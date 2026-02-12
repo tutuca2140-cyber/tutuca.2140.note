@@ -8,7 +8,8 @@ import {
   payments, InsertPayment,
   vehicles, InsertVehicle,
   vehicleFinancings, InsertVehicleFinancing,
-  auditLogs, InsertAuditLog
+  auditLogs, InsertAuditLog,
+  localSessions, InsertLocalSession
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -476,3 +477,116 @@ export async function getDashboardStats(databaseId: number) {
     return null;
   }
 }
+
+
+// ==================== LOCAL AUTHENTICATION ====================
+
+export async function createLocalUser(data: {
+  username: string;
+  email: string;
+  name: string;
+  passwordHash: string;
+}): Promise<any> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  try {
+    const result = await db.insert(users).values({
+      username: data.username,
+      email: data.email,
+      name: data.name,
+      passwordHash: data.passwordHash,
+      loginMethod: 'local',
+      role: 'user',
+      canView: true,
+      canInsert: false,
+      canEdit: false,
+      canDelete: false,
+      canGenerateReports: false,
+      canAccessSettings: false,
+      isActive: true,
+      emailVerified: false,
+      lastSignedIn: new Date(),
+    });
+    return result;
+  } catch (error) {
+    console.error("[Database] Failed to create local user:", error);
+    throw error;
+  }
+}
+
+export async function getUserByUsername(username: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  try {
+    const result = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    return result.length > 0 ? result[0] : undefined;
+  } catch (error) {
+    console.error("[Database] Failed to get user by username:", error);
+    return undefined;
+  }
+}
+
+export async function getUserByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  try {
+    const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    return result.length > 0 ? result[0] : undefined;
+  } catch (error) {
+    console.error("[Database] Failed to get user by email:", error);
+    return undefined;
+  }
+}
+
+export async function createLocalSession(userId: number, token: string, expiresAt: Date) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  try {
+    await db.insert(localSessions).values({
+      userId,
+      token,
+      expiresAt,
+    });
+  } catch (error) {
+    console.error("[Database] Failed to create local session:", error);
+    throw error;
+  }
+}
+
+export async function getLocalSession(token: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  try {
+    const result = await db.select().from(localSessions).where(eq(localSessions.token, token)).limit(1);
+    if (result.length === 0) return undefined;
+    
+    const session = result[0];
+    if (new Date(session.expiresAt) < new Date()) {
+      return undefined; // Session expired
+    }
+    
+    return session;
+  } catch (error) {
+    console.error("[Database] Failed to get local session:", error);
+    return undefined;
+  }
+}
+
+export async function deleteLocalSession(token: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  try {
+    await db.delete(localSessions).where(eq(localSessions.token, token));
+  } catch (error) {
+    console.error("[Database] Failed to delete local session:", error);
+    throw error;
+  }
+}
+
+

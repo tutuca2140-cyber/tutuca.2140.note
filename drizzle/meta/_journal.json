@@ -15,6 +15,13 @@
       "when": 1770927862778,
       "tag": "0001_light_king_bedlam",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1770930160284,
+      "tag": "0002_nasty_fabian_cortez",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE `local_sessions` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`userId` int NOT NULL,\n\t`token` varchar(255) NOT NULL,\n\t`expiresAt` timestamp NOT NULL,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `local_sessions_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `local_sessions_token_unique` UNIQUE(`token`)\n);\nALTER TABLE `users` MODIFY COLUMN `openId` varchar(64);\nALTER TABLE `users` MODIFY COLUMN `loginMethod` varchar(64) DEFAULT 'local';\nALTER TABLE `users` ADD `username` varchar(100);\nALTER TABLE `users` ADD `passwordHash` text;\nALTER TABLE `users` ADD `emailVerified` boolean DEFAULT false NOT NULL;\nALTER TABLE `users` ADD CONSTRAINT `users_username_unique` UNIQUE(`username`);\nALTER TABLE `users` ADD CONSTRAINT `users_email_unique` UNIQUE(`email`);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4R3cj27qnpynHDc.root --database 43AEutkXNXrMugnDWgDfuN --execute CREATE TABLE `local_sessions` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`userId` int NOT NULL,\n\t`token` varchar(255) NOT NULL,\n\t`expiresAt` timestamp NOT NULL,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `local_sessions_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `local_sessions_token_unique` UNIQUE(`token`)\n);\nALTER TABLE `users` MODIFY COLUMN `openId` varchar(64);\nALTER TABLE `users` MODIFY COLUMN `loginMethod` varchar(64) DEFAULT 'local';\nALTER TABLE `users` ADD `username` varchar(100);\nALTER TABLE `users` ADD `passwordHash` text;\nALTER TABLE `users` ADD `emailVerified` boolean DEFAULT false NOT NULL;\nALTER TABLE `users` ADD CONSTRAINT `users_username_unique` UNIQUE(`username`);\nALTER TABLE `users` ADD CONSTRAINT `users_email_unique` UNIQUE(`email`);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 2001
+}

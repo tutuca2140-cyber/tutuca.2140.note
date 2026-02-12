@@ -6,10 +6,12 @@ import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, boolean 
  */
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
-  openId: varchar("openId", { length: 64 }).notNull().unique(),
+  openId: varchar("openId", { length: 64 }).unique(),
+  username: varchar("username", { length: 100 }).unique(),
+  passwordHash: text("passwordHash"),
   name: text("name"),
-  email: varchar("email", { length: 320 }),
-  loginMethod: varchar("loginMethod", { length: 64 }),
+  email: varchar("email", { length: 320 }).unique(),
+  loginMethod: varchar("loginMethod", { length: 64 }).default("local"),
   role: mysqlEnum("role", ["user", "admin", "super_admin"]).default("user").notNull(),
   
   // Permissions (6 tipos granulares)
@@ -21,6 +23,7 @@ export const users = mysqlTable("users", {
   canAccessSettings: boolean("canAccessSettings").default(false).notNull(),
   
   isActive: boolean("isActive").default(true).notNull(),
+  emailVerified: boolean("emailVerified").default(false).notNull(),
   
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -29,6 +32,20 @@ export const users = mysqlTable("users", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+
+/**
+ * Local authentication sessions - para manter sessões de usuários que fazem login com usuário/senha
+ */
+export const localSessions = mysqlTable("local_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  token: varchar("token", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type LocalSession = typeof localSessions.$inferSelect;
+export type InsertLocalSession = typeof localSessions.$inferInsert;
 
 /**
  * Databases table - Sistema de múltiplos bancos de dados independentes

@@ -16,10 +16,12 @@ import AdminUsuarios from "./pages/admin/Usuarios";
 import AdminBancos from "./pages/admin/Bancos";
 import AdminAuditoria from "./pages/admin/Auditoria";
 import AdminConfiguracoes from "./pages/admin/Configuracoes";
+import Login from "./pages/Login";
 
 function Router() {
   return (
     <Switch>
+      <Route path={"/login"} component={Login} />
       <Route path={"/"} component={Home} />
       <Route path={"/dashboard"} component={Dashboard} />
       <Route path={"/clientes"} component={Clientes} />

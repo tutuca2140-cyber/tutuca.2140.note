@@ -5,6 +5,8 @@ import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "./db";
+import * as bcrypt from "bcrypt";
+import { nanoid } from "nanoid";
 
 // Admin procedure - requer role admin ou super_admin
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -40,6 +42,100 @@ export const appRouter = router({
       
       return { success: true } as const;
     }),
+
+    loginLocal: publicProcedure
+      .input(z.object({
+        username: z.string().min(1),
+        password: z.string().min(1)
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const user = await db.getUserByUsername(input.username);
+        
+        if (!user || !user.passwordHash) {
+          throw new TRPCError({
+            code: 'UNAUTHORIZED',
+            message: 'Usuário ou senha inválidos'
+          });
+        }
+
+        const passwordMatch = await bcrypt.compare(input.password, user.passwordHash);
+        if (!passwordMatch) {
+          throw new TRPCError({
+            code: 'UNAUTHORIZED',
+            message: 'Usuário ou senha inválidos'
+          });
+        }
+
+        if (!user.isActive) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Usuário desativado'
+          });
+        }
+
+        // Criar sessão
+        const token = nanoid(32);
+        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 dias
+        await db.createLocalSession(user.id, token, expiresAt);
+
+        // Atualizar lastSignedIn
+        // await db.updateUserLastSignedIn(user.id);
+
+        // Registrar no cookie
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: 30 * 24 * 60 * 60 * 1000 });
+
+        // Log de auditoria
+        await db.createAuditLog({
+          userId: user.id,
+          username: user.username || user.email || 'Desconhecido',
+          action: 'login_local',
+          entity: 'auth',
+          details: 'Login local realizado com sucesso',
+          status: 'success'
+        });
+
+        return { success: true };
+      }),
+
+    registerLocal: publicProcedure
+      .input(z.object({
+        username: z.string().min(3).max(100),
+        email: z.string().email(),
+        name: z.string().min(1),
+        password: z.string().min(6)
+      }))
+      .mutation(async ({ input }) => {
+        // Verificar se usuário já existe
+        const existingUser = await db.getUserByUsername(input.username);
+        if (existingUser) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Usuário já existe'
+          });
+        }
+
+        const existingEmail = await db.getUserByEmail(input.email);
+        if (existingEmail) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Email já cadastrado'
+          });
+        }
+
+        // Hash da senha
+        const passwordHash = await bcrypt.hash(input.password, 10);
+
+        // Criar usuário
+        await db.createLocalUser({
+          username: input.username,
+          email: input.email,
+          name: input.name,
+          passwordHash
+        });
+
+        return { success: true };
+      }),
   }),
 
   // ==================== USERS ====================

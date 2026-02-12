@@ -100,3 +100,29 @@
 - [x] Testar responsividade (celular, tablet, desktop)
 - [x] Verificar console para erros
 - [x] Validar códigos HTTP (sem 404 ou 500)
+
+## Atualização 25 - Autenticação com Usuário e Senha
+
+### Schema e Banco de Dados
+- [x] Adicionar campos de senha ao schema de usuários
+- [x] Criar migração para adicionar campos de autenticação local
+- [x] Implementar hash de senha com bcrypt
+
+### Routers de Autenticação
+- [x] Criar procedimento de login com usuário/senha
+- [x] Criar procedimento de registro de novo usuário
+- [x] Implementar validação de credenciais
+- [x] Gerar tokens JWT para sessão local
+
+### Interface de Login
+- [x] Criar página de login com abas (Manus OAuth / Usuário e Senha)
+- [x] Implementar formulário de login com validação
+- [x] Implementar formulário de registro (opcional)
+- [ ] Adicionar opção de "Lembrar-me"
+- [ ] Adicionar recuperação de senha
+
+### Testes e Validação
+- [x] Testar login com usuário/senha
+- [x] Testar logout
+- [x] Testar manutenção de sessão
+- [x] Testar compatibilidade com Manus OAuth
