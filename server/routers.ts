@@ -8,10 +8,15 @@ import * as db from "./db";
 import * as bcrypt from "bcrypt";
 import { nanoid } from "nanoid";
 import { notifyOwner } from "./_core/notification";
-import { addPeriods, allocatePayment, calculateLoanPlan } from "../shared/finance";
+import { addPeriods, allocatePayment, allocateBalancePayment, calculateInterestOnBalance, calculateLoanPlan, roundMoney } from "../shared/finance";
 
-const optionalText = z.preprocess((value) => typeof value === 'string' && value.trim() === '' ? undefined : value, z.string().optional());
-const optionalEmail = z.preprocess((value) => typeof value === 'string' && value.trim() === '' ? undefined : value, z.string().email().optional());
+const optionalText = z.string().optional();
+const optionalEmail = z.union([z.string().email(), z.literal('')]).optional();
+const optionalAddress = z.record(z.string(), z.string()).optional();
+const stripLegacyCpf = <T extends { cpf?: unknown }>(client: T): Omit<T, 'cpf'> => {
+  const { cpf: _cpf, ...withoutCpf } = client;
+  return withoutCpf;
+};
 
 // Admin procedure - requer role admin ou super_admin
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -583,10 +588,11 @@ export const appRouter = router({
 
   // ==================== CLIENTS ====================
   clients: router({
-    list: protectedProcedure.query(async () => {
+    list: protectedProcedure.query(async ({ ctx }) => {
+      if (!ctx.user.canView) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para visualizar clientes.' });
       const activeDb = await db.getActiveDatabase();
       if (!activeDb) return [];
-      return await db.getClientsByDatabase(activeDb.id);
+      return (await db.getClientsByDatabase(activeDb.id)).map(stripLegacyCpf);
     }),
 
     getById: protectedProcedure
@@ -596,7 +602,7 @@ export const appRouter = router({
         if (!activeDb) return undefined;
         const client = await db.getClientById(input.id);
         if (!client || client.databaseId !== activeDb.id) return undefined;
-        return client;
+        return stripLegacyCpf(client);
       }),
 
     profile: protectedProcedure
@@ -607,16 +613,21 @@ export const appRouter = router({
         if (!activeDb) return undefined;
         const profile = await db.getClientProfile(input.id, activeDb.id);
         if (!profile) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cliente não encontrado no banco ativo.' });
-        return profile;
+        return { ...profile, client: stripLegacyCpf(profile.client) };
       }),
 
     create: protectedProcedure
       .input(z.object({
         name: z.string().trim().min(1),
-        cpf: optionalText,
+        birthDate: z.string().optional(),
         email: optionalEmail,
         phone: optionalText,
+        whatsapp: optionalText,
+        profession: optionalText,
+        indicatorAgentId: z.number().int().positive().optional(),
         address: optionalText,
+        residentialAddress: optionalAddress,
+        commercialAddress: optionalAddress,
         city: optionalText,
         state: optionalText,
         zipCode: optionalText,
@@ -639,7 +650,20 @@ export const appRouter = router({
         }
 
         const result = await db.createClient({
-          ...input,
+          name: input.name,
+          birthDate: input.birthDate ? new Date(input.birthDate) : undefined,
+          email: input.email,
+          phone: input.phone,
+          whatsapp: input.whatsapp,
+          profession: input.profession,
+          indicatorAgentId: input.indicatorAgentId,
+          address: input.address,
+          residentialAddress: input.residentialAddress,
+          commercialAddress: input.commercialAddress,
+          city: input.city,
+          state: input.state,
+          zipCode: input.zipCode,
+          notes: input.notes,
           databaseId: activeDb.id,
           createdBy: ctx.user.id
         });
@@ -661,10 +685,15 @@ export const appRouter = router({
       .input(z.object({
         id: z.number().int().positive(),
         name: z.string().trim().min(1).optional(),
-        cpf: optionalText,
+        birthDate: z.string().optional(),
         email: optionalEmail,
         phone: optionalText,
+        whatsapp: optionalText,
+        profession: optionalText,
+        indicatorAgentId: z.number().int().positive().optional(),
         address: optionalText,
+        residentialAddress: optionalAddress,
+        commercialAddress: optionalAddress,
         city: optionalText,
         state: optionalText,
         zipCode: optionalText,
@@ -683,8 +712,8 @@ export const appRouter = router({
         const currentClient = await db.getClientById(input.id);
         if (!currentClient || currentClient.databaseId !== activeDb.id) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cliente não encontrado no banco ativo.' });
 
-        const { id, ...data } = input;
-        await db.updateClientInDatabase(id, data, activeDb.id);
+        const { id, birthDate, ...data } = input;
+        await db.updateClientInDatabase(id, { ...data, ...(birthDate !== undefined ? { birthDate: birthDate ? new Date(birthDate) : null } : {}) }, activeDb.id);
 
         
         await db.createAuditLog({
@@ -764,6 +793,53 @@ export const appRouter = router({
         return await db.getLoansByClient(input.clientId, activeDb.id);
       }),
 
+    history: protectedProcedure
+      .input(z.object({ loanId: z.number().int().positive() }))
+      .query(async ({ input, ctx }) => {
+        if (!ctx.user.canView) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para visualizar o histórico.' });
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb) return [];
+        const loan = await db.getLoanById(input.loanId);
+        if (!loan || loan.databaseId !== activeDb.id) return [];
+        return db.getLoanInterestHistory(input.loanId, activeDb.id);
+      }),
+
+    generateInterest: protectedProcedure
+      .input(z.object({ loanId: z.number().int().positive(), periodReference: z.string().trim().min(1).max(20) }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user.canEdit) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para lançar juros.' });
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
+        const loan = await db.getLoanById(input.loanId);
+        if (!loan || loan.databaseId !== activeDb.id) throw new TRPCError({ code: 'NOT_FOUND', message: 'Empréstimo não encontrado no banco ativo.' });
+        if (loan.status === 'pago' || loan.status === 'cancelado') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Não é possível lançar juros em um empréstimo encerrado.' });
+        if (await db.getLoanInterestPeriod(input.loanId, activeDb.id, input.periodReference)) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'Os juros deste período já foram lançados.' });
+        }
+        const principalBalance = Number(loan.principalBalance || loan.amount);
+        const interest = calculateInterestOnBalance(principalBalance, Number(loan.interestRate));
+        const accruedInterest = roundMoney(Number(loan.accruedInterest || 0) + interest);
+        await db.createLoanInterestHistory({
+          databaseId: activeDb.id,
+          loanId: loan.id,
+          periodReference: input.periodReference,
+          previousPrincipalBalance: principalBalance.toFixed(2),
+          interestGenerated: interest.toFixed(2),
+          paymentAmount: '0.00',
+          interestPaid: '0.00',
+          principalAmortized: '0.00',
+          updatedPrincipalBalance: principalBalance.toFixed(2),
+        });
+        await db.updateLoanBalance(loan.id, activeDb.id, {
+          principalBalance: principalBalance.toFixed(2),
+          accruedInterest: accruedInterest.toFixed(2),
+          remainingBalance: roundMoney(principalBalance + accruedInterest).toFixed(2),
+          lastInterestPeriod: input.periodReference,
+        });
+        await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || 'Usuário', action: 'generate_loan_interest', entity: 'loans', entityId: loan.id, databaseId: activeDb.id, details: `Juros de ${input.periodReference}: R$ ${interest.toFixed(2)}`, status: 'success' });
+        return { interest, accruedInterest, principalBalance };
+      }),
+
     create: protectedProcedure
       .input(z.object({
         clientId: z.number().int().positive(),
@@ -771,7 +847,7 @@ export const appRouter = router({
         interestType: z.enum(['simple', 'compound']).default('simple').optional(),
         interestRate: z.string(),
         ratePeriod: z.enum(['day', 'week', 'month', 'year']).default('month').optional(),
-        installments: z.coerce.number().int().positive(),
+        installments: z.coerce.number().int().positive().optional(),
         installmentAmount: z.string().optional(),
         totalAmount: z.string().optional(),
         startDate: z.string(),
@@ -802,7 +878,8 @@ export const appRouter = router({
         }
         const interestType = input.interestType ?? 'simple';
         const ratePeriod = input.ratePeriod ?? 'month';
-        const plan = calculateLoanPlan({ principal, ratePercent, periods: input.installments, interestType, ratePeriod });
+        const periods = input.installments ?? 1;
+        const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
         const startDate = new Date(input.startDate);
         if (Number.isNaN(startDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Data inicial inválida.' });
         const endDate = input.endDate ? new Date(input.endDate) : addPeriods(startDate, plan.periods, ratePeriod);
@@ -817,7 +894,11 @@ export const appRouter = router({
           installments: plan.periods,
           installmentAmount: plan.installmentAmount.toFixed(2),
           totalAmount: plan.totalAmount.toFixed(2),
-          remainingBalance: plan.totalAmount.toFixed(2),
+          remainingBalance: plan.principal.toFixed(2),
+          principalBalance: plan.principal.toFixed(2),
+          accruedInterest: '0.00',
+          totalPaid: '0.00',
+          lastInterestPeriod: null,
           startDate,
           endDate,
           status: 'ativo',
@@ -971,17 +1052,18 @@ export const appRouter = router({
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'A comissão só pode ser informada quando um agente é selecionado.' });
         }
 
-        const contractTotal = loan ? Number(loan.totalAmount) : Number(vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0);
-        const contractPrincipal = loan ? Number(loan.amount) : Number(vehicleFinancing?.financedAmount || 0);
         const priorPayments = loan
           ? await db.getPaymentsByLoan(loan.id, activeDb.id)
           : await db.getPaymentsByFinancing(vehicleFinancing!.id, activeDb.id);
-        const balanceBefore = Math.max(0, contractTotal - priorPayments.filter((payment) => payment.status === 'pago').reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+        const contractPrincipal = loan ? Number(loan.principalBalance || loan.amount) : Number(vehicleFinancing?.financedAmount || 0);
+        const accruedInterest = loan ? Number(loan.accruedInterest || 0) : Math.max(0, Number(vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0) - contractPrincipal);
+        const priorPaid = priorPayments.filter((payment) => payment.status === 'pago').reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+        const balanceBefore = loan ? roundMoney(contractPrincipal + accruedInterest) : Math.max(0, Number(vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0) - priorPaid);
         if (input.status === 'pago' && paymentAmount > balanceBefore + 0.01) throw new TRPCError({ code: 'BAD_REQUEST', message: 'O pagamento não pode exceder o saldo do contrato.' });
-        const totalInterest = Math.max(0, contractTotal - contractPrincipal);
-        const interestPaid = priorPayments.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0);
         const allocation = input.status === 'pago'
-          ? allocatePayment(paymentAmount, contractTotal, totalInterest, interestPaid, balanceBefore)
+          ? loan
+            ? allocateBalancePayment(paymentAmount, accruedInterest, contractPrincipal)
+            : allocatePayment(paymentAmount, Number(vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0), accruedInterest, priorPayments.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0), balanceBefore)
           : { principalAmount: 0, interestAmount: 0, remainingBalance: balanceBefore };
 
         const commissionAmount = Math.round(paymentAmount * commissionPercentage) / 100;
@@ -989,7 +1071,7 @@ export const appRouter = router({
         const duplicate = await db.paymentAlreadyRegistered({ databaseId: activeDb.id, loanId: input.loanId, vehicleFinancingId: input.vehicleFinancingId, installmentNumber: input.installmentNumber, amount: input.amount, paymentDate, agentId });
         if (duplicate) throw new TRPCError({ code: 'CONFLICT', message: 'Este pagamento e sua comissão já foram registrados.' });
 
-        const result = await db.createPayment({
+        const paymentData = {
           loanId: input.loanId,
           vehicleFinancingId: input.vehicleFinancingId,
           installmentNumber: input.installmentNumber,
@@ -1009,11 +1091,33 @@ export const appRouter = router({
           netAmount: netAmount.toFixed(2),
           databaseId: activeDb.id,
           createdBy: ctx.user.id,
-        });
-
-        if (loan && input.status === 'pago') {
-          await db.updateLoanBalance(loan.id, activeDb.id, { remainingBalance: allocation.remainingBalance.toFixed(2), status: allocation.remainingBalance <= 0 ? 'pago' : (new Date(loan.endDate) < new Date() ? 'atrasado' : 'ativo') });
-        }
+        };
+        const nextPrincipal = roundMoney(Math.max(0, Number(loan?.principalBalance || loan?.amount || 0) - allocation.principalAmount));
+        const nextInterest = roundMoney(Math.max(0, Number(loan?.accruedInterest || 0) - allocation.interestAmount));
+        const nextTotalPaid = roundMoney(Number(loan?.totalPaid || 0) + paymentAmount);
+        const result = await db.createPaymentBundle(paymentData, {
+          databaseId: activeDb.id,
+          type: 'ENTRADA',
+          category: loan ? 'PAGAMENTO_EMPRESTIMO' : 'PAGAMENTO_FINANCIAMENTO',
+          description: loan ? `Recebimento do empréstimo #${loan.id}` : `Recebimento do financiamento #${vehicleFinancing!.id}`,
+          amount: paymentAmount.toFixed(2),
+          movementDate: paymentDate,
+          clientId: loan?.clientId ?? vehicleFinancing?.clientId,
+          loanId: loan?.id,
+          responsible: ctx.user.name || ctx.user.email || 'Usuário',
+          notes: input.notes,
+          createdBy: ctx.user.id,
+        }, loan && input.status === 'pago' ? {
+          id: loan.id,
+          databaseId: activeDb.id,
+          values: {
+            principalBalance: nextPrincipal.toFixed(2),
+            accruedInterest: nextInterest.toFixed(2),
+            totalPaid: nextTotalPaid.toFixed(2),
+            remainingBalance: allocation.remainingBalance.toFixed(2),
+            status: allocation.remainingBalance <= 0 ? 'pago' : (new Date(loan.endDate) < new Date() ? 'atrasado' : 'ativo'),
+          },
+        } : undefined);
         await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || 'Usuário', action: 'create_payment', entity: 'payments', databaseId: activeDb.id, details: `Pagamento registrado: R$ ${paymentAmount.toFixed(2)}; comissão: R$ ${commissionAmount.toFixed(2)}`, status: 'success' });
         return result;
       }),
@@ -1059,6 +1163,32 @@ export const appRouter = router({
 
         return { success: true };
       }),
+  }),
+
+  // ==================== CASH FLOW ====================
+  cashFlow: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      if (!ctx.user.canView) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para visualizar o fluxo de caixa.' });
+      const activeDb = await db.getActiveDatabase();
+      return activeDb ? db.getCashFlowByDatabase(activeDb.id) : [];
+    }),
+    create: protectedProcedure.input(z.object({
+      type: z.enum(['ENTRADA', 'SAIDA']),
+      category: z.string().trim().min(1),
+      description: z.string().trim().min(1),
+      amount: z.coerce.number().positive(),
+      movementDate: z.string(),
+      responsible: z.string().optional(),
+      notes: z.string().optional(),
+    })).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.canInsert) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para registrar movimentações.' });
+      const activeDb = await db.getActiveDatabase();
+      if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
+      const movementDate = new Date(input.movementDate);
+      if (Number.isNaN(movementDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Data da movimentação inválida.' });
+      await db.createCashFlowEntry({ ...input, amount: input.amount.toFixed(2), movementDate, databaseId: activeDb.id, createdBy: ctx.user.id });
+      return { success: true };
+    }),
   }),
 
   // ==================== VEHICLES ====================
@@ -1327,7 +1457,10 @@ export const appRouter = router({
           activeLoans: { count: 0, total: 0 },
           paidLoans: { count: 0, total: 0 },
           pendingPayments: { count: 0, total: 0 },
-          totalClients: 0
+          totalClients: 0,
+          totalEntradas: 0,
+          totalSaidas: 0,
+          saldoCaixa: 0,
         };
       }
       return await db.getDashboardStats(activeDb.id);

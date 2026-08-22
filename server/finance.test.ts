@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocatePayment, calculateLoanPlan, addPeriods } from "../shared/finance";
+import { allocateBalancePayment, allocatePayment, calculateInterestOnBalance, calculateLoanPlan, addPeriods } from "../shared/finance";
 
 describe("finance utilities", () => {
   it("calcula juros simples com parcelas e período configuráveis", () => {
@@ -19,6 +19,25 @@ describe("finance utilities", () => {
     expect(allocation.interestAmount).toBe(18.18);
     expect(allocation.principalAmount).toBe(181.82);
     expect(allocation.remainingBalance).toBe(900);
+  });
+
+  it("calcula juros mensais sobre o saldo principal atual", () => {
+    expect(calculateInterestOnBalance(1000, 10)).toBe(100);
+    expect(calculateInterestOnBalance(800, 10)).toBe(80);
+  });
+
+  it("quita juros acumulados antes de amortizar o principal", () => {
+    const allocation = allocateBalancePayment(300, 100, 1000);
+    expect(allocation.interestAmount).toBe(100);
+    expect(allocation.principalAmount).toBe(200);
+    expect(allocation.remainingBalance).toBe(800);
+  });
+
+  it("permite pagamento somente de juros sem reduzir o principal", () => {
+    const allocation = allocateBalancePayment(100, 100, 1000);
+    expect(allocation.interestAmount).toBe(100);
+    expect(allocation.principalAmount).toBe(0);
+    expect(allocation.remainingBalance).toBe(1000);
   });
 
   it("avança períodos mensais sem depender do fuso local", () => {

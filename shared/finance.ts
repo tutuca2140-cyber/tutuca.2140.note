@@ -42,6 +42,21 @@ export function calculateLoanPlan(input: LoanPlanInput): LoanPlan {
   };
 }
 
+export function calculateInterestOnBalance(principalBalance: number, monthlyRatePercent: number) {
+  return roundMoney(Math.max(0, principalBalance) * Math.max(0, monthlyRatePercent) / 100);
+}
+
+export function allocateBalancePayment(paymentAmount: number, accruedInterest: number, principalBalance: number) {
+  const amount = roundMoney(paymentAmount);
+  const interestAmount = roundMoney(Math.min(Math.max(0, amount), Math.max(0, accruedInterest)));
+  const principalAmount = roundMoney(Math.min(Math.max(0, amount - interestAmount), Math.max(0, principalBalance)));
+  return {
+    principalAmount,
+    interestAmount,
+    remainingBalance: roundMoney(Math.max(0, principalBalance - principalAmount + accruedInterest - interestAmount)),
+  };
+}
+
 export function allocatePayment(
   paymentAmount: number,
   totalAmount: number,

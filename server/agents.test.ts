@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import * as db from "./db";
-import { agents, payments } from "../drizzle/schema";
+import { agents, cashFlow, payments } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import type { TrpcContext } from "./_core/context";
 
@@ -49,6 +49,7 @@ describe("agentes comissionados", () => {
 
     let clientId: number | undefined;
     let loanId: number | undefined;
+    let openLoanId: number | undefined;
     let agentId: number | undefined;
     const paymentIds: number[] = [];
     const databaseId = activeDb!.id;
@@ -72,6 +73,18 @@ describe("agentes comissionados", () => {
       const loan = (await db.getLoansByDatabase(databaseId)).find((item) => item.clientId === clientId);
       expect(loan).toBeDefined();
       loanId = loan!.id;
+
+      await caller.loans.create({
+        clientId,
+        amount: "500.00",
+        interestRate: "5.00",
+        startDate: new Date().toISOString(),
+        description: "Contrato aberto sem parcelas",
+      });
+      const openLoan = (await db.getLoansByDatabase(databaseId)).find((item) => item.description === "Contrato aberto sem parcelas");
+      expect(openLoan).toBeDefined();
+      openLoanId = openLoan!.id;
+      expect(openLoan!.installments).toBe(1);
 
       await expect(caller.agents.create({ name: agentName, defaultCommissionPercentage: 2.5 })).resolves.toBeDefined();
       const agent = (await db.getAgentsByDatabase(databaseId)).find((item) => item.name === agentName);
@@ -123,6 +136,10 @@ describe("agentes comissionados", () => {
       expect(Number(noAgentPayment!.netAmount)).toBe(50.55);
       paymentIds.push(noAgentPayment!.id);
 
+      const cashEntries = (await db.getCashFlowByDatabase(databaseId)).filter((entry) => entry.loanId === loanId);
+      expect(cashEntries).toHaveLength(6);
+      expect(cashEntries.every((entry) => entry.type === "ENTRADA")).toBe(true);
+
       const history = await caller.agents.history({ agentId });
       expect(history.totals.totalPayments).toBe(5);
       expect(history.totals.totalCommission).toBe(56);
@@ -147,6 +164,12 @@ describe("agentes comissionados", () => {
       expect(performance.kpis.totalCommissions).toBeGreaterThanOrEqual(25);
       expect(performance.ranking.some((item) => item.agentId === agentId)).toBe(true);
 
+      await caller.cashFlow.create({ type: "SAIDA", category: `TESTE_SAIDA_${suffix}`, description: "Saída manual de teste", amount: 35, movementDate: new Date().toISOString() });
+      const manualOut = (await db.getCashFlowByDatabase(databaseId)).find((entry) => entry.category === `TESTE_SAIDA_${suffix}`);
+      expect(manualOut?.type).toBe("SAIDA");
+      const dashboardStats = await caller.dashboard.stats();
+      expect(Number(dashboardStats?.totalSaidas)).toBeGreaterThanOrEqual(35);
+
       await caller.agents.deactivate({ id: agentId });
       const historyAfterDeactivation = await caller.agents.history({ agentId });
       expect(historyAfterDeactivation.totals.totalPayments).toBe(5);
@@ -164,10 +187,12 @@ describe("agentes comissionados", () => {
       if (agentId) {
         const connection = await db.getDb();
         if (connection) {
+          await connection.delete(cashFlow).where(eq(cashFlow.category, `TESTE_SAIDA_${suffix}`));
           await connection.delete(payments).where(eq(payments.agentId, agentId));
           await connection.delete(agents).where(eq(agents.id, agentId));
         }
       }
+      if (openLoanId) await db.deleteLoan(openLoanId);
       if (loanId) await db.deleteLoan(loanId);
       if (clientId) await db.deleteClient(clientId);
       if (createdDatabaseId) await db.deleteDatabase(createdDatabaseId);

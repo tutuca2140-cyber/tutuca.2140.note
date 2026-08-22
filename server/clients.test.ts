@@ -68,16 +68,25 @@ describe("DEATH NOTE System Tests", () => {
     const activeDb = await db.getActiveDatabase();
     if (!activeDb) return;
     const suffix = Date.now();
-    await db.createClient({ databaseId: activeDb.id, name: `Perfil de teste ${suffix}`, createdBy: 1 });
+    await db.createClient({ databaseId: activeDb.id, name: `Perfil de teste ${suffix}`, birthDate: new Date("1990-01-01"), whatsapp: "11999999999", profession: "Comerciante", residentialAddress: { logradouro: "Rua A", numero: "10", cidade: "São Paulo", estado: "SP" }, commercialAddress: { logradouro: "Rua B", numero: "20", cidade: "São Paulo", estado: "SP" }, createdBy: 1 });
     const created = (await db.getClientsByDatabase(activeDb.id)).find((item) => item.name === `Perfil de teste ${suffix}`);
     expect(created).toBeDefined();
     const { ctx } = createAuthContext('admin');
     const profile = await appRouter.createCaller(ctx).clients.profile({ id: created!.id });
     expect(profile.client.id).toBe(created!.id);
+    expect(profile.client.whatsapp).toBe("11999999999");
+    expect(profile.client.profession).toBe("Comerciante");
+    expect(profile.client.residentialAddress).toEqual({ logradouro: "Rua A", numero: "10", cidade: "São Paulo", estado: "SP" });
+    expect(profile.client.commercialAddress).toEqual({ logradouro: "Rua B", numero: "20", cidade: "São Paulo", estado: "SP" });
+    expect("cpf" in profile.client).toBe(false);
     expect(Array.isArray(profile.loans)).toBe(true);
     expect(Array.isArray(profile.financings)).toBe(true);
     expect(Array.isArray(profile.payments)).toBe(true);
     expect(profile.financialHistory.paymentCount).toBe(profile.payments.length);
+    const listed = await appRouter.createCaller(ctx).clients.list();
+    const listedClient = listed.find((item) => item.id === created!.id);
+    expect(listedClient).toBeDefined();
+    expect("cpf" in listedClient!).toBe(false);
     await db.deleteClient(created!.id);
   });
 

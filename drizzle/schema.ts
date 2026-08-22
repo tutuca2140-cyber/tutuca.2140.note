@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, boolean } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, boolean, json, uniqueIndex } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -86,10 +86,17 @@ export const clients = mysqlTable("clients", {
   id: int("id").autoincrement().primaryKey(),
   databaseId: int("databaseId").notNull(), // Isolamento por banco
   name: varchar("name", { length: 255 }).notNull(),
+  // Campo legado mantido apenas para compatibilidade de dados; não é exposto pela API/interface.
   cpf: varchar("cpf", { length: 14 }),
+  birthDate: timestamp("birthDate"),
   email: varchar("email", { length: 320 }),
   phone: varchar("phone", { length: 20 }),
+  whatsapp: varchar("whatsapp", { length: 20 }),
+  profession: varchar("profession", { length: 120 }),
+  indicatorAgentId: int("indicatorAgentId"),
   address: text("address"),
+  residentialAddress: json("residentialAddress"),
+  commercialAddress: json("commercialAddress"),
   city: varchar("city", { length: 100 }),
   state: varchar("state", { length: 2 }),
   zipCode: varchar("zipCode", { length: 10 }),
@@ -117,6 +124,10 @@ export const loans = mysqlTable("loans", {
   installmentAmount: decimal("installmentAmount", { precision: 15, scale: 2 }).notNull(), // Valor da parcela
   totalAmount: decimal("totalAmount", { precision: 15, scale: 2 }).notNull(), // Valor total com juros
   remainingBalance: decimal("remainingBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  principalBalance: decimal("principalBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  accruedInterest: decimal("accruedInterest", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  totalPaid: decimal("totalPaid", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  lastInterestPeriod: varchar("lastInterestPeriod", { length: 20 }),
   startDate: timestamp("startDate").notNull(),
   endDate: timestamp("endDate").notNull(),
   status: mysqlEnum("status", ["ativo", "pago", "atrasado", "cancelado"]).default("ativo").notNull(),
@@ -128,6 +139,26 @@ export const loans = mysqlTable("loans", {
 
 export type Loan = typeof loans.$inferSelect;
 export type InsertLoan = typeof loans.$inferInsert;
+
+/** Histórico mensal de juros, com uma linha única por contrato e período de referência. */
+export const loanInterestHistory = mysqlTable("loan_interest_history", {
+  id: int("id").autoincrement().primaryKey(),
+  databaseId: int("databaseId").notNull(),
+  loanId: int("loanId").notNull().references(() => loans.id),
+  periodReference: varchar("periodReference", { length: 20 }).notNull(),
+  previousPrincipalBalance: decimal("previousPrincipalBalance", { precision: 15, scale: 2 }).notNull(),
+  interestGenerated: decimal("interestGenerated", { precision: 15, scale: 2 }).notNull(),
+  paymentAmount: decimal("paymentAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  interestPaid: decimal("interestPaid", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  principalAmortized: decimal("principalAmortized", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  updatedPrincipalBalance: decimal("updatedPrincipalBalance", { precision: 15, scale: 2 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  loanPeriodUnique: uniqueIndex("loan_interest_history_loan_period_unique").on(table.loanId, table.periodReference),
+}));
+
+export type LoanInterestHistory = typeof loanInterestHistory.$inferSelect;
+export type InsertLoanInterestHistory = typeof loanInterestHistory.$inferInsert;
 
 /**
  * Agents table - Agentes comissionados isolados por banco de dados
@@ -176,6 +207,27 @@ export const payments = mysqlTable("payments", {
 
 export type Payment = typeof payments.$inferSelect;
 export type InsertPayment = typeof payments.$inferInsert;
+
+/** Movimentações financeiras reais do banco ativo. */
+export const cashFlow = mysqlTable("cash_flow", {
+  id: int("id").autoincrement().primaryKey(),
+  databaseId: int("databaseId").notNull(),
+  type: mysqlEnum("type", ["ENTRADA", "SAIDA"]).notNull(),
+  category: varchar("category", { length: 120 }).notNull(),
+  description: text("description").notNull(),
+  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  movementDate: timestamp("movementDate").notNull(),
+  clientId: int("clientId").references(() => clients.id, { onDelete: "set null" }),
+  loanId: int("loanId").references(() => loans.id, { onDelete: "set null" }),
+  paymentId: int("paymentId").references(() => payments.id, { onDelete: "set null" }),
+  responsible: varchar("responsible", { length: 255 }),
+  notes: text("notes"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type CashFlow = typeof cashFlow.$inferSelect;
+export type InsertCashFlow = typeof cashFlow.$inferInsert;
 
 /**
  * Vehicles table - Veículos para financiamento

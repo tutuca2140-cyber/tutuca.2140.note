@@ -23,7 +23,7 @@ export default function Emprestimos() {
     interestType: "simple" as InterestType,
     interestRate: "0",
     ratePeriod: "month" as RatePeriod,
-    installments: "1",
+    installments: "",
     startDate: today(),
     endDate: "",
     description: "",
@@ -36,7 +36,7 @@ export default function Emprestimos() {
   const plan = useMemo(() => {
     const principal = Number(form.amount);
     const rate = Number(form.interestRate);
-    const periods = Number(form.installments);
+    const periods = form.installments.trim() === "" ? 1 : Number(form.installments);
     if (!Number.isFinite(principal) || principal <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isFinite(periods) || periods < 1) return null;
     return calculateLoanPlan({ principal, ratePercent: rate, periods, interestType: form.interestType, ratePeriod: form.ratePeriod });
   }, [form.amount, form.interestRate, form.installments, form.interestType, form.ratePeriod]);
@@ -48,7 +48,7 @@ export default function Emprestimos() {
   });
 
   const update = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
-  const reset = () => setForm({ clientId: "", amount: "", interestType: "simple", interestRate: "0", ratePeriod: "month", installments: "1", startDate: today(), endDate: "", description: "" });
+  const reset = () => setForm({ clientId: "", amount: "", interestType: "simple", interestRate: "0", ratePeriod: "month", installments: "", startDate: today(), endDate: "", description: "" });
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -63,7 +63,7 @@ export default function Emprestimos() {
         interestType: form.interestType,
         interestRate: Number(form.interestRate).toFixed(4),
         ratePeriod: form.ratePeriod,
-        installments: plan.periods,
+        installments: form.installments.trim() ? plan.periods : undefined,
         startDate: new Date(`${form.startDate}T12:00:00`).toISOString(),
         endDate: form.endDate ? new Date(`${form.endDate}T12:00:00`).toISOString() : undefined,
         description: form.description || undefined,
@@ -92,12 +92,12 @@ export default function Emprestimos() {
               <DialogHeader><DialogTitle>Novo empréstimo</DialogTitle></DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="sm:col-span-2"><Label htmlFor="loan-client">Cliente existente *</Label><select id="loan-client" value={form.clientId} onChange={(event) => update("clientId", event.target.value)} className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm" required><option value="">Selecione um cliente</option>{(clients ?? []).map((client) => <option key={client.id} value={client.id}>{client.name}{client.cpf ? ` — ${client.cpf}` : ""}</option>)}</select></div>
+                  <div className="sm:col-span-2"><Label htmlFor="loan-client">Cliente existente *</Label><select id="loan-client" value={form.clientId} onChange={(event) => update("clientId", event.target.value)} className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm" required><option value="">Selecione um cliente</option>{(clients ?? []).map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>
                   <div><Label htmlFor="loan-amount">Principal (R$) *</Label><Input id="loan-amount" type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => update("amount", event.target.value)} placeholder="1.000,00" required /></div>
                   <div><Label htmlFor="loan-rate">Taxa por período (%) *</Label><Input id="loan-rate" type="number" min="0" step="0.0001" value={form.interestRate} onChange={(event) => update("interestRate", event.target.value)} required /></div>
                   <div><Label htmlFor="loan-interest-type">Tipo de juros</Label><select id="loan-interest-type" value={form.interestType} onChange={(event) => update("interestType", event.target.value as InterestType)} className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="simple">Juros simples</option><option value="compound">Juros compostos</option></select></div>
                   <div><Label htmlFor="loan-period">Periodicidade da taxa</Label><select id="loan-period" value={form.ratePeriod} onChange={(event) => update("ratePeriod", event.target.value as RatePeriod)} className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="day">Diária</option><option value="week">Semanal</option><option value="month">Mensal</option><option value="year">Anual</option></select></div>
-                  <div><Label htmlFor="loan-installments">Quantidade de períodos *</Label><Input id="loan-installments" type="number" min="1" step="1" value={form.installments} onChange={(event) => update("installments", event.target.value)} required /></div>
+                  <div><Label htmlFor="loan-installments">Quantidade de períodos (opcional)</Label><Input id="loan-installments" type="number" min="1" step="1" value={form.installments} onChange={(event) => update("installments", event.target.value)} placeholder="Deixe em branco para contrato aberto" /></div>
                   <div><Label htmlFor="loan-start">Início *</Label><Input id="loan-start" type="date" value={form.startDate} onChange={(event) => update("startDate", event.target.value)} required /></div>
                   <div><Label htmlFor="loan-end">Término (opcional)</Label><Input id="loan-end" type="date" value={form.endDate} onChange={(event) => update("endDate", event.target.value)} /></div>
                   <div className="sm:col-span-2"><Label htmlFor="loan-description">Observações</Label><Textarea id="loan-description" value={form.description} onChange={(event) => update("description", event.target.value)} placeholder="Garantias, condições ou observações do contrato" /></div>

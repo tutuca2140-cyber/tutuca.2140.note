@@ -1,0 +1,1 @@
+ALTER TABLE `loan_interest_history` ADD CONSTRAINT `loan_interest_history_loan_period_unique` UNIQUE(`loanId`,`periodReference`);

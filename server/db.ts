@@ -5,7 +5,9 @@ import {
   databases, InsertDatabase,
   clients, InsertClient,
   loans, InsertLoan,
+  loanInterestHistory, InsertLoanInterestHistory,
   payments, InsertPayment,
+  cashFlow, InsertCashFlow,
   vehicles, InsertVehicle,
   vehicleFinancings, InsertVehicleFinancing,
   auditLogs, InsertAuditLog,
@@ -390,6 +392,31 @@ export async function getLoansByClient(clientId: number, databaseId: number) {
     .orderBy(desc(loans.createdAt));
 }
 
+export async function getLoanInterestHistory(loanId: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(loanInterestHistory)
+    .where(and(eq(loanInterestHistory.loanId, loanId), eq(loanInterestHistory.databaseId, databaseId)))
+    .orderBy(desc(loanInterestHistory.createdAt));
+}
+
+export async function getLoanInterestPeriod(loanId: number, databaseId: number, periodReference: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(loanInterestHistory).where(and(
+    eq(loanInterestHistory.loanId, loanId),
+    eq(loanInterestHistory.databaseId, databaseId),
+    eq(loanInterestHistory.periodReference, periodReference),
+  )).limit(1);
+  return rows[0];
+}
+
+export async function createLoanInterestHistory(data: InsertLoanInterestHistory) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.insert(loanInterestHistory).values(data);
+}
+
 // ==================== AGENTS ====================
 
 export async function createAgent(data: InsertAgent) {
@@ -557,10 +584,36 @@ export async function createPayment(data: InsertPayment) {
   return result;
 }
 
+export async function createPaymentBundle(data: InsertPayment, cashEntry: Omit<InsertCashFlow, 'paymentId'>, loanUpdate?: { id: number; databaseId: number; values: Partial<InsertLoan> }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async (tx) => {
+    const result = await tx.insert(payments).values(data);
+    const paymentId = Number((result as unknown as Array<{ insertId?: number }>)[0]?.insertId || 0) || undefined;
+    await tx.insert(cashFlow).values({ ...cashEntry, paymentId });
+    if (loanUpdate) {
+      await tx.update(loans).set(loanUpdate.values).where(and(eq(loans.id, loanUpdate.id), eq(loans.databaseId, loanUpdate.databaseId)));
+    }
+    return result;
+  });
+}
+
 export async function getPaymentsByDatabase(databaseId: number) {
   const db = await getDb();
   if (!db) return [];
   return await db.select().from(payments).where(eq(payments.databaseId, databaseId)).orderBy(desc(payments.createdAt));
+}
+
+export async function createCashFlowEntry(data: InsertCashFlow) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(cashFlow).values(data);
+}
+
+export async function getCashFlowByDatabase(databaseId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cashFlow).where(eq(cashFlow.databaseId, databaseId)).orderBy(desc(cashFlow.movementDate));
 }
 
 export async function getPaymentsByLoan(loanId: number, databaseId: number) {
@@ -741,11 +794,24 @@ export async function getDashboardStats(databaseId: number) {
       .from(payments)
       .where(and(eq(payments.databaseId, databaseId), eq(payments.status, 'pendente')));
 
+    // Totais reais do fluxo de caixa
+    const cashInResult = await db
+      .select({ total: sql<string>`sum(${cashFlow.amount})` })
+      .from(cashFlow)
+      .where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, 'ENTRADA')));
+    const cashOutResult = await db
+      .select({ total: sql<string>`sum(${cashFlow.amount})` })
+      .from(cashFlow)
+      .where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, 'SAIDA')));
+
     // Total de clientes
     const clientsResult = await db
       .select({ count: sql<number>`count(*)` })
       .from(clients)
       .where(eq(clients.databaseId, databaseId));
+
+    const totalEntradas = parseFloat(cashInResult[0]?.total || '0');
+    const totalSaidas = parseFloat(cashOutResult[0]?.total || '0');
 
     return {
       activeLoans: {
@@ -760,7 +826,10 @@ export async function getDashboardStats(databaseId: number) {
         count: pendingPaymentsResult[0]?.count || 0,
         total: parseFloat(pendingPaymentsResult[0]?.total || '0')
       },
-      totalClients: clientsResult[0]?.count || 0
+      totalClients: clientsResult[0]?.count || 0,
+      totalEntradas,
+      totalSaidas,
+      saldoCaixa: roundMoney(totalEntradas - totalSaidas),
     };
   } catch (error) {
     console.error("[Database] Failed to get dashboard stats:", error);

@@ -206,3 +206,35 @@ A senha do Draco foi fornecida pelo proprietário do projeto para configuração
 - [x] Cobrir o endpoint clients.profile com teste de retorno consolidado
 - [x] Confirmar runtime local sem erros de TypeScript e com servidor ativo durante screenshots
 - [x] Entregar ao usuário a atualização com o checkpoint fb5c8662 e o link público temporário já gerado
+
+## Nova solicitação — Site a partir do ZIP anexado
+- [x] Inspecionar o ZIP anexado e confirmar sua estrutura
+- [x] Integrar ou sincronizar o conteúdo do ZIP com o projeto web ativo
+- [x] Validar a abertura do site, autenticação e módulos principais
+- [x] Validar responsividade e salvar checkpoint da nova versão
+
+## Integração Pasted_content_02.txt — Regras financeiras e fluxo de caixa
+- [x] Remover CPF do cadastro, validações, API, tipos, queries e interface sem destruir dados existentes
+- [x] Ampliar clientes com nascimento, WhatsApp, profissão, agente indicador e endereços residencial/comercial
+- [x] Ajustar empréstimos para juros baseados no saldo devedor, sem depender obrigatoriamente de parcelas
+- [x] Implementar histórico mensal de juros com proteção contra duplicidade de período
+- [x] Ajustar pagamentos para quitar juros em aberto antes de amortizar principal
+- [x] Garantir transação e atualização consistente de empréstimo, pagamento e fluxo de caixa
+- [x] Integrar entradas e saídas reais ao fluxo de caixa e ao dashboard
+- [x] Adicionar testes da nova especificação e validar build, interface e compatibilidade
+
+## Ajustes finais identificados pela validação da especificação
+- [x] Remover CPF das superfícies tipadas e queries públicas, mantendo apenas compatibilidade interna não exposta
+- [x] Adicionar seleção de agente indicador e endereços estruturados completos no cadastro e perfil de clientes
+- [x] Permitir criação de empréstimo sem parcelas também na interface e testar o router
+- [x] Refatorar pagamento, atualização do empréstimo e fluxo de caixa para transação única
+- [x] Exibir entradas, saídas e saldo de caixa no Dashboard e validar também o fluxo de saídas manual
+- [x] Adicionar testes específicos da nova especificação e revalidar compatibilidade e fluxo completo
+
+## Cobertura adicional obrigatória antes da entrega
+- [x] Cobrir por teste as queries públicas de clientes sem exposição de CPF
+- [x] Exibir agente indicador e endereços estruturados no perfil consolidado
+- [x] Testar criação de empréstimo sem installments no router
+- [x] Testar lançamento manual de saída e sua refletância no dashboard
+- [x] Expandir testes de cliente, empréstimo sem parcelas e saída manual
+- [x] Adicionar testes explícitos para clients.list e clients.profile garantindo que CPF nunca seja exposto
