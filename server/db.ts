@@ -9,7 +9,8 @@ import {
   vehicles, InsertVehicle,
   vehicleFinancings, InsertVehicleFinancing,
   auditLogs, InsertAuditLog,
-  localSessions, InsertLocalSession
+  localSessions, InsertLocalSession,
+  passwordResetTokens, InsertPasswordResetToken
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -629,6 +630,46 @@ export async function deleteLocalSession(token: string) {
     console.error("[Database] Failed to delete local session:", error);
     throw error;
   }
+}
+
+export async function createPasswordResetToken(data: InsertPasswordResetToken) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(passwordResetTokens).values(data);
+}
+
+export async function getPasswordResetToken(token: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(passwordResetTokens)
+    .where(eq(passwordResetTokens.token, token)).limit(1);
+  const resetToken = result[0];
+  if (!resetToken || resetToken.usedAt || new Date(resetToken.expiresAt) <= new Date()) {
+    return undefined;
+  }
+  return resetToken;
+}
+
+export async function consumePasswordResetToken(tokenId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(passwordResetTokens)
+    .set({ usedAt: new Date() })
+    .where(eq(passwordResetTokens.id, tokenId));
+}
+
+export async function updateLocalPassword(userId: number, passwordHash: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ passwordHash, loginMethod: 'local' }).where(eq(users.id, userId));
+  await db.delete(localSessions).where(eq(localSessions.userId, userId));
+}
+
+export async function deletePasswordResetTokensForUser(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
 }
 
 

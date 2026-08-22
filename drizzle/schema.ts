@@ -48,6 +48,21 @@ export type LocalSession = typeof localSessions.$inferSelect;
 export type InsertLocalSession = typeof localSessions.$inferInsert;
 
 /**
+ * Tokens temporários para recuperação de senha local.
+ */
+export const passwordResetTokens = mysqlTable("password_reset_tokens", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  token: varchar("token", { length: 128 }).notNull().unique(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  usedAt: timestamp("usedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type InsertPasswordResetToken = typeof passwordResetTokens.$inferInsert;
+
+/**
  * Databases table - Sistema de múltiplos bancos de dados independentes
  */
 export const databases = mysqlTable("databases", {

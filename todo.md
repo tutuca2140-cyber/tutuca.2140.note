@@ -118,8 +118,8 @@
 - [x] Criar página de login com abas (Manus OAuth / Usuário e Senha)
 - [x] Implementar formulário de login com validação
 - [x] Implementar formulário de registro (opcional)
-- [ ] Adicionar opção de "Lembrar-me"
-- [ ] Adicionar recuperação de senha
+- [x] Adicionar opção de "Lembrar-me"
+- [x] Adicionar recuperação de senha
 
 ### Testes e Validação
 - [x] Testar login com usuário/senha
@@ -143,6 +143,11 @@ A senha do Draco foi fornecida pelo proprietário do projeto para configuração
 
 
 ## Pendências de entrega identificadas
-- [ ] Validar a estrutura e o conteúdo essencial do ZIP gerado
+- [x] Validar a estrutura e o conteúdo essencial do ZIP gerado
 - [ ] Criar novo checkpoint após as mudanças do super administrador Draco
 - [ ] Enviar a entrega final com o checkpoint atualizado e o link público vigente
+
+
+## Validações adicionais de recuperação
+- [x] Disponibilizar fluxo administrativo visível para redefinição segura
+- [x] Testar caminho feliz, expiração e uso único do token de recuperação

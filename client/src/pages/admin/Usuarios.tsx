@@ -1,11 +1,33 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { Shield, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useState } from "react";
+import { toast } from "sonner";
 
 export default function AdminUsuarios() {
   const { data: users, isLoading } = trpc.users.list.useQuery();
+  const resetPasswordMutation = trpc.users.adminResetPassword.useMutation();
+  const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>({});
+
+  const handleAdminReset = async (userId: number) => {
+    const password = passwordDrafts[userId] ?? "";
+    if (password.length < 6) {
+      toast.error("A senha deve ter no mínimo 6 caracteres.");
+      return;
+    }
+
+    try {
+      await resetPasswordMutation.mutateAsync({ userId, password });
+      setPasswordDrafts((current) => ({ ...current, [userId]: "" }));
+      toast.success("Senha redefinida e sessões anteriores invalidadas.");
+    } catch (error: any) {
+      toast.error(error.message || "Não foi possível redefinir a senha.");
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -42,7 +64,7 @@ export default function AdminUsuarios() {
                     )}
                   </div>
                   <div className="text-sm space-y-1">
-                    <p className="text-muted-foreground truncate">{user.email}</p>
+                    <p className="text-muted-foreground truncate">{user.username ? `@${user.username}` : user.email}</p>
                     <div className="flex flex-wrap gap-1 mt-2">
                       {user.canView && <Badge variant="outline" className="text-xs">Ver</Badge>}
                       {user.canInsert && <Badge variant="outline" className="text-xs">Inserir</Badge>}
@@ -51,6 +73,30 @@ export default function AdminUsuarios() {
                       {user.canGenerateReports && <Badge variant="outline" className="text-xs">Relatórios</Badge>}
                       {user.canAccessSettings && <Badge variant="outline" className="text-xs">Config</Badge>}
                     </div>
+                    {user.username === "Draco" ? (
+                      <p className="text-xs text-blue-700 bg-blue-50 rounded-md p-2 mt-3">
+                        Super administrador protegido: senha, permissões, status e exclusão bloqueados.
+                      </p>
+                    ) : (
+                      <div className="flex gap-2 pt-3">
+                        <Input
+                          type="password"
+                          placeholder="Nova senha"
+                          value={passwordDrafts[user.id] ?? ""}
+                          onChange={(e) => setPasswordDrafts((current) => ({ ...current, [user.id]: e.target.value }))}
+                          disabled={resetPasswordMutation.isPending}
+                          aria-label={`Nova senha de ${user.username || user.name || user.email}`}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => handleAdminReset(user.id)}
+                          disabled={resetPasswordMutation.isPending}
+                        >
+                          Redefinir
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

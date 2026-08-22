@@ -7,6 +7,7 @@ import { z } from "zod";
 import * as db from "./db";
 import * as bcrypt from "bcrypt";
 import { nanoid } from "nanoid";
+import { notifyOwner } from "./_core/notification";
 
 // Admin procedure - requer role admin ou super_admin
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -46,7 +47,8 @@ export const appRouter = router({
     loginLocal: publicProcedure
       .input(z.object({
         username: z.string().min(1),
-        password: z.string().min(1)
+        password: z.string().min(1),
+        rememberMe: z.boolean().optional().default(false),
       }))
       .mutation(async ({ input, ctx }) => {
         const user = await db.getUserByUsername(input.username);
@@ -75,7 +77,8 @@ export const appRouter = router({
 
         // Criar sessão
         const token = nanoid(32);
-        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 dias
+        const sessionDuration = input.rememberMe ? 30 * 24 * 60 * 60 * 1000 : 8 * 60 * 60 * 1000;
+        const expiresAt = new Date(Date.now() + sessionDuration);
         await db.createLocalSession(user.id, token, expiresAt);
 
         // Atualizar lastSignedIn
@@ -83,7 +86,7 @@ export const appRouter = router({
 
         // Registrar no cookie
         const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: 30 * 24 * 60 * 60 * 1000 });
+        ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: sessionDuration });
 
         // Log de auditoria
         await db.createAuditLog({
@@ -123,15 +126,68 @@ export const appRouter = router({
           });
         }
 
-        // Hash da senha
         const passwordHash = await bcrypt.hash(input.password, 10);
-
-        // Criar usuário
         await db.createLocalUser({
           username: input.username,
           email: input.email,
           name: input.name,
           passwordHash
+        });
+
+        return { success: true };
+      }),
+
+    requestPasswordReset: publicProcedure
+      .input(z.object({
+        identifier: z.string().min(1),
+        origin: z.string().url(),
+      }))
+      .mutation(async ({ input }) => {
+        // Resposta uniforme evita revelar se um usuário existe.
+        const user = await db.getUserByUsername(input.identifier) ?? await db.getUserByEmail(input.identifier);
+        if (!user?.passwordHash || user.username === 'Draco') {
+          return { success: true };
+        }
+
+        const token = nanoid(48);
+        const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+        await db.createPasswordResetToken({ userId: user.id, token, expiresAt });
+
+        // O link é encaminhado ao proprietário do projeto para entrega segura.
+        await notifyOwner({
+          title: 'Solicitação de recuperação de senha',
+          content: `Usuário: ${user.username ?? user.email}\nLink válido por 30 minutos: ${input.origin}/login?reset=${token}`,
+        });
+
+        return { success: true };
+      }),
+
+    resetPassword: publicProcedure
+      .input(z.object({
+        token: z.string().min(1),
+        password: z.string().min(6),
+      }))
+      .mutation(async ({ input }) => {
+        const resetToken = await db.getPasswordResetToken(input.token);
+        if (!resetToken) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Token inválido ou expirado' });
+        }
+
+        const user = await db.getUserById(resetToken.userId);
+        if (!user || user.username === 'Draco') {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Esta conta não pode usar recuperação de senha.' });
+        }
+
+        const passwordHash = await bcrypt.hash(input.password, 10);
+        await db.updateLocalPassword(user.id, passwordHash);
+        await db.consumePasswordResetToken(resetToken.id);
+        await db.createAuditLog({
+          userId: user.id,
+          username: user.username || user.email || 'Usuário',
+          action: 'password_reset',
+          entity: 'auth',
+          details: 'Senha local redefinida por token temporário',
+          status: 'success',
         });
 
         return { success: true };
@@ -232,6 +288,35 @@ export const appRouter = router({
           status: 'success'
         });
         
+        return { success: true };
+      }),
+
+    adminResetPassword: adminProcedure
+      .input(z.object({
+        userId: z.number(),
+        password: z.string().min(6),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const targetUser = await db.getUserById(input.userId);
+        if (!targetUser) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Usuário não encontrado.' });
+        }
+        if (targetUser.username === 'Draco') {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'A senha do super administrador Draco não pode ser alterada.' });
+        }
+
+        const passwordHash = await bcrypt.hash(input.password, 10);
+        await db.updateLocalPassword(targetUser.id, passwordHash);
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.email || 'Admin',
+          action: 'admin_password_reset',
+          entity: 'users',
+          entityId: targetUser.id,
+          details: `Senha redefinida pelo administrador para ${targetUser.username || targetUser.email}`,
+          status: 'success',
+        });
+
         return { success: true };
       }),
 
