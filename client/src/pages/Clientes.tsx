@@ -6,13 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { Plus, Search, Trash2, Edit, Users } from "lucide-react";
+import { Plus, Search, Trash2, Edit, Users, Eye } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 export default function Clientes() {
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [profileId, setProfileId] = useState<number | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     cpf: "",
@@ -26,6 +27,7 @@ export default function Clientes() {
   });
 
   const { data: clients, isLoading, refetch } = trpc.clients.list.useQuery();
+  const { data: profile, isLoading: profileLoading } = trpc.clients.profile.useQuery({ id: profileId ?? 0 }, { enabled: profileId !== null });
   const createMutation = trpc.clients.create.useMutation();
   const deleteMutation = trpc.clients.delete.useMutation();
   const utils = trpc.useUtils();
@@ -213,12 +215,10 @@ export default function Clientes() {
                   <CardTitle className="text-lg flex items-start justify-between">
                     <span className="truncate">{client.name}</span>
                     <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => handleDelete(client.id)}
-                      >
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setProfileId(client.id)} aria-label={`Abrir perfil de ${client.name}`}>
+                        <Eye className="h-4 w-4 text-primary" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(client.id)} aria-label={`Excluir ${client.name}`}>
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </div>
@@ -265,6 +265,13 @@ export default function Clientes() {
             </CardContent>
           </Card>
         )}
+
+        <Dialog open={profileId !== null} onOpenChange={(value) => { if (!value) setProfileId(null); }}>
+          <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+            <DialogHeader><DialogTitle>{profile?.client.name ?? "Perfil do cliente"}</DialogTitle></DialogHeader>
+            {profileLoading ? <div className="py-10 text-center text-muted-foreground">Carregando histórico financeiro...</div> : profile ? <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-4"><div className="rounded-xl bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Total pago</p><p className="mt-1 font-semibold">R$ {profile.financialHistory.totalPaid.toFixed(2).replace('.', ',')}</p></div><div className="rounded-xl bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Saldo aberto</p><p className="mt-1 font-semibold text-primary">R$ {profile.financialHistory.remainingBalance.toFixed(2).replace('.', ',')}</p></div><div className="rounded-xl bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Contratos</p><p className="mt-1 font-semibold">{profile.loans.length + profile.financings.length}</p></div><div className="rounded-xl bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Veículos</p><p className="mt-1 font-semibold">{profile.vehicles.length}</p></div></div><div className="grid gap-4 md:grid-cols-2"><Card><CardHeader><CardTitle className="text-base">Dados pessoais</CardTitle></CardHeader><CardContent className="space-y-2 text-sm"><p><strong>CPF:</strong> {profile.client.cpf || "Não informado"}</p><p><strong>E-mail:</strong> {profile.client.email || "Não informado"}</p><p><strong>Telefone:</strong> {profile.client.phone || "Não informado"}</p><p><strong>Endereço:</strong> {[profile.client.address, profile.client.city, profile.client.state].filter(Boolean).join(" · ") || "Não informado"}</p></CardContent></Card><Card><CardHeader><CardTitle className="text-base">Histórico financeiro</CardTitle></CardHeader><CardContent className="space-y-2 text-sm"><p><strong>Pagamentos:</strong> {profile.financialHistory.paymentCount}</p><p><strong>Principal amortizado:</strong> R$ {profile.financialHistory.totalPrincipal.toFixed(2).replace('.', ',')}</p><p><strong>Juros pagos:</strong> R$ {profile.financialHistory.totalInterest.toFixed(2).replace('.', ',')}</p><p><strong>Comissões:</strong> R$ {profile.financialHistory.totalCommissions.toFixed(2).replace('.', ',')}</p></CardContent></Card></div><div className="grid gap-4 md:grid-cols-2"><Card><CardHeader><CardTitle className="text-base">Empréstimos ({profile.loans.length})</CardTitle></CardHeader><CardContent>{profile.loans.length ? <div className="space-y-2 text-sm">{profile.loans.map((loan) => <div key={loan.id} className="flex items-center justify-between rounded-lg border p-3"><span>#{loan.id} · {loan.installments} parcelas</span><span className="font-semibold">R$ {Number(loan.remainingBalance).toFixed(2).replace('.', ',')}</span></div>)}</div> : <p className="text-sm text-muted-foreground">Nenhum empréstimo vinculado.</p>}</CardContent></Card><Card><CardHeader><CardTitle className="text-base">Veículos ({profile.vehicles.length})</CardTitle></CardHeader><CardContent>{profile.vehicles.length ? <div className="space-y-2 text-sm">{profile.vehicles.map((vehicle) => <div key={vehicle.id} className="flex items-center justify-between rounded-lg border p-3"><span>{vehicle.brand} {vehicle.model}</span><span className="text-muted-foreground">{vehicle.plate || vehicle.status}</span></div>)}</div> : <p className="text-sm text-muted-foreground">Nenhum veículo vinculado.</p>}</CardContent></Card><Card><CardHeader><CardTitle className="text-base">Financiamentos ({profile.financings.length})</CardTitle></CardHeader><CardContent>{profile.financings.length ? <div className="space-y-2 text-sm">{profile.financings.map((financing) => <div key={financing.id} className="flex items-center justify-between rounded-lg border p-3"><span>#{financing.id} · {financing.installments} parcelas</span><span className="font-semibold">R$ {Number(financing.totalAmount || financing.financedAmount || 0).toFixed(2).replace('.', ',')}</span></div>)}</div> : <p className="text-sm text-muted-foreground">Nenhum financiamento vinculado.</p>}</CardContent></Card></div><div className="grid gap-4"><Card><CardHeader><CardTitle className="text-base">Histórico de pagamentos ({profile.payments.length})</CardTitle></CardHeader><CardContent>{profile.payments.length ? <div className="space-y-2">{profile.payments.map((payment) => <div key={payment.id} className="grid gap-2 rounded-lg border p-3 text-sm sm:grid-cols-5"><span>{new Date(payment.paymentDate).toLocaleDateString('pt-BR')}</span><span className="font-semibold">R$ {Number(payment.amount || 0).toFixed(2).replace('.', ',')}</span><span>Principal: R$ {Number(payment.principalAmount || 0).toFixed(2).replace('.', ',')}</span><span>Juros: R$ {Number(payment.interestAmount || 0).toFixed(2).replace('.', ',')}</span><span>Comissão: R$ {Number(payment.commissionAmount || 0).toFixed(2).replace('.', ',')}</span></div>)}</div> : <p className="text-sm text-muted-foreground">Nenhum pagamento registrado para este cliente.</p>}</CardContent></Card></div></div> : <p className="py-10 text-center text-muted-foreground">Perfil não encontrado.</p>}
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

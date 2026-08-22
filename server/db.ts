@@ -14,6 +14,7 @@ import {
   passwordResetTokens, InsertPasswordResetToken
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import { allocatePayment, roundMoney } from "../shared/finance";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -274,10 +275,59 @@ export async function updateClient(id: number, data: Partial<InsertClient>) {
   await db.update(clients).set(data).where(eq(clients.id, id));
 }
 
+export async function updateClientInDatabase(id: number, data: Partial<InsertClient>, databaseId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(clients).set(data).where(and(eq(clients.id, id), eq(clients.databaseId, databaseId)));
+}
+
 export async function deleteClient(id: number) {
   const db = await getDb();
   if (!db) return;
   await db.delete(clients).where(eq(clients.id, id));
+}
+
+export async function deleteClientInDatabase(id: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(clients).where(and(eq(clients.id, id), eq(clients.databaseId, databaseId)));
+}
+
+export async function getClientProfile(clientId: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const clientResult = await db.select().from(clients).where(and(eq(clients.id, clientId), eq(clients.databaseId, databaseId))).limit(1);
+  const client = clientResult[0];
+  if (!client) return undefined;
+
+  const [loanRows, vehicleRows, financingRows] = await Promise.all([
+    db.select().from(loans).where(and(eq(loans.clientId, clientId), eq(loans.databaseId, databaseId))).orderBy(desc(loans.createdAt)),
+    db.select().from(vehicles).where(and(eq(vehicles.clientId, clientId), eq(vehicles.databaseId, databaseId))).orderBy(desc(vehicles.createdAt)),
+    db.select().from(vehicleFinancings).where(and(eq(vehicleFinancings.clientId, clientId), eq(vehicleFinancings.databaseId, databaseId))).orderBy(desc(vehicleFinancings.createdAt)),
+  ]);
+
+  const loanPayments = (await Promise.all(loanRows.map((loan) => getPaymentsByLoan(loan.id, databaseId)))).flat();
+  const financingPayments = (await Promise.all(financingRows.map((financing) => getPaymentsByFinancing(financing.id, databaseId)))).flat();
+  const paymentsForClient = [...loanPayments, ...financingPayments].sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
+  const totalPaid = roundMoney(paymentsForClient.filter((payment) => payment.status === 'pago').reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+  const totalInterest = roundMoney(paymentsForClient.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0));
+  const totalPrincipal = roundMoney(paymentsForClient.reduce((sum, payment) => sum + Number(payment.principalAmount || 0), 0));
+  const totalCommissions = roundMoney(paymentsForClient.reduce((sum, payment) => sum + Number(payment.commissionAmount || 0), 0));
+  const remainingLoanBalance = loanRows.reduce((sum, loan) => sum + Number(loan.remainingBalance || loan.totalAmount || 0), 0);
+  const remainingFinancingBalance = financingRows.reduce((sum, financing) => {
+    const paid = financingPayments.filter((payment) => payment.vehicleFinancingId === financing.id && payment.status === 'pago').reduce((paidSum, payment) => paidSum + Number(payment.amount || 0), 0);
+    return sum + Math.max(0, Number(financing.totalAmount || financing.financedAmount || 0) - paid);
+  }, 0);
+  const remainingBalance = roundMoney(remainingLoanBalance + remainingFinancingBalance);
+
+  return {
+    client,
+    loans: loanRows,
+    vehicles: vehicleRows,
+    financings: financingRows,
+    payments: paymentsForClient,
+    financialHistory: { totalPaid, totalInterest, totalPrincipal, totalCommissions, remainingBalance, paymentCount: paymentsForClient.length },
+  };
 }
 
 // ==================== LOANS ====================
@@ -308,10 +358,28 @@ export async function updateLoan(id: number, data: Partial<InsertLoan>) {
   await db.update(loans).set(data).where(eq(loans.id, id));
 }
 
+export async function updateLoanBalance(id: number, databaseId: number, data: Partial<InsertLoan>) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
+}
+
+export async function updateLoanInDatabase(id: number, databaseId: number, data: Partial<InsertLoan>) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
+}
+
 export async function deleteLoan(id: number) {
   const db = await getDb();
   if (!db) return;
   await db.delete(loans).where(eq(loans.id, id));
+}
+
+export async function deleteLoanInDatabase(id: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(loans).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
 }
 
 export async function getLoansByClient(clientId: number, databaseId: number) {
@@ -500,7 +568,15 @@ export async function getPaymentsByLoan(loanId: number, databaseId: number) {
   if (!db) return [];
   return await db.select().from(payments)
     .where(and(eq(payments.loanId, loanId), eq(payments.databaseId, databaseId)))
-    .orderBy(payments.installmentNumber);
+    .orderBy(desc(payments.paymentDate));
+}
+
+export async function getPaymentsByFinancing(vehicleFinancingId: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(payments)
+    .where(and(eq(payments.vehicleFinancingId, vehicleFinancingId), eq(payments.databaseId, databaseId)))
+    .orderBy(desc(payments.paymentDate));
 }
 
 export async function getPaymentById(id: number) {
@@ -550,10 +626,22 @@ export async function updateVehicle(id: number, data: Partial<InsertVehicle>) {
   await db.update(vehicles).set(data).where(eq(vehicles.id, id));
 }
 
+export async function updateVehicleInDatabase(id: number, data: Partial<InsertVehicle>, databaseId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(vehicles).set(data).where(and(eq(vehicles.id, id), eq(vehicles.databaseId, databaseId)));
+}
+
 export async function deleteVehicle(id: number) {
   const db = await getDb();
   if (!db) return;
   await db.delete(vehicles).where(eq(vehicles.id, id));
+}
+
+export async function deleteVehicleInDatabase(id: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(vehicles).where(and(eq(vehicles.id, id), eq(vehicles.databaseId, databaseId)));
 }
 
 // ==================== VEHICLE FINANCINGS ====================

@@ -94,6 +94,8 @@ export default function Pagamentos() {
       setSelectedAgent("");
       setCommissionPercentage("");
       utils.payments.list.invalidate();
+      utils.loans.list.invalidate();
+      utils.vehicleFinancings.list.invalidate();
       utils.dashboard.agentPerformance.invalidate();
     } catch (error: any) {
       toast.error(error.message || "Erro ao registrar pagamento");
@@ -300,7 +302,7 @@ export default function Pagamentos() {
                           <div>
                             <p className="font-semibold">Pagamento #{payment.id}</p>
                             <p className="text-sm text-muted-foreground">
-                              Empréstimo #{payment.loanId} • {formatDate(payment.paymentDate)}
+                              {payment.loanId ? `Empréstimo #${payment.loanId}` : `Financiamento #${payment.vehicleFinancingId}`} • {formatDate(payment.paymentDate)}
                             </p>
                           </div>
                         </div>

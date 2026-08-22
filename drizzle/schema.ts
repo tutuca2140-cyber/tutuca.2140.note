@@ -110,10 +110,13 @@ export const loans = mysqlTable("loans", {
   databaseId: int("databaseId").notNull(), // Isolamento por banco
   clientId: int("clientId").notNull(),
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
-  interestRate: decimal("interestRate", { precision: 5, scale: 2 }).notNull(), // Taxa de juros (%)
-  installments: int("installments").notNull(), // Número de parcelas
+  interestType: mysqlEnum("interestType", ["simple", "compound"]).default("simple").notNull(),
+  interestRate: decimal("interestRate", { precision: 8, scale: 4 }).notNull(), // Taxa de juros (%)
+  ratePeriod: mysqlEnum("ratePeriod", ["day", "week", "month", "year"]).default("month").notNull(),
+  installments: int("installments").notNull(), // Número de parcelas/períodos
   installmentAmount: decimal("installmentAmount", { precision: 15, scale: 2 }).notNull(), // Valor da parcela
   totalAmount: decimal("totalAmount", { precision: 15, scale: 2 }).notNull(), // Valor total com juros
+  remainingBalance: decimal("remainingBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
   startDate: timestamp("startDate").notNull(),
   endDate: timestamp("endDate").notNull(),
   status: mysqlEnum("status", ["ativo", "pago", "atrasado", "cancelado"]).default("ativo").notNull(),
@@ -158,6 +161,9 @@ export const payments = mysqlTable("payments", {
   status: mysqlEnum("status", ["pago", "pendente", "atrasado"]).default("pendente").notNull(),
   lateFee: decimal("lateFee", { precision: 15, scale: 2 }).default("0.00"), // Multa por atraso
   interest: decimal("interest", { precision: 15, scale: 2 }).default("0.00"), // Juros de mora
+  principalAmount: decimal("principalAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  interestAmount: decimal("interestAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  remainingBalance: decimal("remainingBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
   notes: text("notes"),
   agentId: int("agentId").references(() => agents.id),
   commissionPercentage: decimal("commissionPercentage", { precision: 5, scale: 2 }).default("0.00").notNull(),
@@ -177,6 +183,7 @@ export type InsertPayment = typeof payments.$inferInsert;
 export const vehicles = mysqlTable("vehicles", {
   id: int("id").autoincrement().primaryKey(),
   databaseId: int("databaseId").notNull(), // Isolamento por banco
+  clientId: int("clientId").references(() => clients.id),
   brand: varchar("brand", { length: 100 }).notNull(),
   model: varchar("model", { length: 100 }).notNull(),
   year: int("year").notNull(),

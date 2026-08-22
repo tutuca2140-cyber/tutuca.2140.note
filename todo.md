@@ -161,10 +161,47 @@ A senha do Draco foi fornecida pelo proprietário do projeto para configuração
 - [x] Preservar o super administrador Draco e suas proteções
 - [x] Atualizar ou criar testes para as mudanças
 - [x] Validar build, interface e compatibilidade
-- [ ] Criar checkpoint e entregar a atualização
+- [x] Criar checkpoint e entregar a atualização
 
 
 ## Correções críticas da Atualização 27
 - [x] Implementar prevenção real de comissão/pagamento duplicado
 - [x] Substituir o placeholder de pagamento de financiamento por fluxo funcional
 - [x] Testar duplicidade, filtros, ranking e histórico após desativação
+
+
+## Entrega explícita da Atualização 27
+- [x] Entregar ao usuário o checkpoint 8ad91809 com resumo das mudanças integradas
+
+
+## Atualização 28 - Integração do Pasted_content_01.txt
+- [ ] Ler e mapear o novo conteúdo enviado
+- [ ] Identificar arquivos e módulos que precisam ser substituídos
+- [ ] Integrar as funcionalidades ao sistema atual
+- [ ] Preservar autenticação, isolamento por banco e proteção do Draco
+- [ ] Atualizar testes críticos
+- [ ] Validar tipos, build, interface e responsividade
+- [ ] Criar checkpoint e entregar a atualização
+
+## Continuação - Entrega integrada
+- [x] Implementar visualização consolidada do perfil do cliente com contratos, veículos e histórico financeiro
+- [x] Criar módulo de relatórios exportáveis em CSV e PDF para empréstimos e fluxo de caixa
+- [x] Sincronizar a interface de pagamentos de financiamentos com vehicleFinancingId
+- [x] Executar validação ponta a ponta Cliente → Empréstimo → Pagamento → Comissão
+- [x] Validar responsividade, build, testes e ausência de erros de runtime
+- [ ] Gerar ZIP atualizado e checkpoint final para entrega
+- [ ] Disponibilizar preview público temporário para teste
+
+## Correções adicionais de isolamento e validação
+- [x] Normalizar campos opcionais no cadastro de clientes
+- [x] Restringir consultas e mutações de empréstimos ao banco ativo
+- [x] Adicionar testes unitários para fórmulas financeiras e perfil consolidado
+- [x] Exibir financiamentos vinculados no perfil consolidado do cliente
+- [x] Exibir histórico detalhado de pagamentos e comissões no perfil consolidado
+
+## Evidências de validação final
+- [x] Implementar exportação PDF real com jsPDF, além do CSV
+- [x] Documentar fluxo financeiro com base nos pagamentos reais do banco ativo
+- [x] Automatizar Cliente → Empréstimo → Pagamento → Comissão no teste de integração
+- [x] Cobrir o endpoint clients.profile com teste de retorno consolidado
+- [x] Confirmar runtime local sem erros de TypeScript e com servidor ativo durante screenshots

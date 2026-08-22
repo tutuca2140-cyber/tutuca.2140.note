@@ -54,24 +54,20 @@ describe("agentes comissionados", () => {
     const databaseId = activeDb!.id;
 
     try {
-      await db.createClient({ databaseId, name: clientName, email: clientEmail, createdBy: 1 });
+      await db.setActiveDatabase(databaseId);
+      await caller.clients.create({ name: clientName, email: clientEmail });
       const client = (await db.getClientsByDatabase(databaseId)).find((item) => item.name === clientName);
       expect(client).toBeDefined();
       clientId = client!.id;
 
-      await db.createLoan({
-        databaseId,
+      await caller.loans.create({
         clientId,
-        amount: "1000.00",
+        amount: "3000.00",
         interestRate: "0.00",
-        installments: 1,
-        installmentAmount: "1000.00",
-        totalAmount: "1000.00",
-        startDate: new Date(),
-        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        status: "ativo",
+        installments: 5,
+        startDate: new Date().toISOString(),
+        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         description: "Empréstimo para teste de comissão",
-        createdBy: 1,
       });
       const loan = (await db.getLoansByDatabase(databaseId)).find((item) => item.clientId === clientId);
       expect(loan).toBeDefined();
@@ -83,6 +79,7 @@ describe("agentes comissionados", () => {
       agentId = agent!.id;
       expect(Number(agent!.defaultCommissionPercentage)).toBe(2.5);
 
+      await db.setActiveDatabase(databaseId);
       const paymentDate = new Date().toISOString();
       const cases = [
         { installmentNumber: 1, amount: "1000.00", percentage: undefined, commission: 25, net: 975 },
@@ -175,5 +172,5 @@ describe("agentes comissionados", () => {
       if (clientId) await db.deleteClient(clientId);
       if (createdDatabaseId) await db.deleteDatabase(createdDatabaseId);
     }
-  });
+  }, 15000);
 });

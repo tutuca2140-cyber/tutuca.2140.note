@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
+import * as db from "./db";
 import type { TrpcContext } from "./_core/context";
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
@@ -61,6 +62,23 @@ describe("DEATH NOTE System Tests", () => {
       // Database might not be available in test environment
       expect(error).toBeDefined();
     }
+  });
+
+  it("should return a consolidated client profile scoped to the active database", async () => {
+    const activeDb = await db.getActiveDatabase();
+    if (!activeDb) return;
+    const suffix = Date.now();
+    await db.createClient({ databaseId: activeDb.id, name: `Perfil de teste ${suffix}`, createdBy: 1 });
+    const created = (await db.getClientsByDatabase(activeDb.id)).find((item) => item.name === `Perfil de teste ${suffix}`);
+    expect(created).toBeDefined();
+    const { ctx } = createAuthContext('admin');
+    const profile = await appRouter.createCaller(ctx).clients.profile({ id: created!.id });
+    expect(profile.client.id).toBe(created!.id);
+    expect(Array.isArray(profile.loans)).toBe(true);
+    expect(Array.isArray(profile.financings)).toBe(true);
+    expect(Array.isArray(profile.payments)).toBe(true);
+    expect(profile.financialHistory.paymentCount).toBe(profile.payments.length);
+    await db.deleteClient(created!.id);
   });
 
   it("should check user permissions", async () => {
