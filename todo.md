@@ -175,13 +175,13 @@ A senha do Draco foi fornecida pelo proprietário do projeto para configuração
 
 
 ## Atualização 28 - Integração do Pasted_content_01.txt
-- [ ] Ler e mapear o novo conteúdo enviado
-- [ ] Identificar arquivos e módulos que precisam ser substituídos
-- [ ] Integrar as funcionalidades ao sistema atual
-- [ ] Preservar autenticação, isolamento por banco e proteção do Draco
-- [ ] Atualizar testes críticos
-- [ ] Validar tipos, build, interface e responsividade
-- [ ] Criar checkpoint e entregar a atualização
+- [x] Ler e mapear o novo conteúdo enviado
+- [x] Identificar arquivos e módulos que precisam ser substituídos
+- [x] Integrar as funcionalidades ao sistema atual
+- [x] Preservar autenticação, isolamento por banco e proteção do Draco
+- [x] Atualizar testes críticos
+- [x] Validar tipos, build, interface e responsividade
+- [x] Criar checkpoint e entregar a atualização
 
 ## Continuação - Entrega integrada
 - [x] Implementar visualização consolidada do perfil do cliente com contratos, veículos e histórico financeiro
@@ -189,8 +189,8 @@ A senha do Draco foi fornecida pelo proprietário do projeto para configuração
 - [x] Sincronizar a interface de pagamentos de financiamentos com vehicleFinancingId
 - [x] Executar validação ponta a ponta Cliente → Empréstimo → Pagamento → Comissão
 - [x] Validar responsividade, build, testes e ausência de erros de runtime
-- [ ] Gerar ZIP atualizado e checkpoint final para entrega
-- [ ] Disponibilizar preview público temporário para teste
+- [x] Gerar ZIP atualizado e checkpoint final para entrega
+- [x] Disponibilizar preview público temporário para teste
 
 ## Correções adicionais de isolamento e validação
 - [x] Normalizar campos opcionais no cadastro de clientes
@@ -205,3 +205,4 @@ A senha do Draco foi fornecida pelo proprietário do projeto para configuração
 - [x] Automatizar Cliente → Empréstimo → Pagamento → Comissão no teste de integração
 - [x] Cobrir o endpoint clients.profile com teste de retorno consolidado
 - [x] Confirmar runtime local sem erros de TypeScript e com servidor ativo durante screenshots
+- [x] Entregar ao usuário a atualização com o checkpoint fb5c8662 e o link público temporário já gerado
