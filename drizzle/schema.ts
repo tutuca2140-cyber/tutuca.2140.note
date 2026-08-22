@@ -127,12 +127,30 @@ export type Loan = typeof loans.$inferSelect;
 export type InsertLoan = typeof loans.$inferInsert;
 
 /**
+ * Agents table - Agentes comissionados isolados por banco de dados
+ */
+export const agents = mysqlTable("agents", {
+  id: int("id").autoincrement().primaryKey(),
+  databaseId: int("databaseId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  defaultCommissionPercentage: decimal("defaultCommissionPercentage", { precision: 5, scale: 2 }).default("0.00").notNull(),
+  status: mysqlEnum("status", ["ACTIVE", "INACTIVE"]).default("ACTIVE").notNull(),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Agent = typeof agents.$inferSelect;
+export type InsertAgent = typeof agents.$inferInsert;
+
+/**
  * Payments table - Pagamentos de empréstimos
  */
 export const payments = mysqlTable("payments", {
   id: int("id").autoincrement().primaryKey(),
   databaseId: int("databaseId").notNull(), // Isolamento por banco
-  loanId: int("loanId").notNull(),
+  loanId: int("loanId"),
+  vehicleFinancingId: int("vehicleFinancingId").references(() => vehicleFinancings.id),
   installmentNumber: int("installmentNumber").notNull(), // Número da parcela
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
   paymentDate: timestamp("paymentDate").notNull(),
@@ -141,6 +159,10 @@ export const payments = mysqlTable("payments", {
   lateFee: decimal("lateFee", { precision: 15, scale: 2 }).default("0.00"), // Multa por atraso
   interest: decimal("interest", { precision: 15, scale: 2 }).default("0.00"), // Juros de mora
   notes: text("notes"),
+  agentId: int("agentId").references(() => agents.id),
+  commissionPercentage: decimal("commissionPercentage", { precision: 5, scale: 2 }).default("0.00").notNull(),
+  commissionAmount: decimal("commissionAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  netAmount: decimal("netAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

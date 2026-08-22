@@ -61,7 +61,7 @@
 - [x] Testar fluxo completo de autenticação
 - [x] Testar isolamento de dados entre bancos
 - [x] Criar checkpoint final
-- [ ] Gerar link de teste 24h
+- [x] Gerar link de teste 24h
 
 
 ## Atualização 24 - Correção e Integração de Financiamentos
@@ -144,10 +144,27 @@ A senha do Draco foi fornecida pelo proprietário do projeto para configuração
 
 ## Pendências de entrega identificadas
 - [x] Validar a estrutura e o conteúdo essencial do ZIP gerado
-- [ ] Criar novo checkpoint após as mudanças do super administrador Draco
-- [ ] Enviar a entrega final com o checkpoint atualizado e o link público vigente
+- [x] Criar novo checkpoint após as mudanças do super administrador Draco
+- [x] Enviar a entrega final com o checkpoint atualizado e o link público vigente
 
 
 ## Validações adicionais de recuperação
 - [x] Disponibilizar fluxo administrativo visível para redefinição segura
 - [x] Testar caminho feliz, expiração e uso único do token de recuperação
+
+
+## Atualização 27 - Integração e substituição do novo conteúdo
+- [x] Ler e mapear o conteúdo de Pasted_content.txt
+- [x] Identificar módulos e arquivos afetados
+- [x] Integrar as novas funcionalidades ao sistema existente
+- [x] Substituir as partes correspondentes sem quebrar o fluxo atual
+- [x] Preservar o super administrador Draco e suas proteções
+- [x] Atualizar ou criar testes para as mudanças
+- [x] Validar build, interface e compatibilidade
+- [ ] Criar checkpoint e entregar a atualização
+
+
+## Correções críticas da Atualização 27
+- [x] Implementar prevenção real de comissão/pagamento duplicado
+- [x] Substituir o placeholder de pagamento de financiamento por fluxo funcional
+- [x] Testar duplicidade, filtros, ranking e histórico após desativação

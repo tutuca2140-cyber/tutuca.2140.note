@@ -16,8 +16,11 @@ export default function Pagamentos() {
   const [contractType, setContractType] = useState<"emprestimo" | "financiamento">("emprestimo");
   const [selectedLoan, setSelectedLoan] = useState<string>("");
   const [selectedFinancing, setSelectedFinancing] = useState<string>("");
+  const [selectedAgent, setSelectedAgent] = useState<string>("");
+  const [commissionPercentage, setCommissionPercentage] = useState("");
   const [formData, setFormData] = useState({
     amount: "",
+    installmentNumber: "1",
     paymentDate: "",
     method: "dinheiro" as const,
     notes: ""
@@ -26,6 +29,7 @@ export default function Pagamentos() {
   const { data: payments, isLoading: paymentsLoading } = trpc.payments.list.useQuery();
   const { data: loans } = trpc.loans.list.useQuery();
   const { data: financings } = trpc.vehicleFinancings.list.useQuery();
+  const { data: agents } = trpc.agents.list.useQuery({ includeInactive: false });
   
   const createPaymentMutation = trpc.payments.create.useMutation();
   const utils = trpc.useUtils();
@@ -56,32 +60,41 @@ export default function Pagamentos() {
       return;
     }
 
+    const percentage = commissionPercentage === "" ? undefined : Number(commissionPercentage);
+    if (percentage !== undefined && (!Number.isFinite(percentage) || percentage < 0 || percentage > 100)) {
+      toast.error("A comissão deve estar entre 0% e 100%.");
+      return;
+    }
+
     try {
-      if (contractType === "emprestimo") {
-        await createPaymentMutation.mutateAsync({
-          loanId: parseInt(selectedLoan),
-          installmentNumber: 1,
-          amount: formData.amount,
-          paymentDate: formData.paymentDate,
-          dueDate: formData.paymentDate,
-          status: "pago",
-          notes: formData.notes
-        });
-        toast.success("Pagamento de empréstimo registrado com sucesso!");
-      } else {
-        toast.info("Pagamento de financiamento será registrado em breve");
-      }
+      await createPaymentMutation.mutateAsync({
+        loanId: contractType === "emprestimo" ? Number(selectedLoan) : undefined,
+        vehicleFinancingId: contractType === "financiamento" ? Number(selectedFinancing) : undefined,
+        installmentNumber: Number(formData.installmentNumber),
+        amount: formData.amount,
+        paymentDate: formData.paymentDate,
+        dueDate: formData.paymentDate,
+        status: "pago",
+        notes: formData.notes,
+        agentId: selectedAgent ? Number(selectedAgent) : undefined,
+        commissionPercentage: percentage,
+      });
+      toast.success(`Pagamento de ${contractType === "emprestimo" ? "empréstimo" : "financiamento"} registrado com sucesso!`);
 
       setOpenCreate(false);
       setFormData({
         amount: "",
+        installmentNumber: "1",
         paymentDate: "",
-        method: "dinheiro",
+        method: "dinheiro" as const,
         notes: ""
       });
       setSelectedLoan("");
       setSelectedFinancing("");
+      setSelectedAgent("");
+      setCommissionPercentage("");
       utils.payments.list.invalidate();
+      utils.dashboard.agentPerformance.invalidate();
     } catch (error: any) {
       toast.error(error.message || "Erro ao registrar pagamento");
     }
@@ -172,7 +185,7 @@ export default function Pagamentos() {
                         <SelectValue placeholder="Selecionar financiamento" />
                       </SelectTrigger>
                       <SelectContent>
-                        {financings?.filter(f => f.status === 'ativo').map((financing) => (
+                        {financings?.filter(f => f.status !== 'pago' && f.status !== 'cancelado').map((financing) => (
                           <SelectItem key={financing.id} value={financing.id.toString()}>
                             Cliente #{financing.clientId} - {formatCurrency(financing.financedAmount)}
                           </SelectItem>
@@ -182,7 +195,40 @@ export default function Pagamentos() {
                   </div>
                 )}
 
+                <Card className="border-primary/20 bg-primary/[0.03]">
+                  <CardHeader className="pb-3"><CardTitle className="text-base">Agente Comissionado</CardTitle></CardHeader>
+                  <CardContent className="space-y-3">
+                    <div>
+                      <Label htmlFor="agentId">Agente (opcional)</Label>
+                      <Select value={selectedAgent || "none"} onValueChange={(value) => {
+                        setSelectedAgent(value === "none" ? "" : value);
+                        const agent = agents?.find((item) => item.id.toString() === value);
+                        if (agent) setCommissionPercentage(String(agent.defaultCommissionPercentage || "0"));
+                        if (value === "none") setCommissionPercentage("");
+                      }}>
+                        <SelectTrigger><SelectValue placeholder="Sem agente comissionado" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Sem agente comissionado</SelectItem>
+                          {agents?.map((agent) => <SelectItem key={agent.id} value={agent.id.toString()}>{agent.name} — padrão {Number(agent.defaultCommissionPercentage || 0).toFixed(2)}%</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {selectedAgent && <div>
+                      <Label htmlFor="commissionPercentage">Percentual da comissão (%)</Label>
+                      <Input id="commissionPercentage" type="number" min="0" max="100" step="0.01" value={commissionPercentage} onChange={(event) => setCommissionPercentage(event.target.value)} required />
+                    </div>}
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-md bg-white p-3"><p className="text-muted-foreground">Comissão</p><p className="font-semibold text-primary">{formatCurrency((Number(formData.amount || 0) * Number(commissionPercentage || 0)) / 100)}</p></div>
+                      <div className="rounded-md bg-white p-3"><p className="text-muted-foreground">Valor líquido</p><p className="font-semibold">{formatCurrency(Number(formData.amount || 0) - (Number(formData.amount || 0) * Number(commissionPercentage || 0)) / 100)}</p></div>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="installmentNumber">Número da parcela *</Label>
+                    <Input id="installmentNumber" type="number" min="1" step="1" value={formData.installmentNumber} onChange={(e) => setFormData({ ...formData, installmentNumber: e.target.value })} required />
+                  </div>
                   <div>
                     <Label htmlFor="amount">Valor do Pagamento *</Label>
                     <Input
@@ -265,8 +311,14 @@ export default function Pagamentos() {
                           </span>
                         </div>
                       </div>
+                      <div className="mt-4 grid grid-cols-2 gap-3 border-t pt-3 text-sm sm:grid-cols-4">
+                        <div><p className="text-muted-foreground">Agente</p><p className="font-medium">{payment.agentId ? `#${payment.agentId}` : "Sem agente"}</p></div>
+                        <div><p className="text-muted-foreground">Comissão</p><p className="font-medium text-primary">{formatCurrency(payment.commissionAmount || 0)} ({Number(payment.commissionPercentage || 0).toFixed(2)}%)</p></div>
+                        <div><p className="text-muted-foreground">Valor líquido</p><p className="font-medium">{formatCurrency(payment.netAmount ?? payment.amount)}</p></div>
+                        <div><p className="text-muted-foreground">Status</p><p className="font-medium capitalize">{payment.status}</p></div>
+                      </div>
                       {payment.notes && (
-                        <div className="mt-3 pt-3 border-t text-sm text-muted-foreground">
+                        <div className="mt-3 text-sm text-muted-foreground">
                           {payment.notes}
                         </div>
                       )}

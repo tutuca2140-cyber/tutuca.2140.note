@@ -51,6 +51,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     { name: "Clientes", href: "/clientes", icon: Users, show: user?.canView },
     { name: "Empréstimos", href: "/emprestimos", icon: CreditCard, show: user?.canView },
     { name: "Pagamentos", href: "/pagamentos", icon: Wallet, show: user?.canView },
+    { name: "Agentes", href: "/agentes", icon: Users, show: user?.canView },
     { name: "Veículos", href: "/veiculos", icon: Car, show: user?.canView },
     { name: "Financiamentos", href: "/financiamentos", icon: ClipboardList, show: user?.canView },
     { name: "Relatórios", href: "/relatorios", icon: FileText, show: user?.canGenerateReports },

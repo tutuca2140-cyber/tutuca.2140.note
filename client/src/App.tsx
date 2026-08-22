@@ -9,6 +9,7 @@ import Dashboard from "./pages/Dashboard";
 import Clientes from "./pages/Clientes";
 import Emprestimos from "./pages/Emprestimos";
 import Pagamentos from "./pages/Pagamentos";
+import Agentes from "./pages/Agentes";
 import Veiculos from "./pages/Veiculos";
 import Financiamentos from "./pages/Financiamentos";
 import Relatorios from "./pages/Relatorios";
@@ -27,6 +28,7 @@ function Router() {
       <Route path={"/clientes"} component={Clientes} />
       <Route path={"/emprestimos"} component={Emprestimos} />
       <Route path={"/pagamentos"} component={Pagamentos} />
+      <Route path={"/agentes"} component={Agentes} />
       <Route path={"/veiculos"} component={Veiculos} />
       <Route path={"/financiamentos"} component={Financiamentos} />
       <Route path={"/relatorios"} component={Relatorios} />

@@ -449,6 +449,134 @@ export const appRouter = router({
       }),
   }),
 
+  // ==================== AGENTS ====================
+  agents: router({
+    list: protectedProcedure
+      .input(z.object({ includeInactive: z.boolean().default(true).optional() }).optional())
+      .query(async ({ input, ctx }) => {
+        if (!ctx.user.canView) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para visualizar agentes.' });
+        }
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb) return [];
+        return await db.getAgentsByDatabase(activeDb.id, input?.includeInactive ?? true);
+      }),
+
+    getById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const agent = await db.getAgentById(input.id);
+        if (!agent) throw new TRPCError({ code: 'NOT_FOUND', message: 'Agente não encontrado.' });
+        return agent;
+      }),
+
+    create: protectedProcedure
+      .input(z.object({
+        name: z.string().min(1).max(255),
+        defaultCommissionPercentage: z.coerce.number().min(0).max(100),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user.canInsert) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para inserir agentes.' });
+        }
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
+        const result = await db.createAgent({
+          databaseId: activeDb.id,
+          name: input.name,
+          defaultCommissionPercentage: input.defaultCommissionPercentage.toFixed(2),
+          status: 'ACTIVE',
+          createdBy: ctx.user.id,
+        });
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.email || 'Usuário',
+          action: 'create_agent',
+          entity: 'agents',
+          databaseId: activeDb.id,
+          details: `Agente criado: ${input.name}`,
+          status: 'success',
+        });
+        return result;
+      }),
+
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().min(1).max(255).optional(),
+        defaultCommissionPercentage: z.coerce.number().min(0).max(100).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user.canEdit) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para editar agentes.' });
+        }
+        const activeDb = await db.getActiveDatabase();
+        const targetAgent = activeDb ? await db.getAgentById(input.id) : undefined;
+        if (!activeDb || !targetAgent || targetAgent.databaseId !== activeDb.id) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Agente não encontrado no banco ativo.' });
+        }
+        const { id, defaultCommissionPercentage, ...rest } = input;
+        await db.updateAgent(id, {
+          ...rest,
+          ...(defaultCommissionPercentage === undefined ? {} : { defaultCommissionPercentage: defaultCommissionPercentage.toFixed(2) }),
+        }, activeDb.id);
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.email || 'Usuário',
+          action: 'update_agent',
+          entity: 'agents',
+          entityId: id,
+          details: JSON.stringify(input),
+          status: 'success',
+        });
+        return { success: true };
+      }),
+
+    deactivate: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user.canEdit) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para desativar agentes.' });
+        }
+        const activeDb = await db.getActiveDatabase();
+        const targetAgent = activeDb ? await db.getAgentById(input.id) : undefined;
+        if (!activeDb || !targetAgent || targetAgent.databaseId !== activeDb.id) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Agente não encontrado no banco ativo.' });
+        }
+        await db.deactivateAgent(input.id, activeDb.id);
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.email || 'Usuário',
+          action: 'deactivate_agent',
+          entity: 'agents',
+          entityId: input.id,
+          details: 'Agente desativado; histórico preservado.',
+          status: 'success',
+        });
+        return { success: true };
+      }),
+
+    history: protectedProcedure
+      .input(z.object({
+        agentId: z.number(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+      }))
+      .query(async ({ input, ctx }) => {
+        if (!ctx.user.canView) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para visualizar o histórico.' });
+        }
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb) return { payments: [], totals: { totalPayments: 0, totalPaymentAmount: 0, totalCommission: 0, averageCommission: 0 } };
+        return await db.getAgentPaymentHistory(
+          input.agentId,
+          activeDb.id,
+          input.startDate ? new Date(input.startDate) : undefined,
+          input.endDate ? new Date(input.endDate) : undefined,
+        );
+      }),
+  }),
+
   // ==================== CLIENTS ====================
   clients: router({
     list: protectedProcedure.query(async () => {
@@ -726,7 +854,8 @@ export const appRouter = router({
 
     create: protectedProcedure
       .input(z.object({
-        loanId: z.number(),
+        loanId: z.number().int().positive().optional(),
+        vehicleFinancingId: z.number().int().positive().optional(),
         installmentNumber: z.number(),
         amount: z.string(),
         paymentDate: z.string(),
@@ -735,6 +864,8 @@ export const appRouter = router({
         lateFee: z.string().optional(),
         interest: z.string().optional(),
         notes: z.string().optional(),
+        agentId: z.number().int().positive().optional(),
+        commissionPercentage: z.coerce.number().min(0).max(100).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const activeDb = await db.getActiveDatabase();
@@ -752,12 +883,66 @@ export const appRouter = router({
           });
         }
 
+        if ((input.loanId === undefined) === (input.vehicleFinancingId === undefined)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Informe um empréstimo ou um financiamento, mas não ambos.' });
+        }
+
+        const vehicleFinancing = input.vehicleFinancingId === undefined
+          ? undefined
+          : await db.getVehicleFinancingById(input.vehicleFinancingId);
+        if (input.vehicleFinancingId !== undefined && (!vehicleFinancing || vehicleFinancing.databaseId !== activeDb.id || ["pago", "cancelado"].includes(vehicleFinancing.status))) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Financiamento inválido ou encerrado para o banco ativo.' });
+        }
+
+        const paymentAmount = Number(input.amount);
+        if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'O valor do pagamento deve ser maior que zero.' });
+        }
+        const paymentDate = new Date(input.paymentDate);
+        if (Number.isNaN(paymentDate.getTime())) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'A data do pagamento é inválida.' });
+        }
+
+        let commissionPercentage = 0;
+        let agentId: number | undefined;
+        if (input.agentId !== undefined) {
+          const agent = await db.getAgentById(input.agentId);
+          if (!agent || agent.databaseId !== activeDb.id) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: 'Agente inválido para o banco ativo.' });
+          }
+          if (agent.status !== 'ACTIVE') {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: 'Agentes inativos não podem ser selecionados em novos pagamentos.' });
+          }
+          agentId = agent.id;
+          commissionPercentage = input.commissionPercentage ?? Number(agent.defaultCommissionPercentage || 0);
+        } else if (input.commissionPercentage !== undefined && input.commissionPercentage !== 0) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'A comissão só pode ser informada quando um agente é selecionado.' });
+        }
+
+        const commissionAmount = Math.round(paymentAmount * commissionPercentage) / 100;
+        const netAmount = Math.round((paymentAmount - commissionAmount) * 100) / 100;
+        const duplicate = await db.paymentAlreadyRegistered({
+          databaseId: activeDb.id,
+          loanId: input.loanId,
+          vehicleFinancingId: input.vehicleFinancingId,
+          installmentNumber: input.installmentNumber,
+          amount: input.amount,
+          paymentDate,
+          agentId,
+        });
+        if (duplicate) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'Este pagamento e sua comissão já foram registrados.' });
+        }
         const result = await db.createPayment({
           ...input,
-          paymentDate: new Date(input.paymentDate),
+          agentId,
+          commissionPercentage: commissionPercentage.toFixed(2),
+          commissionAmount: commissionAmount.toFixed(2),
+          netAmount: netAmount.toFixed(2),
+          paymentDate,
           dueDate: new Date(input.dueDate),
           databaseId: activeDb.id,
-          createdBy: ctx.user.id
+          createdBy: ctx.user.id,
         });
 
         await db.createAuditLog({
@@ -766,7 +951,7 @@ export const appRouter = router({
           action: 'create_payment',
           entity: 'payments',
           databaseId: activeDb.id,
-          details: `Pagamento registrado: R$ ${input.amount}`,
+          details: `Pagamento registrado: R$ ${input.amount}; comissão: R$ ${commissionAmount.toFixed(2)}`,
           status: 'success'
         });
 
@@ -1071,6 +1256,23 @@ export const appRouter = router({
       }
       return await db.getDashboardStats(activeDb.id);
     }),
+
+    agentPerformance: protectedProcedure
+      .input(z.object({ startDate: z.string().optional(), endDate: z.string().optional() }).optional())
+      .query(async ({ input, ctx }) => {
+        if (!ctx.user.canView) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para visualizar performance.' });
+        }
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb) {
+          return { kpis: { totalAgents: 0, activeAgents: 0, totalPayments: 0, totalPaymentVolume: 0, totalCommissions: 0, bestAgent: null }, ranking: [], evolution: [] };
+        }
+        return await db.getAgentPerformance(
+          activeDb.id,
+          input?.startDate ? new Date(input.startDate) : undefined,
+          input?.endDate ? new Date(input.endDate) : undefined,
+        );
+      }),
   }),
 });
 

@@ -9,6 +9,7 @@ import {
   vehicles, InsertVehicle,
   vehicleFinancings, InsertVehicleFinancing,
   auditLogs, InsertAuditLog,
+  agents, InsertAgent,
   localSessions, InsertLocalSession,
   passwordResetTokens, InsertPasswordResetToken
 } from "../drizzle/schema";
@@ -321,7 +322,165 @@ export async function getLoansByClient(clientId: number, databaseId: number) {
     .orderBy(desc(loans.createdAt));
 }
 
+// ==================== AGENTS ====================
+
+export async function createAgent(data: InsertAgent) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.insert(agents).values(data);
+}
+
+export async function getAgentsByDatabase(databaseId: number, includeInactive = true) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = includeInactive
+    ? eq(agents.databaseId, databaseId)
+    : and(eq(agents.databaseId, databaseId), eq(agents.status, 'ACTIVE'));
+  return await db.select().from(agents).where(conditions).orderBy(agents.name);
+}
+
+export async function getAgentById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(agents).where(eq(agents.id, id)).limit(1);
+  return result[0];
+}
+
+export async function updateAgent(id: number, data: Partial<InsertAgent>, databaseId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(agents).set(data).where(and(eq(agents.id, id), eq(agents.databaseId, databaseId)));
+}
+
+export async function deactivateAgent(id: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(agents).set({ status: 'INACTIVE' }).where(and(eq(agents.id, id), eq(agents.databaseId, databaseId)));
+}
+
+export async function getAgentPaymentHistory(agentId: number, databaseId: number, startDate?: Date, endDate?: Date) {
+  const db = await getDb();
+  if (!db) return { payments: [], totals: { totalPayments: 0, totalPaymentAmount: 0, totalCommission: 0, averageCommission: 0 } };
+
+  const conditions = [eq(payments.agentId, agentId), eq(payments.databaseId, databaseId)];
+  if (startDate) conditions.push(sql`${payments.paymentDate} >= ${startDate}` as any);
+  if (endDate) conditions.push(sql`${payments.paymentDate} <= ${endDate}` as any);
+
+  const rows = await db.select({
+    id: payments.id,
+    paymentDate: payments.paymentDate,
+    loanId: payments.loanId,
+    paymentAmount: payments.amount,
+    commissionPercentage: payments.commissionPercentage,
+    commissionAmount: payments.commissionAmount,
+    netAmount: payments.netAmount,
+    clientName: clients.name,
+  }).from(payments)
+    .leftJoin(loans, eq(payments.loanId, loans.id))
+    .leftJoin(clients, eq(loans.clientId, clients.id))
+    .where(and(...conditions))
+    .orderBy(desc(payments.paymentDate));
+
+  const totalPaymentAmount = rows.reduce((sum, row) => sum + Number(row.paymentAmount || 0), 0);
+  const totalCommission = rows.reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0);
+  return {
+    payments: rows,
+    totals: {
+      totalPayments: rows.length,
+      totalPaymentAmount,
+      totalCommission,
+      averageCommission: rows.length ? totalCommission / rows.length : 0,
+    },
+  };
+}
+
+export async function getAgentPerformance(databaseId: number, startDate?: Date, endDate?: Date) {
+  const db = await getDb();
+  if (!db) return { kpis: { totalAgents: 0, activeAgents: 0, totalPayments: 0, totalPaymentVolume: 0, totalCommissions: 0, bestAgent: null }, ranking: [], evolution: [] };
+
+  const agentConditions = [eq(agents.databaseId, databaseId)];
+  const allAgents = await db.select().from(agents).where(and(...agentConditions));
+  const paymentConditions = [eq(payments.databaseId, databaseId)];
+  if (startDate) paymentConditions.push(sql`${payments.paymentDate} >= ${startDate}` as any);
+  if (endDate) paymentConditions.push(sql`${payments.paymentDate} <= ${endDate}` as any);
+
+  const rows = await db.select({
+    agentId: payments.agentId,
+    agentName: agents.name,
+    paymentAmount: payments.amount,
+    commissionAmount: payments.commissionAmount,
+    paymentDate: payments.paymentDate,
+  }).from(payments)
+    .innerJoin(agents, eq(payments.agentId, agents.id))
+    .where(and(...paymentConditions));
+
+  const rankingMap = new Map<number, { agentId: number; agentName: string; paymentCount: number; paymentVolume: number; commissionAmount: number }>();
+  const evolutionMap = new Map<string, { period: string; paymentVolume: number; commissionAmount: number }>();
+  for (const row of rows) {
+    if (!row.agentId) continue;
+    const current = rankingMap.get(row.agentId) ?? { agentId: row.agentId, agentName: row.agentName, paymentCount: 0, paymentVolume: 0, commissionAmount: 0 };
+    current.paymentCount += 1;
+    current.paymentVolume += Number(row.paymentAmount || 0);
+    current.commissionAmount += Number(row.commissionAmount || 0);
+    rankingMap.set(row.agentId, current);
+    const period = new Date(row.paymentDate).toISOString().slice(0, 10);
+    const evolution = evolutionMap.get(period) ?? { period, paymentVolume: 0, commissionAmount: 0 };
+    evolution.paymentVolume += Number(row.paymentAmount || 0);
+    evolution.commissionAmount += Number(row.commissionAmount || 0);
+    evolutionMap.set(period, evolution);
+  }
+
+  const ranking = Array.from(rankingMap.values()).sort((a, b) => b.paymentVolume - a.paymentVolume || b.commissionAmount - a.commissionAmount || b.paymentCount - a.paymentCount);
+  const totalPaymentVolume = rows.reduce((sum, row) => sum + Number(row.paymentAmount || 0), 0);
+  const totalCommissions = rows.reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0);
+  return {
+    kpis: {
+      totalAgents: allAgents.length,
+      activeAgents: allAgents.filter((agent) => agent.status === 'ACTIVE').length,
+      totalPayments: rows.length,
+      totalPaymentVolume,
+      totalCommissions,
+      bestAgent: ranking[0] ?? null,
+    },
+    ranking,
+    evolution: Array.from(evolutionMap.values()).sort((a, b) => a.period.localeCompare(b.period)),
+  };
+}
+
 // ==================== PAYMENTS ====================
+
+export async function paymentAlreadyRegistered(data: {
+  databaseId: number;
+  loanId?: number;
+  vehicleFinancingId?: number;
+  installmentNumber: number;
+  amount: string;
+  paymentDate: Date;
+  agentId?: number;
+}) {
+  const db = await getDb();
+  if (!db) return false;
+  const contractCondition = data.loanId !== undefined
+    ? eq(payments.loanId, data.loanId)
+    : eq(payments.vehicleFinancingId, data.vehicleFinancingId!);
+  const rows = await db.select({
+    id: payments.id,
+    agentId: payments.agentId,
+    amount: payments.amount,
+    paymentDate: payments.paymentDate,
+  }).from(payments).where(and(
+    eq(payments.databaseId, data.databaseId),
+    contractCondition,
+    eq(payments.installmentNumber, data.installmentNumber),
+  ));
+  const paymentDay = data.paymentDate.toISOString().slice(0, 10);
+  return rows.some((row) => {
+    const rowDay = new Date(row.paymentDate).toISOString().slice(0, 10);
+    return (row.agentId ?? undefined) === data.agentId
+      && Number(row.amount) === Number(data.amount)
+      && rowDay === paymentDay;
+  });
+}
 
 export async function createPayment(data: InsertPayment) {
   const db = await getDb();

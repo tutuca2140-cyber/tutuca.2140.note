@@ -1,0 +1,1 @@
+ALTER TABLE `payments` ADD CONSTRAINT `payments_agentId_agents_id_fk` FOREIGN KEY (`agentId`) REFERENCES `agents`(`id`) ON DELETE no action ON UPDATE no action;
