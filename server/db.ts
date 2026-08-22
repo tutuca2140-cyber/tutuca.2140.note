@@ -152,6 +152,48 @@ export async function toggleUserActive(userId: number, isActive: boolean) {
   await db.update(users).set({ isActive }).where(eq(users.id, userId));
 }
 
+export async function deleteUser(userId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(users).where(eq(users.id, userId));
+}
+
+/**
+ * Reaplica a política de imutabilidade e acesso total do super administrador
+ * fixo. A senha nunca é alterada por esta rotina.
+ */
+export async function ensureDracoIntegrity() {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(users).where(eq(users.username, 'Draco')).limit(1);
+  const user = result[0];
+  if (!user) return undefined;
+
+  await db.update(users).set({
+    role: 'super_admin',
+    canView: true,
+    canInsert: true,
+    canEdit: true,
+    canDelete: true,
+    canGenerateReports: true,
+    canAccessSettings: true,
+    isActive: true,
+  }).where(eq(users.id, user.id));
+
+  return {
+    ...user,
+    role: 'super_admin' as const,
+    canView: true,
+    canInsert: true,
+    canEdit: true,
+    canDelete: true,
+    canGenerateReports: true,
+    canAccessSettings: true,
+    isActive: true,
+  };
+}
+
 // ==================== DATABASES ====================
 
 export async function createDatabase(data: InsertDatabase) {

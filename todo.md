@@ -126,3 +126,23 @@
 - [x] Testar logout
 - [x] Testar manutenção de sessão
 - [x] Testar compatibilidade com Manus OAuth
+
+
+## Atualização 26 - Super Administrador Global Draco
+- [x] Criar/confirmar Draco diretamente no banco com senha protegida
+- [x] Garantir papel super_admin, ativo e seis permissões totais
+- [x] Integrar sessões locais ao contexto global de autenticação
+- [x] Impedir alteração de permissões, papel e status do Draco
+- [x] Impedir exclusão do Draco
+- [x] Criar testes de login, permissões e imutabilidade
+- [x] Gerar ZIP atualizado e validar entrega
+- [x] Atualizar checkpoint e link público de teste
+
+### Observação de segurança
+A senha do Draco foi fornecida pelo proprietário do projeto para configuração inicial. Ela não será exibida em interfaces públicas nem gravada em arquivos do projeto.
+
+
+## Pendências de entrega identificadas
+- [ ] Validar a estrutura e o conteúdo essencial do ZIP gerado
+- [ ] Criar novo checkpoint após as mudanças do super administrador Draco
+- [ ] Enviar a entrega final com o checkpoint atualizado e o link público vigente

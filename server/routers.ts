@@ -161,6 +161,11 @@ export const appRouter = router({
         canAccessSettings: z.boolean().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
+        const targetUser = await db.getUserById(input.userId);
+        if (targetUser?.username === 'Draco') {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'As permissões do super administrador Draco são imutáveis.' });
+        }
+
         const { userId, ...permissions } = input;
         await db.updateUserPermissions(userId, permissions);
         
@@ -184,6 +189,11 @@ export const appRouter = router({
         role: z.enum(['user', 'admin', 'super_admin'])
       }))
       .mutation(async ({ input, ctx }) => {
+        const targetUser = await db.getUserById(input.userId);
+        if (targetUser?.username === 'Draco') {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'O super administrador Draco não pode ter o perfil alterado.' });
+        }
+
         await db.updateUserRole(input.userId, input.role);
         
         await db.createAuditLog({
@@ -205,6 +215,11 @@ export const appRouter = router({
         isActive: z.boolean()
       }))
       .mutation(async ({ input, ctx }) => {
+        const targetUser = await db.getUserById(input.userId);
+        if (targetUser?.username === 'Draco') {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'O super administrador Draco não pode ser desativado.' });
+        }
+
         await db.toggleUserActive(input.userId, input.isActive);
         
         await db.createAuditLog({
@@ -217,6 +232,28 @@ export const appRouter = router({
           status: 'success'
         });
         
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ userId: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const targetUser = await db.getUserById(input.userId);
+        if (targetUser?.username === 'Draco') {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'O super administrador Draco não pode ser excluído.' });
+        }
+
+        await db.deleteUser(input.userId);
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.email || 'Admin',
+          action: 'delete_user',
+          entity: 'users',
+          entityId: input.userId,
+          details: 'Usuário excluído',
+          status: 'success'
+        });
+
         return { success: true };
       }),
   }),

@@ -260,6 +260,30 @@ class SDKServer {
     // Regular authentication flow
     const cookies = this.parseCookies(req.headers.cookie);
     const sessionCookie = cookies.get(COOKIE_NAME);
+
+    // Sessões criadas pelo login local usam o mesmo cookie da aplicação.
+    // Esta verificação ocorre antes do JWT do Manus para manter os dois fluxos compatíveis.
+    if (sessionCookie) {
+      const localSession = await db.getLocalSession(sessionCookie);
+      if (localSession) {
+        const localUser = await db.getUserById(localSession.userId);
+        if (!localUser) {
+          throw ForbiddenError("Usuário da sessão local não encontrado");
+        }
+
+        if (localUser.username === 'Draco') {
+          const protectedUser = await db.ensureDracoIntegrity();
+          if (protectedUser) return protectedUser as User;
+        }
+
+        if (!localUser.isActive) {
+          throw ForbiddenError("Usuário desativado");
+        }
+
+        return localUser;
+      }
+    }
+
     const session = await this.verifySession(sessionCookie);
 
     if (!session) {
