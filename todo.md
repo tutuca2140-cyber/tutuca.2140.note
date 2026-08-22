@@ -238,3 +238,11 @@ A senha do Draco foi fornecida pelo proprietário do projeto para configuração
 - [x] Testar lançamento manual de saída e sua refletância no dashboard
 - [x] Expandir testes de cliente, empréstimo sem parcelas e saída manual
 - [x] Adicionar testes explícitos para clients.list e clients.profile garantindo que CPF nunca seja exposto
+
+## Integração GitHub — tutuca2140-cyber/tutuca.2140.note
+- [x] Verificar a configuração e o acesso ao GitHub
+- [x] Comparar o conteúdo remoto com o projeto DEATH NOTE
+- [x] Sincronizar o código com o repositório existente sem sobrescrever dados indevidamente
+- [x] Validar a sincronização e registrar o resultado
+- [x] Confirmar o commit e a árvore publicados no repositório remoto após o push — d5067d2ddef7d1182b56e91812e8b19bc69e56db
+- [x] Registrar que o remoto continha apenas README.md antes da sincronização e que nenhum arquivo de aplicação foi sobrescrito
