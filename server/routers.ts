@@ -782,6 +782,23 @@ export const appRouter = router({
         return loan?.databaseId === activeDb.id ? loan : null;
       }),
 
+    details: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .query(async ({ input, ctx }) => {
+        if (!ctx.user.canView) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para visualizar detalhes.' });
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb) return null;
+        const loan = await db.getLoanById(input.id);
+        if (!loan || loan.databaseId !== activeDb.id) return null;
+        const [client, payments, interestHistory, cashFlow] = await Promise.all([
+          db.getClientById(loan.clientId),
+          db.getPaymentsByLoan(loan.id, activeDb.id),
+          db.getLoanInterestHistory(loan.id, activeDb.id),
+          db.getCashFlowByLoan(loan.id, activeDb.id),
+        ]);
+        return { loan, client: client && client.databaseId === activeDb.id ? client : null, payments, interestHistory, cashFlow };
+      }),
+
     getByClient: protectedProcedure
       .input(z.object({ clientId: z.number() }))
       .query(async ({ input, ctx }) => {
@@ -885,7 +902,7 @@ export const appRouter = router({
         const endDate = input.endDate ? new Date(input.endDate) : addPeriods(startDate, plan.periods, ratePeriod);
         if (Number.isNaN(endDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Data final inválida.' });
 
-        const result = await db.createLoan({
+        const result = await db.createLoanBundle({
           clientId: input.clientId,
           amount: plan.principal.toFixed(2),
           interestType,
@@ -905,6 +922,17 @@ export const appRouter = router({
           description: input.description,
           databaseId: activeDb.id,
           createdBy: ctx.user.id,
+        }, {
+          databaseId: activeDb.id,
+          type: 'SAIDA',
+          category: 'LIBERACAO_EMPRESTIMO',
+          description: 'Liberação de empréstimo',
+          amount: plan.principal.toFixed(2),
+          movementDate: startDate,
+          clientId: input.clientId,
+          responsible: ctx.user.name || ctx.user.email || 'Usuário',
+          notes: input.description,
+          createdBy: ctx.user.id,
         });
 
         await db.createAuditLog({
@@ -923,36 +951,56 @@ export const appRouter = router({
     update: protectedProcedure
       .input(z.object({
         id: z.number(),
+        clientId: z.number().int().positive().optional(),
+        amount: z.string().optional(),
+        interestType: z.enum(['simple', 'compound']).optional(),
+        interestRate: z.string().optional(),
+        ratePeriod: z.enum(['day', 'week', 'month', 'year']).optional(),
+        installments: z.coerce.number().int().positive().optional(),
+        installmentAmount: z.string().optional(),
+        totalAmount: z.string().optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
         status: z.enum(['ativo', 'pago', 'atrasado', 'cancelado']).optional(),
         description: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (!ctx.user.canEdit) {
-          throw new TRPCError({
-            code: 'FORBIDDEN',
-            message: 'Você não tem permissão para editar dados'
-          });
-        }
-
+        if (!ctx.user.canEdit) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para editar dados' });
         const activeDb = await db.getActiveDatabase();
         if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
         const currentLoan = await db.getLoanById(input.id);
         if (!currentLoan || currentLoan.databaseId !== activeDb.id) throw new TRPCError({ code: 'NOT_FOUND', message: 'Empréstimo não encontrado no banco ativo.' });
-        const { id, ...data } = input;
-        await db.updateLoanInDatabase(id, activeDb.id, data);
-
-        await db.createAuditLog({
-          userId: ctx.user.id,
-          username: ctx.user.name || ctx.user.email || 'Usuário',
-          action: 'update_loan',
-          entity: 'loans',
-          entityId: id,
-          databaseId: activeDb?.id,
-          details: JSON.stringify(data),
-          status: 'success'
+        if (input.clientId !== undefined) {
+          const client = await db.getClientById(input.clientId);
+          if (!client || client.databaseId !== activeDb.id) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cliente inválido para o banco ativo.' });
+        }
+        const startDate = input.startDate ? new Date(input.startDate) : currentLoan.startDate;
+        const endDate = input.endDate ? new Date(input.endDate) : currentLoan.endDate;
+        if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Datas do empréstimo inválidas.' });
+        const principal = input.amount !== undefined ? Number(input.amount) : Number(currentLoan.amount);
+        const ratePercent = input.interestRate !== undefined ? Number(input.interestRate) : Number(currentLoan.interestRate);
+        if (!Number.isFinite(principal) || principal <= 0 || !Number.isFinite(ratePercent) || ratePercent < 0) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Valor principal ou taxa de juros inválidos.' });
+        const interestType = input.interestType ?? currentLoan.interestType;
+        const ratePeriod = input.ratePeriod ?? currentLoan.ratePeriod;
+        const periods = input.installments ?? currentLoan.installments ?? 1;
+        const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
+        const { id, status, description, clientId } = input;
+        await db.updateLoanInDatabase(id, activeDb.id, {
+          clientId,
+          amount: plan.principal.toFixed(2),
+          interestType,
+          interestRate: ratePercent.toFixed(4),
+          ratePeriod,
+          installments: plan.periods,
+          installmentAmount: input.installmentAmount ?? plan.installmentAmount.toFixed(2),
+          totalAmount: input.totalAmount ?? plan.totalAmount.toFixed(2),
+          startDate,
+          endDate,
+          ...(status !== undefined ? { status } : {}),
+          ...(description !== undefined ? { description } : {}),
         });
-
-        return { success: true };
+        await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || 'Usuário', action: 'update_loan', entity: 'loans', entityId: id, databaseId: activeDb.id, details: JSON.stringify(input), status: 'success' });
+        return { success: true, message: 'Empréstimo atualizado com sucesso.' };
       }),
 
     delete: protectedProcedure
@@ -969,20 +1017,23 @@ export const appRouter = router({
         if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
         const currentLoan = await db.getLoanById(input.id);
         if (!currentLoan || currentLoan.databaseId !== activeDb.id) throw new TRPCError({ code: 'NOT_FOUND', message: 'Empréstimo não encontrado no banco ativo.' });
-        await db.deleteLoanInDatabase(input.id, activeDb.id);
-
+        const result = await db.deleteLoanSafely(input.id, activeDb.id);
         await db.createAuditLog({
           userId: ctx.user.id,
           username: ctx.user.name || ctx.user.email || 'Usuário',
-          action: 'delete_loan',
+          action: result.cancelled ? 'cancel_loan' : 'delete_loan',
           entity: 'loans',
           entityId: input.id,
-          databaseId: activeDb?.id,
-          details: 'Empréstimo deletado',
-          status: 'success'
+          databaseId: activeDb.id,
+          details: JSON.stringify(result),
+          status: result.cancelled ? 'warning' : 'success'
         });
-
-        return { success: true };
+        return {
+          success: true,
+          cancelled: result.cancelled,
+          message: result.cancelled ? 'Empréstimo cancelado para preservar o histórico financeiro.' : 'Empréstimo excluído com sucesso.',
+          relations: result.relations,
+        };
       }),
   }),
 
@@ -1098,7 +1149,9 @@ export const appRouter = router({
         const result = await db.createPaymentBundle(paymentData, {
           databaseId: activeDb.id,
           type: 'ENTRADA',
-          category: loan ? 'PAGAMENTO_EMPRESTIMO' : 'PAGAMENTO_FINANCIAMENTO',
+          category: loan
+            ? allocation.interestAmount > 0 && allocation.principalAmount === 0 ? 'JUROS_EMPRESTIMO' : allocation.remainingBalance <= 0 ? 'QUITACAO_EMPRESTIMO' : 'PAGAMENTO_EMPRESTIMO'
+            : 'PAGAMENTO_FINANCIAMENTO',
           description: loan ? `Recebimento do empréstimo #${loan.id}` : `Recebimento do financiamento #${vehicleFinancing!.id}`,
           amount: paymentAmount.toFixed(2),
           movementDate: paymentDate,
@@ -1125,43 +1178,45 @@ export const appRouter = router({
     update: protectedProcedure
       .input(z.object({
         id: z.number(),
+        amount: z.string().optional(),
         status: z.enum(['pago', 'pendente', 'atrasado']).optional(),
         paymentDate: z.string().optional(),
+        dueDate: z.string().optional(),
         notes: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (!ctx.user.canEdit) {
-          throw new TRPCError({
-            code: 'FORBIDDEN',
-            message: 'Você não tem permissão para editar dados'
-          });
-        }
-
-        const { id, ...data } = input;
-        const updateData: Partial<{
-          status?: 'pago' | 'pendente' | 'atrasado';
-          paymentDate?: Date;
-          notes?: string;
-        }> = {
-          status: data.status,
-          notes: data.notes,
-          ...(data.paymentDate && { paymentDate: new Date(data.paymentDate) })
-        };
-        await db.updatePayment(id, updateData);
-
+        if (!ctx.user.canEdit) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para editar dados' });
         const activeDb = await db.getActiveDatabase();
-        await db.createAuditLog({
-          userId: ctx.user.id,
-          username: ctx.user.name || ctx.user.email || 'Usuário',
-          action: 'update_payment',
-          entity: 'payments',
-          entityId: id,
-          databaseId: activeDb?.id,
-          details: JSON.stringify(data),
-          status: 'success'
+        if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
+        const current = await db.getPaymentById(input.id);
+        if (!current || current.databaseId !== activeDb.id) throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagamento não encontrado no banco ativo.' });
+        const amount = input.amount !== undefined ? Number(input.amount) : Number(current.amount);
+        if (!Number.isFinite(amount) || amount <= 0) throw new TRPCError({ code: 'BAD_REQUEST', message: 'O valor do pagamento deve ser maior que zero.' });
+        const paymentDate = input.paymentDate ? new Date(input.paymentDate) : current.paymentDate;
+        const dueDate = input.dueDate ? new Date(input.dueDate) : current.dueDate;
+        if (Number.isNaN(paymentDate.getTime()) || Number.isNaN(dueDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'As datas do pagamento são inválidas.' });
+        const result = await db.updatePaymentBundle(input.id, activeDb.id, {
+          amount: amount.toFixed(2),
+          status: input.status ?? current.status,
+          paymentDate,
+          dueDate,
+          notes: input.notes !== undefined ? input.notes : current.notes,
         });
+        await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || 'Usuário', action: 'update_payment', entity: 'payments', entityId: input.id, databaseId: activeDb.id, details: JSON.stringify(input), status: 'success' });
+        return { success: true, message: 'Pagamento atualizado e caixa reconciliado.', result };
+      }),
 
-        return { success: true };
+    delete: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user.canDelete) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para excluir pagamentos.' });
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
+        const current = await db.getPaymentById(input.id);
+        if (!current || current.databaseId !== activeDb.id) throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagamento não encontrado no banco ativo.' });
+        const result = await db.deletePaymentBundle(input.id, activeDb.id);
+        await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || 'Usuário', action: 'delete_payment', entity: 'payments', entityId: input.id, databaseId: activeDb.id, details: 'Pagamento removido; caixa e saldo recalculados.', status: 'warning' });
+        return { success: true, message: 'Pagamento excluído e caixa reconciliado.', result };
       }),
   }),
 
@@ -1573,6 +1628,17 @@ export const appRouter = router({
           vehicleProfit: 0,
           vehicleExpenses: 0,
           vehicleSalesCount: 0,
+          loanMetrics: {
+            totalLent: 0,
+            totalReceived: 0,
+            totalInterestReceived: 0,
+            totalPrincipalAmortized: 0,
+            totalOpen: 0,
+            overdueCount: 0,
+            totalOverdue: 0,
+            totalVehiclePurchases: 0,
+            totalVehicleSales: 0,
+          },
         };
       }
       return await db.getDashboardStats(activeDb.id);

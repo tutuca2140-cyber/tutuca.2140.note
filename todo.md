@@ -265,3 +265,18 @@ A senha do Draco foi fornecida pelo proprietário do projeto para configuração
 ## Correção de integridade do lucro por venda
 - [x] Calcular lucro e quantidade de vendas do Dashboard exclusivamente pela tabela vehicle_sales
 - [x] Testar que veículo com salePrice preenchido, mas sem venda registrada, não entra no lucro nem na contagem
+
+## Atualização completa — Pasted_content_04
+- [x] Auditar e corrigir edição/exclusão protegida de empréstimos e pagamentos
+- [x] Garantir saída única no caixa na liberação efetiva do empréstimo
+- [x] Garantir entradas de pagamentos no caixa com juros, amortização e quitação corretos
+- [x] Vincular origens das movimentações de caixa e impedir duplicidades
+- [x] Atualizar Dashboard com métricas financeiras reais e invalidação após mutações
+- [x] Melhorar feedbacks, carregamentos, confirmações e responsividade
+- [x] Criar/atualizar testes abrangentes e executar check, testes e build
+- [ ] Sincronizar alterações finais com o repositório GitHub configurado
+- [ ] Salvar checkpoint final e entregar a versão atualizada
+
+## Histórico de auditoria — Pasted_content_04
+- [x] Revisar todos os requisitos do arquivo anexado contra a implementação existente e documentar matriz requisito–implementação–teste em `docs/pasted-content-04-matriz.md`
+- [x] Registrar limitações ou decisões de compatibilidade para preservar dados existentes — movimentações legadas sem IDs continuam preservadas e são identificadas visualmente por categoria/descrição; novas operações usam sourceKey idempotente.

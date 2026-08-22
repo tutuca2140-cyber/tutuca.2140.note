@@ -224,9 +224,13 @@ export const cashFlow = mysqlTable("cash_flow", {
   paymentId: int("paymentId").references(() => payments.id, { onDelete: "set null" }),
   responsible: varchar("responsible", { length: 255 }),
   notes: text("notes"),
+  /** Chave idempotente da origem automática; entradas manuais permanecem nulas. */
+  sourceKey: varchar("sourceKey", { length: 180 }),
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  sourceKeyUnique: uniqueIndex("cash_flow_source_key_unique").on(table.sourceKey),
+}));
 
 export type CashFlow = typeof cashFlow.$inferSelect;
 export type InsertCashFlow = typeof cashFlow.$inferInsert;

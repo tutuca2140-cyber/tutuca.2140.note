@@ -136,7 +136,7 @@ describe("agentes comissionados", () => {
       expect(Number(noAgentPayment!.netAmount)).toBe(50.55);
       paymentIds.push(noAgentPayment!.id);
 
-      const cashEntries = (await db.getCashFlowByDatabase(databaseId)).filter((entry) => entry.loanId === loanId);
+      const cashEntries = (await db.getCashFlowByDatabase(databaseId)).filter((entry) => entry.loanId === loanId && entry.paymentId !== null);
       expect(cashEntries).toHaveLength(6);
       expect(cashEntries.every((entry) => entry.type === "ENTRADA")).toBe(true);
 
