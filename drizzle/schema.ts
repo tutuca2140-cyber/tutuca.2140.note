@@ -219,6 +219,8 @@ export const cashFlow = mysqlTable("cash_flow", {
   movementDate: timestamp("movementDate").notNull(),
   clientId: int("clientId").references(() => clients.id, { onDelete: "set null" }),
   loanId: int("loanId").references(() => loans.id, { onDelete: "set null" }),
+  vehicleId: int("vehicleId").references(() => vehicles.id, { onDelete: "set null" }),
+  vehicleSaleId: int("vehicleSaleId").references(() => vehicleSales.id, { onDelete: "set null" }),
   paymentId: int("paymentId").references(() => payments.id, { onDelete: "set null" }),
   responsible: varchar("responsible", { length: 255 }),
   notes: text("notes"),
@@ -236,14 +238,22 @@ export const vehicles = mysqlTable("vehicles", {
   id: int("id").autoincrement().primaryKey(),
   databaseId: int("databaseId").notNull(), // Isolamento por banco
   clientId: int("clientId").references(() => clients.id),
-  brand: varchar("brand", { length: 100 }).notNull(),
+  vehicleType: mysqlEnum("vehicleType", ["CARRO", "MOTO", "OUTRO"]).default("OUTRO").notNull(),
+  brand: varchar("brand", { length: 100 }),
   model: varchar("model", { length: 100 }).notNull(),
-  year: int("year").notNull(),
+  year: int("year"),
   color: varchar("color", { length: 50 }),
   plate: varchar("plate", { length: 20 }),
+  renavam: varchar("renavam", { length: 30 }),
   chassi: varchar("chassi", { length: 50 }),
-  price: decimal("price", { precision: 15, scale: 2 }).notNull(),
-  status: mysqlEnum("status", ["disponivel", "vendido", "reservado"]).default("disponivel").notNull(),
+  mileage: int("mileage"),
+  purchasePrice: decimal("purchasePrice", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  expenses: decimal("expenses", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  salePrice: decimal("salePrice", { precision: 15, scale: 2 }),
+  purchaseDate: timestamp("purchaseDate"),
+  stockEntryDate: timestamp("stockEntryDate").defaultNow().notNull(),
+  price: decimal("price", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  status: mysqlEnum("status", ["disponivel", "vendido", "reservado", "indisponivel"]).default("disponivel").notNull(),
   description: text("description"),
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -252,6 +262,26 @@ export const vehicles = mysqlTable("vehicles", {
 
 export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertVehicle = typeof vehicles.$inferInsert;
+
+/** Vendas de veículos sempre apontam para um veículo já existente no estoque. */
+export const vehicleSales = mysqlTable("vehicle_sales", {
+  id: int("id").autoincrement().primaryKey(),
+  databaseId: int("databaseId").notNull(),
+  vehicleId: int("vehicleId").notNull().references(() => vehicles.id),
+  clientId: int("clientId").references(() => clients.id, { onDelete: "set null" }),
+  saleAmount: decimal("saleAmount", { precision: 15, scale: 2 }).notNull(),
+  receivedAmount: decimal("receivedAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  receivableBalance: decimal("receivableBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  paymentMethod: varchar("paymentMethod", { length: 30 }),
+  saleDate: timestamp("saleDate").notNull(),
+  notes: text("notes"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type VehicleSale = typeof vehicleSales.$inferSelect;
+export type InsertVehicleSale = typeof vehicleSales.$inferInsert;
 
 /**
  * Vehicle Financings table - Financiamentos de veículos

@@ -72,6 +72,7 @@ describe("DEATH NOTE System Tests", () => {
     const created = (await db.getClientsByDatabase(activeDb.id)).find((item) => item.name === `Perfil de teste ${suffix}`);
     expect(created).toBeDefined();
     const { ctx } = createAuthContext('admin');
+    await db.setActiveDatabase(activeDb.id);
     const profile = await appRouter.createCaller(ctx).clients.profile({ id: created!.id });
     expect(profile.client.id).toBe(created!.id);
     expect(profile.client.whatsapp).toBe("11999999999");
@@ -83,6 +84,7 @@ describe("DEATH NOTE System Tests", () => {
     expect(Array.isArray(profile.financings)).toBe(true);
     expect(Array.isArray(profile.payments)).toBe(true);
     expect(profile.financialHistory.paymentCount).toBe(profile.payments.length);
+    await db.setActiveDatabase(activeDb.id);
     const listed = await appRouter.createCaller(ctx).clients.list();
     const listedClient = listed.find((item) => item.id === created!.id);
     expect(listedClient).toBeDefined();

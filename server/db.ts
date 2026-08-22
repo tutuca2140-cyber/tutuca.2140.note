@@ -9,6 +9,7 @@ import {
   payments, InsertPayment,
   cashFlow, InsertCashFlow,
   vehicles, InsertVehicle,
+  vehicleSales, InsertVehicleSale,
   vehicleFinancings, InsertVehicleFinancing,
   auditLogs, InsertAuditLog,
   agents, InsertAgent,
@@ -660,6 +661,17 @@ export async function createVehicle(data: InsertVehicle) {
   return result;
 }
 
+export async function createVehicleBundle(data: InsertVehicle, cashEntry?: InsertCashFlow) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async (tx) => {
+    const result = await tx.insert(vehicles).values(data);
+    const vehicleId = Number((result as unknown as Array<{ insertId?: number }>)[0]?.insertId || 0) || undefined;
+    if (cashEntry && vehicleId && Number(cashEntry.amount) > 0) await tx.insert(cashFlow).values({ ...cashEntry, vehicleId });
+    return { vehicleId, result };
+  });
+}
+
 export async function getVehiclesByDatabase(databaseId: number) {
   const db = await getDb();
   if (!db) return [];
@@ -695,6 +707,49 @@ export async function deleteVehicleInDatabase(id: number, databaseId: number) {
   const db = await getDb();
   if (!db) return;
   await db.delete(vehicles).where(and(eq(vehicles.id, id), eq(vehicles.databaseId, databaseId)));
+}
+
+export async function getVehicleSalesByDatabase(databaseId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(vehicleSales).where(eq(vehicleSales.databaseId, databaseId)).orderBy(desc(vehicleSales.saleDate));
+}
+
+export async function getVehicleSaleById(id: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(vehicleSales).where(and(eq(vehicleSales.id, id), eq(vehicleSales.databaseId, databaseId))).limit(1);
+  return rows[0];
+}
+
+export async function createVehicleSaleBundle(data: InsertVehicleSale, vehicleId: number, databaseId: number, cashEntry?: Omit<InsertCashFlow, "vehicleSaleId">) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async (tx) => {
+    const vehicle = (await tx.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.databaseId, databaseId))).limit(1))[0];
+    if (!vehicle || vehicle.status !== "disponivel") throw new Error("Veículo não disponível no estoque ativo.");
+    const result = await tx.insert(vehicleSales).values(data);
+    const saleId = Number((result as unknown as Array<{ insertId?: number }>)[0]?.insertId || 0) || undefined;
+    await tx.update(vehicles).set({ status: "vendido", clientId: data.clientId ?? null, salePrice: data.saleAmount }).where(and(eq(vehicles.id, vehicleId), eq(vehicles.databaseId, databaseId)));
+    if (cashEntry && Number(data.receivedAmount) > 0) await tx.insert(cashFlow).values({ ...cashEntry, vehicleId, vehicleSaleId: saleId });
+    return { saleId, vehicle };
+  });
+}
+
+export async function receiveVehicleSaleBundle(saleId: number, databaseId: number, amount: string, movementDate: Date, createdBy: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async (tx) => {
+    const sale = (await tx.select().from(vehicleSales).where(and(eq(vehicleSales.id, saleId), eq(vehicleSales.databaseId, databaseId))).limit(1))[0];
+    if (!sale) throw new Error("Venda de veículo não encontrada no banco ativo.");
+    const remaining = Number(sale.receivableBalance);
+    if (remaining <= 0) throw new Error("Esta venda já está totalmente paga.");
+    const received = Math.min(Number(amount), remaining);
+    const nextBalance = roundMoney(remaining - received);
+    await tx.update(vehicleSales).set({ receivedAmount: roundMoney(Number(sale.receivedAmount) + received).toFixed(2), receivableBalance: nextBalance.toFixed(2) }).where(and(eq(vehicleSales.id, saleId), eq(vehicleSales.databaseId, databaseId)));
+    await tx.insert(cashFlow).values({ databaseId, type: "ENTRADA", category: "RECEBIMENTO_VENDA_VEICULO", description: "Recebimento de venda de veículo", amount: received.toFixed(2), movementDate, vehicleId: sale.vehicleId, vehicleSaleId: sale.id, clientId: sale.clientId, createdBy });
+    return { received, nextBalance };
+  });
 }
 
 // ==================== VEHICLE FINANCINGS ====================
@@ -812,6 +867,11 @@ export async function getDashboardStats(databaseId: number) {
 
     const totalEntradas = parseFloat(cashInResult[0]?.total || '0');
     const totalSaidas = parseFloat(cashOutResult[0]?.total || '0');
+    const vehicleRows = await db.select({ expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId));
+    const vehicleSaleRows = await db.select({ saleAmount: vehicleSales.saleAmount, purchasePrice: vehicles.purchasePrice, expenses: vehicles.expenses }).from(vehicleSales).innerJoin(vehicles, eq(vehicleSales.vehicleId, vehicles.id)).where(and(eq(vehicleSales.databaseId, databaseId), eq(vehicles.databaseId, databaseId)));
+    const vehicleExpenses = vehicleRows.reduce((sum, vehicle) => sum + Number(vehicle.expenses || 0), 0);
+    const vehicleProfit = vehicleSaleRows.reduce((sum, sale) => sum + Number(sale.saleAmount) - Number(sale.purchasePrice || 0) - Number(sale.expenses || 0), 0);
+    const vehicleSalesCount = vehicleSaleRows.length;
 
     return {
       activeLoans: {
@@ -830,6 +890,9 @@ export async function getDashboardStats(databaseId: number) {
       totalEntradas,
       totalSaidas,
       saldoCaixa: roundMoney(totalEntradas - totalSaidas),
+      vehicleProfit: roundMoney(vehicleProfit),
+      vehicleExpenses: roundMoney(vehicleExpenses),
+      vehicleSalesCount,
     };
   } catch (error) {
     console.error("[Database] Failed to get dashboard stats:", error);

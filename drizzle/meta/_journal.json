@@ -92,6 +92,20 @@
       "when": 1787433261800,
       "tag": "0012_jazzy_terrax",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1787436651950,
+      "tag": "0013_wide_vance_astro",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1787437669439,
+      "tag": "0014_tough_the_stranger",
+      "breakpoints": true
     }
   ]
 }

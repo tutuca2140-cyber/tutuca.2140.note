@@ -1202,19 +1202,28 @@ export const appRouter = router({
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
-        return await db.getVehicleById(input.id);
+        const activeDb = await db.getActiveDatabase();
+        const vehicle = await db.getVehicleById(input.id);
+        return activeDb && vehicle?.databaseId === activeDb.id ? vehicle : null;
       }),
 
     create: protectedProcedure
       .input(z.object({
-        clientId: z.number().int().positive(),
-        brand: z.string().min(1),
-        model: z.string().min(1),
-        year: z.coerce.number().int().min(1900).max(2200),
+        clientId: z.number().int().positive().optional(),
+        vehicleType: z.enum(['CARRO', 'MOTO', 'OUTRO']).optional(),
+        brand: z.string().trim().optional(),
+        model: z.string().trim().min(1, 'Informe o modelo do veículo.'),
+        year: z.coerce.number().int().min(1900).max(2200).optional(),
         color: z.string().optional(),
         plate: z.string().optional(),
+        renavam: z.string().optional(),
         chassi: z.string().optional(),
-        price: z.string(),
+        mileage: z.coerce.number().int().nonnegative().optional(),
+        purchasePrice: z.coerce.number().nonnegative().default(0),
+        expenses: z.coerce.number().nonnegative().default(0),
+        salePrice: z.coerce.number().nonnegative().optional(),
+        purchaseDate: z.string().optional(),
+        price: z.string().optional(),
         description: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -1232,14 +1241,34 @@ export const appRouter = router({
             message: 'Você não tem permissão para inserir dados'
           });
         }
-        const client = await db.getClientById(input.clientId);
-        if (!client || client.databaseId !== activeDb.id) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cliente inválido para o banco ativo.' });
-
-        const result = await db.createVehicle({
+        if (input.clientId !== undefined) {
+          const client = await db.getClientById(input.clientId);
+          if (!client || client.databaseId !== activeDb.id) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cliente inválido para o banco ativo.' });
+        }
+        const purchasePrice = input.purchasePrice.toFixed(2);
+        const vehicleData = {
           ...input,
+          clientId: input.clientId ?? null,
+          vehicleType: input.vehicleType ?? 'OUTRO',
+          brand: input.brand || null,
+          year: input.year ?? null,
+          purchasePrice,
+          expenses: input.expenses.toFixed(2),
+          salePrice: input.salePrice?.toFixed(2),
+          purchaseDate: input.purchaseDate ? new Date(input.purchaseDate) : null,
+          price: input.price ?? input.salePrice?.toFixed(2) ?? '0.00',
           databaseId: activeDb.id,
           createdBy: ctx.user.id
-        });
+        } satisfies import('../drizzle/schema').InsertVehicle;
+        const { result } = await db.createVehicleBundle(vehicleData, input.purchasePrice > 0 ? {
+          databaseId: activeDb.id,
+          type: 'SAIDA',
+          category: 'COMPRA_VEICULO',
+          description: `Compra de veículo: ${input.model}`,
+          amount: purchasePrice,
+          movementDate: input.purchaseDate ? new Date(input.purchaseDate) : new Date(),
+          createdBy: ctx.user.id,
+        } : undefined);
 
         await db.createAuditLog({
           userId: ctx.user.id,
@@ -1257,10 +1286,22 @@ export const appRouter = router({
     update: protectedProcedure
       .input(z.object({
         id: z.number().int().positive(),
-        clientId: z.number().int().positive().optional(),
-        status: z.enum(['disponivel', 'vendido', 'reservado']).optional(),
+        clientId: z.number().int().positive().optional().nullable(),
+        vehicleType: z.enum(['CARRO', 'MOTO', 'OUTRO']).optional(),
+        brand: z.string().trim().optional().nullable(),
+        model: z.string().trim().min(1).optional(),
+        year: z.coerce.number().int().min(1900).max(2200).optional().nullable(),
+        color: z.string().optional().nullable(),
+        plate: z.string().optional().nullable(),
+        renavam: z.string().optional().nullable(),
+        chassi: z.string().optional().nullable(),
+        mileage: z.coerce.number().int().nonnegative().optional().nullable(),
+        purchasePrice: z.coerce.number().nonnegative().optional(),
+        expenses: z.coerce.number().nonnegative().optional(),
+        salePrice: z.coerce.number().nonnegative().optional().nullable(),
+        status: z.enum(['disponivel', 'vendido', 'reservado', 'indisponivel']).optional(),
         price: z.string().optional(),
-        description: z.string().optional(),
+        description: z.string().optional().nullable(),
       }))
       .mutation(async ({ input, ctx }) => {
         if (!ctx.user.canEdit) {
@@ -1274,12 +1315,18 @@ export const appRouter = router({
         if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo' });
         const currentVehicle = await db.getVehicleById(input.id);
         if (!currentVehicle || currentVehicle.databaseId !== activeDb.id) throw new TRPCError({ code: 'NOT_FOUND', message: 'Veículo não encontrado no banco ativo.' });
-        if (input.clientId !== undefined) {
+        if (input.clientId !== undefined && input.clientId !== null) {
           const client = await db.getClientById(input.clientId);
           if (!client || client.databaseId !== activeDb.id) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cliente inválido para o banco ativo.' });
         }
         const { id, ...data } = input;
-        await db.updateVehicleInDatabase(id, data, activeDb.id);
+        const normalizedData = {
+          ...data,
+          purchasePrice: data.purchasePrice === undefined ? undefined : data.purchasePrice.toFixed(2),
+          expenses: data.expenses === undefined ? undefined : data.expenses.toFixed(2),
+          salePrice: data.salePrice === undefined ? undefined : data.salePrice === null ? null : data.salePrice.toFixed(2),
+        };
+        await db.updateVehicleInDatabase(id, normalizedData, activeDb.id);
 
         
         await db.createAuditLog({
@@ -1326,6 +1373,68 @@ export const appRouter = router({
 
         return { success: true };
       }),
+  }),
+
+  // ==================== VEHICLE SALES ====================
+  vehicleSales: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      if (!ctx.user.canView) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para visualizar vendas.' });
+      const activeDb = await db.getActiveDatabase();
+      return activeDb ? db.getVehicleSalesByDatabase(activeDb.id) : [];
+    }),
+    create: protectedProcedure.input(z.object({
+      vehicleId: z.number().int().positive(),
+      clientId: z.number().int().positive().optional(),
+      saleAmount: z.coerce.number().positive(),
+      receivedAmount: z.coerce.number().min(0).default(0),
+      paymentMethod: z.enum(['DINHEIRO', 'PIX', 'TRANSFERENCIA', 'CARTAO', 'FINANCIAMENTO', 'OUTRO']).optional(),
+      saleDate: z.string(),
+      notes: z.string().optional(),
+    })).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.canInsert) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para registrar vendas.' });
+      const activeDb = await db.getActiveDatabase();
+      if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
+      const saleDate = new Date(input.saleDate);
+      if (Number.isNaN(saleDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Data da venda inválida.' });
+      if (input.clientId !== undefined) {
+        const client = await db.getClientById(input.clientId);
+        if (!client || client.databaseId !== activeDb.id) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cliente inválido para o banco ativo.' });
+      }
+      const receivedAmount = Math.min(input.receivedAmount, input.saleAmount);
+      const data = {
+        databaseId: activeDb.id,
+        vehicleId: input.vehicleId,
+        clientId: input.clientId ?? null,
+        saleAmount: input.saleAmount.toFixed(2),
+        receivedAmount: receivedAmount.toFixed(2),
+        receivableBalance: (input.saleAmount - receivedAmount).toFixed(2),
+        paymentMethod: input.paymentMethod,
+        saleDate,
+        notes: input.notes,
+        createdBy: ctx.user.id,
+      } satisfies import('../drizzle/schema').InsertVehicleSale;
+      const result = await db.createVehicleSaleBundle(data, input.vehicleId, activeDb.id, {
+        databaseId: activeDb.id,
+        type: 'ENTRADA',
+        category: 'VENDA_VEICULO',
+        description: `Venda de veículo #${input.vehicleId}`,
+        amount: receivedAmount.toFixed(2),
+        movementDate: saleDate,
+        clientId: input.clientId ?? null,
+        createdBy: ctx.user.id,
+      });
+      await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || 'Usuário', action: 'create_vehicle_sale', entity: 'vehicle_sales', entityId: result.saleId, databaseId: activeDb.id, details: JSON.stringify(input), status: 'success' });
+      return result;
+    }),
+    receive: protectedProcedure.input(z.object({ saleId: z.number().int().positive(), amount: z.coerce.number().positive(), movementDate: z.string() })).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.canInsert) throw new TRPCError({ code: 'FORBIDDEN', message: 'Você não tem permissão para registrar recebimentos.' });
+      const activeDb = await db.getActiveDatabase();
+      if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
+      const movementDate = new Date(input.movementDate);
+      if (Number.isNaN(movementDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Data do recebimento inválida.' });
+      const result = await db.receiveVehicleSaleBundle(input.saleId, activeDb.id, input.amount.toFixed(2), movementDate, ctx.user.id);
+      return { success: true, ...result };
+    }),
   }),
 
   // ==================== VEHICLE FINANCINGS ====================
@@ -1461,6 +1570,9 @@ export const appRouter = router({
           totalEntradas: 0,
           totalSaidas: 0,
           saldoCaixa: 0,
+          vehicleProfit: 0,
+          vehicleExpenses: 0,
+          vehicleSalesCount: 0,
         };
       }
       return await db.getDashboardStats(activeDb.id);

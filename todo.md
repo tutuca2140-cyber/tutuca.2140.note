@@ -246,3 +246,22 @@ A senha do Draco foi fornecida pelo proprietário do projeto para configuração
 - [x] Validar a sincronização e registrar o resultado
 - [x] Confirmar o commit e a árvore publicados no repositório remoto após o push — d5067d2ddef7d1182b56e91812e8b19bc69e56db
 - [x] Registrar que o remoto continha apenas README.md antes da sincronização e que nenhum arquivo de aplicação foi sobrescrito
+
+## Integração Pasted_content_03.txt — Veículos, estoque e vendas
+- [x] Inspecionar todas as regras de veículos, vendas e caixa do arquivo anexado
+- [x] Permitir cadastro de veículo com apenas modelo obrigatório e demais dados opcionais
+- [x] Implementar estoque por banco ativo com filtros de tipo, status e busca
+- [x] Criar venda vinculada ao veículo do estoque sem recadastro duplicado
+- [x] Atualizar status do veículo e registrar somente o valor recebido no fluxo de caixa
+- [x] Suportar venda à vista, parcial, parcelada e financiada com validações
+- [x] Integrar lucro, despesas e fluxo de caixa ao dashboard e relatórios
+- [x] Adicionar testes de estoque, venda, caixa e compatibilidade
+
+## Lacunas finais — lucro e despesas de veículos
+- [x] Implementar cálculo de lucro por veículo/venda com base em venda, compra e despesas
+- [x] Exibir lucro no Dashboard com indicador real do banco ativo
+- [x] Adicionar lucro e despesas de veículos aos relatórios CSV e PDF
+
+## Correção de integridade do lucro por venda
+- [x] Calcular lucro e quantidade de vendas do Dashboard exclusivamente pela tabela vehicle_sales
+- [x] Testar que veículo com salePrice preenchido, mas sem venda registrada, não entra no lucro nem na contagem

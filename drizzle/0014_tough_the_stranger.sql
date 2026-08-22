@@ -1,0 +1,1 @@
+ALTER TABLE `vehicles` ADD `expenses` decimal(15,2) DEFAULT '0.00' NOT NULL;
