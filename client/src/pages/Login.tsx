@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { trpc } from "@/lib/trpc";
 import { Lock } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -20,87 +19,36 @@ export default function Login() {
   const [rememberMe, setRememberMe] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-
-  const [resetToken] = useState(() =>
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("reset") ?? ""
-      : ""
-  );
-
-  const [isReset, setIsReset] = useState(() => Boolean(resetToken));
-  const [resetIdentifier, setResetIdentifier] = useState("");
-  const [resetPassword, setResetPassword] = useState("");
-
-  const loginMutation = trpc.auth.loginLocal.useMutation();
-  const requestResetMutation = trpc.auth.requestPasswordReset.useMutation();
-  const resetPasswordMutation = trpc.auth.resetPassword.useMutation();
+  const [showRecovery, setShowRecovery] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      const result = await loginMutation.mutateAsync({
-        username,
-        password,
-        rememberMe,
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          username,
+          password,
+          rememberMe,
+        }),
       });
 
-      if (result.success) {
-        toast.success("Login realizado com sucesso!");
-        setTimeout(() => setLocation("/dashboard"), 300);
+      const result = await response.json();
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Usuário ou senha inválidos.");
       }
+
+      toast.success("Login realizado com sucesso!");
+      setLocation("/dashboard");
     } catch (error: any) {
-      toast.error(error.message || "Usuário ou senha inválidos");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRequestReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-
-    try {
-      await requestResetMutation.mutateAsync({
-        identifier: resetIdentifier,
-        origin: window.location.origin,
-      });
-
-      toast.success(
-        "Se o cadastro existir, a solicitação será encaminhada com segurança."
-      );
-      setIsReset(false);
-      setResetIdentifier("");
-    } catch (error: any) {
-      toast.error(error.message || "Não foi possível solicitar a recuperação");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (resetPassword.length < 6) {
-      toast.error("A nova senha deve ter no mínimo 6 caracteres");
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      await resetPasswordMutation.mutateAsync({
-        token: resetToken,
-        password: resetPassword,
-      });
-
-      toast.success("Senha redefinida com sucesso.");
-      setIsReset(false);
-      setResetPassword("");
-      window.history.replaceState({}, document.title, "/login");
-    } catch (error: any) {
-      toast.error(error.message || "Não foi possível redefinir a senha");
+      toast.error(error?.message || "Não foi possível realizar o login.");
     } finally {
       setIsLoading(false);
     }
@@ -113,10 +61,9 @@ export default function Login() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-lg bg-blue-600 text-white mb-4">
             <Lock className="w-8 h-8" />
           </div>
+
           <h1 className="text-3xl font-bold text-gray-900">NOTE NOTE</h1>
-          <p className="text-gray-600 mt-2">
-            Sistema de Gestão Financeira
-          </p>
+          <p className="text-gray-600 mt-2">Sistema de Gestão Financeira</p>
         </div>
 
         <Card className="shadow-lg">
@@ -128,59 +75,23 @@ export default function Login() {
           </CardHeader>
 
           <CardContent className="space-y-4">
-            {isReset && resetToken ? (
-              <form onSubmit={handleResetPassword} className="space-y-4">
-                <div>
-                  <Label htmlFor="new-password">Nova senha</Label>
-                  <Input
-                    id="new-password"
-                    type="password"
-                    value={resetPassword}
-                    onChange={(e) => setResetPassword(e.target.value)}
-                    required
-                    disabled={isLoading}
-                  />
+            {showRecovery ? (
+              <div className="space-y-4">
+                <div className="rounded-md border bg-slate-50 p-4 text-sm text-slate-700">
+                  A recuperação de senha será conectada ao novo sistema de
+                  autenticação na próxima etapa. Enquanto isso, a senha dos
+                  usuários pode ser redefinida pelo super administrador.
                 </div>
-
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Salvando..." : "Redefinir senha"}
-                </Button>
 
                 <Button
                   type="button"
                   variant="outline"
                   className="w-full"
-                  onClick={() => setIsReset(false)}
+                  onClick={() => setShowRecovery(false)}
                 >
                   Voltar para login
                 </Button>
-              </form>
-            ) : isReset ? (
-              <form onSubmit={handleRequestReset} className="space-y-4">
-                <div>
-                  <Label htmlFor="reset-identifier">Usuário ou email</Label>
-                  <Input
-                    id="reset-identifier"
-                    value={resetIdentifier}
-                    onChange={(e) => setResetIdentifier(e.target.value)}
-                    required
-                    disabled={isLoading}
-                  />
-                </div>
-
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Enviando..." : "Solicitar recuperação"}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setIsReset(false)}
-                >
-                  Voltar para login
-                </Button>
-              </form>
+              </div>
             ) : (
               <>
                 <form onSubmit={handleLogin} className="space-y-4">
@@ -188,6 +99,7 @@ export default function Login() {
                     <Label htmlFor="username">Usuário</Label>
                     <Input
                       id="username"
+                      autoComplete="username"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       required
@@ -200,6 +112,7 @@ export default function Login() {
                     <Input
                       id="password"
                       type="password"
+                      autoComplete="current-password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
@@ -225,7 +138,7 @@ export default function Login() {
                   type="button"
                   variant="link"
                   className="w-full text-blue-600"
-                  onClick={() => setIsReset(true)}
+                  onClick={() => setShowRecovery(true)}
                 >
                   Esqueci minha senha
                 </Button>
