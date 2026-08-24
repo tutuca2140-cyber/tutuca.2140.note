@@ -1,6 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-import { trpc } from "@/lib/trpc";
 import {
   LayoutDashboard,
   Users,
@@ -25,17 +24,19 @@ interface DashboardLayoutProps {
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth({
+    redirectOnUnauthenticated: true,
+    redirectPath: "/login",
+  });
+
   const [location] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const logoutMutation = trpc.auth.logout.useMutation();
-  const { data: activeDb } = trpc.databases.getActive.useQuery();
 
   const handleLogout = async () => {
     try {
-      await logoutMutation.mutateAsync();
-      window.location.href = "/";
-    } catch (error) {
+      await logout();
+      window.location.href = "/login";
+    } catch {
       toast.error("Erro ao fazer logout");
     }
   };
@@ -44,7 +45,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     return location === path || location.startsWith(path + "/");
   };
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
 
   const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, show: true },
@@ -70,7 +71,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto" />
           <p className="mt-4 text-muted-foreground">Carregando...</p>
         </div>
       </div>
@@ -78,13 +79,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   if (!user) {
-    window.location.href = "/";
     return null;
   }
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Mobile menu button */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-border p-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button
@@ -94,16 +93,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           >
             {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
-          <span className="font-bold text-primary tracking-wider">DEATH NOTE</span>
+          <span className="font-bold text-primary tracking-wider">NOTE NOTE</span>
         </div>
-        {activeDb && (
-          <span className="text-xs text-muted-foreground">
-            DB: {activeDb.name}
-          </span>
-        )}
       </div>
 
-      {/* Sidebar */}
       <aside
         className={`
           fixed top-0 left-0 z-40 h-screen w-64 bg-white border-r border-border
@@ -113,61 +106,64 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         `}
       >
         <div className="flex flex-col h-full">
-          {/* Logo */}
           <div className="p-6 border-b border-border">
             <h1 className="text-2xl font-bold text-primary tracking-[0.1em]">
-              DEATH NOTE
+              NOTE NOTE
             </h1>
             <p className="text-xs text-muted-foreground mt-1 tracking-wide">
               Sistema de Gestão
             </p>
           </div>
 
-          {/* User Info */}
           <div className="p-4 border-b border-border bg-muted/30">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                 <span className="text-primary font-semibold">
-                  {user.name?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "U"}
+                  {user.name?.[0]?.toUpperCase() ||
+                    user.username?.[0]?.toUpperCase() ||
+                    user.email?.[0]?.toUpperCase() ||
+                    "U"}
                 </span>
               </div>
+
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{user.name || user.email}</p>
-                <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
+                <p className="text-sm font-medium truncate">
+                  {user.name || user.username || user.email}
+                </p>
+                <p className="text-xs text-muted-foreground capitalize">
+                  {user.role === "super_admin" ? "Super Administrador" : user.role}
+                </p>
               </div>
             </div>
-            {activeDb && (
-              <div className="mt-3 p-2 bg-primary/5 rounded-md">
-                <p className="text-xs text-muted-foreground">Banco Ativo:</p>
-                <p className="text-xs font-medium text-primary truncate">{activeDb.name}</p>
-              </div>
-            )}
           </div>
 
-          {/* Navigation */}
           <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-            {navigation.filter(item => item.show).map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              return (
-                <Link key={item.name} href={item.href}>
-                  <a
-                    className={`
-                      flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
-                      transition-colors
-                      ${active
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }
-                    `}
-                    onClick={() => setSidebarOpen(false)}
-                  >
-                    <Icon className="h-5 w-5" />
-                    {item.name}
-                  </a>
-                </Link>
-              );
-            })}
+            {navigation
+              .filter((item) => item.show)
+              .map((item) => {
+                const Icon = item.icon;
+                const active = isActive(item.href);
+
+                return (
+                  <Link key={item.name} href={item.href}>
+                    <a
+                      className={`
+                        flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
+                        transition-colors
+                        ${
+                          active
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                        }
+                      `}
+                      onClick={() => setSidebarOpen(false)}
+                    >
+                      <Icon className="h-5 w-5" />
+                      {item.name}
+                    </a>
+                  </Link>
+                );
+              })}
 
             {(isAdmin || user?.canAccessSettings) && (
               <>
@@ -176,33 +172,37 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                     Administração
                   </p>
                 </div>
-                {adminNavigation.filter(item => item.show).map((item) => {
-                  const Icon = item.icon;
-                  const active = isActive(item.href);
-                  return (
-                    <Link key={item.name} href={item.href}>
-                      <a
-                        className={`
-                          flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
-                          transition-colors
-                          ${active
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                          }
-                        `}
-                        onClick={() => setSidebarOpen(false)}
-                      >
-                        <Icon className="h-5 w-5" />
-                        {item.name}
-                      </a>
-                    </Link>
-                  );
-                })}
+
+                {adminNavigation
+                  .filter((item) => item.show)
+                  .map((item) => {
+                    const Icon = item.icon;
+                    const active = isActive(item.href);
+
+                    return (
+                      <Link key={item.name} href={item.href}>
+                        <a
+                          className={`
+                            flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
+                            transition-colors
+                            ${
+                              active
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                            }
+                          `}
+                          onClick={() => setSidebarOpen(false)}
+                        >
+                          <Icon className="h-5 w-5" />
+                          {item.name}
+                        </a>
+                      </Link>
+                    );
+                  })}
               </>
             )}
           </nav>
 
-          {/* Logout */}
           <div className="p-4 border-t border-border">
             <Button
               variant="ghost"
@@ -216,14 +216,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </div>
       </aside>
 
-      {/* Main content */}
       <div className="lg:pl-64">
         <main className="pt-20 lg:pt-0 p-6">
           {children}
         </main>
       </div>
 
-      {/* Overlay for mobile */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-30 lg:hidden"
