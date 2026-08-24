@@ -1,18 +1,18 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, boolean, json, uniqueIndex } from "drizzle-orm/mysql-core";
+import { integer, serial, pgTable, text, timestamp, varchar, numeric, boolean, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * Core user table backing auth flow.
  * Extended with permissions and role management for DEATH NOTE system.
  */
-export const users = mysqlTable("users", {
-  id: int("id").autoincrement().primaryKey(),
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
   openId: varchar("openId", { length: 64 }).unique(),
   username: varchar("username", { length: 100 }).unique(),
   passwordHash: text("passwordHash"),
   name: text("name"),
   email: varchar("email", { length: 320 }).unique(),
   loginMethod: varchar("loginMethod", { length: 64 }).default("local"),
-  role: mysqlEnum("role", ["user", "admin", "super_admin"]).default("user").notNull(),
+  role: varchar("role", { length: 64, enum: ["user", "admin", "super_admin"] }).default("user").notNull(),
   
   // Permissions (6 tipos granulares)
   canView: boolean("canView").default(true).notNull(),
@@ -26,7 +26,7 @@ export const users = mysqlTable("users", {
   emailVerified: boolean("emailVerified").default(false).notNull(),
   
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
@@ -36,9 +36,9 @@ export type InsertUser = typeof users.$inferInsert;
 /**
  * Local authentication sessions - para manter sessões de usuários que fazem login com usuário/senha
  */
-export const localSessions = mysqlTable("local_sessions", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+export const localSessions = pgTable("local_sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
   token: varchar("token", { length: 255 }).notNull().unique(),
   expiresAt: timestamp("expiresAt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -50,9 +50,9 @@ export type InsertLocalSession = typeof localSessions.$inferInsert;
 /**
  * Tokens temporários para recuperação de senha local.
  */
-export const passwordResetTokens = mysqlTable("password_reset_tokens", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
   token: varchar("token", { length: 128 }).notNull().unique(),
   expiresAt: timestamp("expiresAt").notNull(),
   usedAt: timestamp("usedAt"),
@@ -65,15 +65,15 @@ export type InsertPasswordResetToken = typeof passwordResetTokens.$inferInsert;
 /**
  * Databases table - Sistema de múltiplos bancos de dados independentes
  */
-export const databases = mysqlTable("databases", {
-  id: int("id").autoincrement().primaryKey(),
+export const databases = pgTable("databases", {
+  id: serial("id").primaryKey(),
   name: varchar("name", { length: 255 }).notNull().unique(),
   description: text("description"),
-  type: mysqlEnum("type", ["novo", "copia", "existente"]).notNull(),
+  type: varchar("type", { length: 64, enum: ["novo", "copia", "existente"] }).notNull(),
   isActive: boolean("isActive").default(false).notNull(),
-  createdBy: int("createdBy").notNull(),
+  createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 export type Database = typeof databases.$inferSelect;
@@ -82,9 +82,9 @@ export type InsertDatabase = typeof databases.$inferInsert;
 /**
  * Clients table - Clientes dos empréstimos
  */
-export const clients = mysqlTable("clients", {
-  id: int("id").autoincrement().primaryKey(),
-  databaseId: int("databaseId").notNull(), // Isolamento por banco
+export const clients = pgTable("clients", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(), // Isolamento por banco
   name: varchar("name", { length: 255 }).notNull(),
   // Campo legado mantido apenas para compatibilidade de dados; não é exposto pela API/interface.
   cpf: varchar("cpf", { length: 14 }),
@@ -93,17 +93,17 @@ export const clients = mysqlTable("clients", {
   phone: varchar("phone", { length: 20 }),
   whatsapp: varchar("whatsapp", { length: 20 }),
   profession: varchar("profession", { length: 120 }),
-  indicatorAgentId: int("indicatorAgentId"),
+  indicatorAgentId: integer("indicatorAgentId"),
   address: text("address"),
-  residentialAddress: json("residentialAddress"),
-  commercialAddress: json("commercialAddress"),
+  residentialAddress: jsonb("residentialAddress"),
+  commercialAddress: jsonb("commercialAddress"),
   city: varchar("city", { length: 100 }),
   state: varchar("state", { length: 2 }),
   zipCode: varchar("zipCode", { length: 10 }),
   notes: text("notes"),
-  createdBy: int("createdBy").notNull(),
+  createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 export type Client = typeof clients.$inferSelect;
@@ -112,46 +112,46 @@ export type InsertClient = typeof clients.$inferInsert;
 /**
  * Loans table - Empréstimos
  */
-export const loans = mysqlTable("loans", {
-  id: int("id").autoincrement().primaryKey(),
-  databaseId: int("databaseId").notNull(), // Isolamento por banco
-  clientId: int("clientId").notNull(),
-  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
-  interestType: mysqlEnum("interestType", ["simple", "compound"]).default("simple").notNull(),
-  interestRate: decimal("interestRate", { precision: 8, scale: 4 }).notNull(), // Taxa de juros (%)
-  ratePeriod: mysqlEnum("ratePeriod", ["day", "week", "month", "year"]).default("month").notNull(),
-  installments: int("installments").notNull(), // Número de parcelas/períodos
-  installmentAmount: decimal("installmentAmount", { precision: 15, scale: 2 }).notNull(), // Valor da parcela
-  totalAmount: decimal("totalAmount", { precision: 15, scale: 2 }).notNull(), // Valor total com juros
-  remainingBalance: decimal("remainingBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  principalBalance: decimal("principalBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  accruedInterest: decimal("accruedInterest", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  totalPaid: decimal("totalPaid", { precision: 15, scale: 2 }).default("0.00").notNull(),
+export const loans = pgTable("loans", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(), // Isolamento por banco
+  clientId: integer("clientId").notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  interestType: varchar("interestType", { length: 64, enum: ["simple", "compound"] }).default("simple").notNull(),
+  interestRate: numeric("interestRate", { precision: 8, scale: 4 }).notNull(), // Taxa de juros (%)
+  ratePeriod: varchar("ratePeriod", { length: 64, enum: ["day", "week", "month", "year"] }).default("month").notNull(),
+  installments: integer("installments").notNull(), // Número de parcelas/períodos
+  installmentAmount: numeric("installmentAmount", { precision: 15, scale: 2 }).notNull(), // Valor da parcela
+  totalAmount: numeric("totalAmount", { precision: 15, scale: 2 }).notNull(), // Valor total com juros
+  remainingBalance: numeric("remainingBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  principalBalance: numeric("principalBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  accruedInterest: numeric("accruedInterest", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  totalPaid: numeric("totalPaid", { precision: 15, scale: 2 }).default("0.00").notNull(),
   lastInterestPeriod: varchar("lastInterestPeriod", { length: 20 }),
   startDate: timestamp("startDate").notNull(),
   endDate: timestamp("endDate").notNull(),
-  status: mysqlEnum("status", ["ativo", "pago", "atrasado", "cancelado"]).default("ativo").notNull(),
+  status: varchar("status", { length: 64, enum: ["ativo", "pago", "atrasado", "cancelado"] }).default("ativo").notNull(),
   description: text("description"),
-  createdBy: int("createdBy").notNull(),
+  createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 export type Loan = typeof loans.$inferSelect;
 export type InsertLoan = typeof loans.$inferInsert;
 
 /** Histórico mensal de juros, com uma linha única por contrato e período de referência. */
-export const loanInterestHistory = mysqlTable("loan_interest_history", {
-  id: int("id").autoincrement().primaryKey(),
-  databaseId: int("databaseId").notNull(),
-  loanId: int("loanId").notNull().references(() => loans.id),
+export const loanInterestHistory = pgTable("loan_interest_history", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(),
+  loanId: integer("loanId").notNull().references(() => loans.id),
   periodReference: varchar("periodReference", { length: 20 }).notNull(),
-  previousPrincipalBalance: decimal("previousPrincipalBalance", { precision: 15, scale: 2 }).notNull(),
-  interestGenerated: decimal("interestGenerated", { precision: 15, scale: 2 }).notNull(),
-  paymentAmount: decimal("paymentAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  interestPaid: decimal("interestPaid", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  principalAmortized: decimal("principalAmortized", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  updatedPrincipalBalance: decimal("updatedPrincipalBalance", { precision: 15, scale: 2 }).notNull(),
+  previousPrincipalBalance: numeric("previousPrincipalBalance", { precision: 15, scale: 2 }).notNull(),
+  interestGenerated: numeric("interestGenerated", { precision: 15, scale: 2 }).notNull(),
+  paymentAmount: numeric("paymentAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  interestPaid: numeric("interestPaid", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  principalAmortized: numeric("principalAmortized", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  updatedPrincipalBalance: numeric("updatedPrincipalBalance", { precision: 15, scale: 2 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
   loanPeriodUnique: uniqueIndex("loan_interest_history_loan_period_unique").on(table.loanId, table.periodReference),
@@ -163,15 +163,15 @@ export type InsertLoanInterestHistory = typeof loanInterestHistory.$inferInsert;
 /**
  * Agents table - Agentes comissionados isolados por banco de dados
  */
-export const agents = mysqlTable("agents", {
-  id: int("id").autoincrement().primaryKey(),
-  databaseId: int("databaseId").notNull(),
+export const agents = pgTable("agents", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
-  defaultCommissionPercentage: decimal("defaultCommissionPercentage", { precision: 5, scale: 2 }).default("0.00").notNull(),
-  status: mysqlEnum("status", ["ACTIVE", "INACTIVE"]).default("ACTIVE").notNull(),
-  createdBy: int("createdBy").notNull(),
+  defaultCommissionPercentage: numeric("defaultCommissionPercentage", { precision: 5, scale: 2 }).default("0.00").notNull(),
+  status: varchar("status", { length: 64, enum: ["ACTIVE", "INACTIVE"] }).default("ACTIVE").notNull(),
+  createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 export type Agent = typeof agents.$inferSelect;
@@ -180,53 +180,53 @@ export type InsertAgent = typeof agents.$inferInsert;
 /**
  * Payments table - Pagamentos de empréstimos
  */
-export const payments = mysqlTable("payments", {
-  id: int("id").autoincrement().primaryKey(),
-  databaseId: int("databaseId").notNull(), // Isolamento por banco
-  loanId: int("loanId"),
-  vehicleFinancingId: int("vehicleFinancingId").references(() => vehicleFinancings.id),
-  installmentNumber: int("installmentNumber").notNull(), // Número da parcela
-  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+export const payments = pgTable("payments", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(), // Isolamento por banco
+  loanId: integer("loanId"),
+  vehicleFinancingId: integer("vehicleFinancingId").references(() => vehicleFinancings.id),
+  installmentNumber: integer("installmentNumber").notNull(), // Número da parcela
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
   paymentDate: timestamp("paymentDate").notNull(),
   dueDate: timestamp("dueDate").notNull(),
-  status: mysqlEnum("status", ["pago", "pendente", "atrasado"]).default("pendente").notNull(),
-  lateFee: decimal("lateFee", { precision: 15, scale: 2 }).default("0.00"), // Multa por atraso
-  interest: decimal("interest", { precision: 15, scale: 2 }).default("0.00"), // Juros de mora
-  principalAmount: decimal("principalAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  interestAmount: decimal("interestAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  remainingBalance: decimal("remainingBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  status: varchar("status", { length: 64, enum: ["pago", "pendente", "atrasado"] }).default("pendente").notNull(),
+  lateFee: numeric("lateFee", { precision: 15, scale: 2 }).default("0.00"), // Multa por atraso
+  interest: numeric("interest", { precision: 15, scale: 2 }).default("0.00"), // Juros de mora
+  principalAmount: numeric("principalAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  interestAmount: numeric("interestAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  remainingBalance: numeric("remainingBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
   notes: text("notes"),
-  agentId: int("agentId").references(() => agents.id),
-  commissionPercentage: decimal("commissionPercentage", { precision: 5, scale: 2 }).default("0.00").notNull(),
-  commissionAmount: decimal("commissionAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  netAmount: decimal("netAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  createdBy: int("createdBy").notNull(),
+  agentId: integer("agentId").references(() => agents.id),
+  commissionPercentage: numeric("commissionPercentage", { precision: 5, scale: 2 }).default("0.00").notNull(),
+  commissionAmount: numeric("commissionAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  netAmount: numeric("netAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 export type Payment = typeof payments.$inferSelect;
 export type InsertPayment = typeof payments.$inferInsert;
 
 /** Movimentações financeiras reais do banco ativo. */
-export const cashFlow = mysqlTable("cash_flow", {
-  id: int("id").autoincrement().primaryKey(),
-  databaseId: int("databaseId").notNull(),
-  type: mysqlEnum("type", ["ENTRADA", "SAIDA"]).notNull(),
+export const cashFlow = pgTable("cash_flow", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(),
+  type: varchar("type", { length: 64, enum: ["ENTRADA", "SAIDA"] }).notNull(),
   category: varchar("category", { length: 120 }).notNull(),
   description: text("description").notNull(),
-  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
   movementDate: timestamp("movementDate").notNull(),
-  clientId: int("clientId").references(() => clients.id, { onDelete: "set null" }),
-  loanId: int("loanId").references(() => loans.id, { onDelete: "set null" }),
-  vehicleId: int("vehicleId").references(() => vehicles.id, { onDelete: "set null" }),
-  vehicleSaleId: int("vehicleSaleId").references(() => vehicleSales.id, { onDelete: "set null" }),
-  paymentId: int("paymentId").references(() => payments.id, { onDelete: "set null" }),
+  clientId: integer("clientId").references(() => clients.id, { onDelete: "set null" }),
+  loanId: integer("loanId").references(() => loans.id, { onDelete: "set null" }),
+  vehicleId: integer("vehicleId").references(() => vehicles.id, { onDelete: "set null" }),
+  vehicleSaleId: integer("vehicleSaleId").references(() => vehicleSales.id, { onDelete: "set null" }),
+  paymentId: integer("paymentId").references(() => payments.id, { onDelete: "set null" }),
   responsible: varchar("responsible", { length: 255 }),
   notes: text("notes"),
   /** Chave idempotente da origem automática; entradas manuais permanecem nulas. */
   sourceKey: varchar("sourceKey", { length: 180 }),
-  createdBy: int("createdBy").notNull(),
+  createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
   sourceKeyUnique: uniqueIndex("cash_flow_source_key_unique").on(table.sourceKey),
@@ -238,50 +238,50 @@ export type InsertCashFlow = typeof cashFlow.$inferInsert;
 /**
  * Vehicles table - Veículos para financiamento
  */
-export const vehicles = mysqlTable("vehicles", {
-  id: int("id").autoincrement().primaryKey(),
-  databaseId: int("databaseId").notNull(), // Isolamento por banco
-  clientId: int("clientId").references(() => clients.id),
-  vehicleType: mysqlEnum("vehicleType", ["CARRO", "MOTO", "OUTRO"]).default("OUTRO").notNull(),
+export const vehicles = pgTable("vehicles", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(), // Isolamento por banco
+  clientId: integer("clientId").references(() => clients.id),
+  vehicleType: varchar("vehicleType", { length: 64, enum: ["CARRO", "MOTO", "OUTRO"] }).default("OUTRO").notNull(),
   brand: varchar("brand", { length: 100 }),
   model: varchar("model", { length: 100 }).notNull(),
-  year: int("year"),
+  year: integer("year"),
   color: varchar("color", { length: 50 }),
   plate: varchar("plate", { length: 20 }),
   renavam: varchar("renavam", { length: 30 }),
   chassi: varchar("chassi", { length: 50 }),
-  mileage: int("mileage"),
-  purchasePrice: decimal("purchasePrice", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  expenses: decimal("expenses", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  salePrice: decimal("salePrice", { precision: 15, scale: 2 }),
+  mileage: integer("mileage"),
+  purchasePrice: numeric("purchasePrice", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  expenses: numeric("expenses", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  salePrice: numeric("salePrice", { precision: 15, scale: 2 }),
   purchaseDate: timestamp("purchaseDate"),
   stockEntryDate: timestamp("stockEntryDate").defaultNow().notNull(),
-  price: decimal("price", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  status: mysqlEnum("status", ["disponivel", "vendido", "reservado", "indisponivel"]).default("disponivel").notNull(),
+  price: numeric("price", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  status: varchar("status", { length: 64, enum: ["disponivel", "vendido", "reservado", "indisponivel"] }).default("disponivel").notNull(),
   description: text("description"),
-  createdBy: int("createdBy").notNull(),
+  createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertVehicle = typeof vehicles.$inferInsert;
 
 /** Vendas de veículos sempre apontam para um veículo já existente no estoque. */
-export const vehicleSales = mysqlTable("vehicle_sales", {
-  id: int("id").autoincrement().primaryKey(),
-  databaseId: int("databaseId").notNull(),
-  vehicleId: int("vehicleId").notNull().references(() => vehicles.id),
-  clientId: int("clientId").references(() => clients.id, { onDelete: "set null" }),
-  saleAmount: decimal("saleAmount", { precision: 15, scale: 2 }).notNull(),
-  receivedAmount: decimal("receivedAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  receivableBalance: decimal("receivableBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
+export const vehicleSales = pgTable("vehicle_sales", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(),
+  vehicleId: integer("vehicleId").notNull().references(() => vehicles.id),
+  clientId: integer("clientId").references(() => clients.id, { onDelete: "set null" }),
+  saleAmount: numeric("saleAmount", { precision: 15, scale: 2 }).notNull(),
+  receivedAmount: numeric("receivedAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  receivableBalance: numeric("receivableBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
   paymentMethod: varchar("paymentMethod", { length: 30 }),
   saleDate: timestamp("saleDate").notNull(),
   notes: text("notes"),
-  createdBy: int("createdBy").notNull(),
+  createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 export type VehicleSale = typeof vehicleSales.$inferSelect;
@@ -290,25 +290,25 @@ export type InsertVehicleSale = typeof vehicleSales.$inferInsert;
 /**
  * Vehicle Financings table - Financiamentos de veículos
  */
-export const vehicleFinancings = mysqlTable("vehicleFinancings", {
-  id: int("id").autoincrement().primaryKey(),
-  databaseId: int("databaseId").notNull(), // Isolamento por banco
-  vehicleId: int("vehicleId").notNull(),
-  clientId: int("clientId").notNull(),
-  vehiclePrice: decimal("vehiclePrice", { precision: 15, scale: 2 }).notNull(),
-  downPayment: decimal("downPayment", { precision: 15, scale: 2 }).notNull(), // Entrada
-  financedAmount: decimal("financedAmount", { precision: 15, scale: 2 }).notNull(), // Valor financiado
-  interestRate: decimal("interestRate", { precision: 5, scale: 2 }).notNull(), // Taxa de juros mensal (%)
-  installments: int("installments").notNull(), // Número de parcelas
-  installmentAmount: decimal("installmentAmount", { precision: 15, scale: 2 }).notNull(), // Valor da parcela
-  totalAmount: decimal("totalAmount", { precision: 15, scale: 2 }).notNull(), // Valor total a pagar
+export const vehicleFinancings = pgTable("vehicleFinancings", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(), // Isolamento por banco
+  vehicleId: integer("vehicleId").notNull(),
+  clientId: integer("clientId").notNull(),
+  vehiclePrice: numeric("vehiclePrice", { precision: 15, scale: 2 }).notNull(),
+  downPayment: numeric("downPayment", { precision: 15, scale: 2 }).notNull(), // Entrada
+  financedAmount: numeric("financedAmount", { precision: 15, scale: 2 }).notNull(), // Valor financiado
+  interestRate: numeric("interestRate", { precision: 5, scale: 2 }).notNull(), // Taxa de juros mensal (%)
+  installments: integer("installments").notNull(), // Número de parcelas
+  installmentAmount: numeric("installmentAmount", { precision: 15, scale: 2 }).notNull(), // Valor da parcela
+  totalAmount: numeric("totalAmount", { precision: 15, scale: 2 }).notNull(), // Valor total a pagar
   startDate: timestamp("startDate").notNull(),
   endDate: timestamp("endDate").notNull(),
-  status: mysqlEnum("status", ["ativo", "pago", "atrasado", "cancelado"]).default("ativo").notNull(),
+  status: varchar("status", { length: 64, enum: ["ativo", "pago", "atrasado", "cancelado"] }).default("ativo").notNull(),
   notes: text("notes"),
-  createdBy: int("createdBy").notNull(),
+  createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 export type VehicleFinancing = typeof vehicleFinancings.$inferSelect;
@@ -317,18 +317,18 @@ export type InsertVehicleFinancing = typeof vehicleFinancings.$inferInsert;
 /**
  * Audit Logs table - Sistema de auditoria completo
  */
-export const auditLogs = mysqlTable("auditLogs", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId"), // Pode ser null para ações do sistema
+export const auditLogs = pgTable("auditLogs", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId"), // Pode ser null para ações do sistema
   username: varchar("username", { length: 255 }),
   action: varchar("action", { length: 100 }).notNull(), // login, logout, create_user, update_user, etc.
   entity: varchar("entity", { length: 100 }), // users, loans, payments, etc.
-  entityId: int("entityId"), // ID da entidade afetada
-  databaseId: int("databaseId"), // Banco de dados relacionado
+  entityId: integer("entityId"), // ID da entidade afetada
+  databaseId: integer("databaseId"), // Banco de dados relacionado
   details: text("details"), // JSON com detalhes da ação
   ipAddress: varchar("ipAddress", { length: 45 }),
   userAgent: text("userAgent"),
-  status: mysqlEnum("status", ["success", "failed", "warning"]).default("success").notNull(),
+  status: varchar("status", { length: 64, enum: ["success", "failed", "warning"] }).default("success").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
