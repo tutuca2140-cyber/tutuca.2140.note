@@ -1,5 +1,6 @@
 import { eq, and, desc, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/neon-http";
+import { neon } from "@neondatabase/serverless";
 import { 
   InsertUser, users, 
   databases, InsertDatabase,
@@ -24,7 +25,8 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      const sqlClient = neon(process.env.DATABASE_URL);
+      _db = drizzle(sqlClient);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -100,7 +102,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
+    await db.insert(users).values(values).onConflictDoUpdate({
+      target: users.openId,
       set: updateSet,
     });
   } catch (error) {
@@ -347,15 +350,15 @@ export async function createLoanBundle(data: InsertLoan, cashEntry: Omit<InsertC
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.transaction(async (tx) => {
-    const result = await tx.insert(loans).values(data);
-    const loanId = Number((result as unknown as Array<{ insertId?: number }>)[0]?.insertId || 0) || undefined;
+    const [createdLoan] = await tx.insert(loans).values(data).returning({ id: loans.id });
+    const loanId = createdLoan?.id;
     if (!loanId) throw new Error("Não foi possível identificar o empréstimo criado.");
     await tx.insert(cashFlow).values({
       ...cashEntry,
       loanId,
       sourceKey: `LOAN_RELEASE:${loanId}`,
     });
-    return { loanId, result };
+    return { loanId, result: createdLoan };
   });
 }
 
@@ -749,15 +752,15 @@ export async function createPaymentBundle(data: InsertPayment, cashEntry: Omit<I
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.transaction(async (tx) => {
-    const result = await tx.insert(payments).values(data);
-    const paymentId = Number((result as unknown as Array<{ insertId?: number }>)[0]?.insertId || 0) || undefined;
+    const [createdPayment] = await tx.insert(payments).values(data).returning({ id: payments.id });
+    const paymentId = createdPayment?.id;
     if (data.status === 'pago') {
       await tx.insert(cashFlow).values({ ...cashEntry, paymentId, sourceKey: paymentId ? `PAYMENT:${paymentId}` : undefined });
     }
     if (loanUpdate) {
       await tx.update(loans).set(loanUpdate.values).where(and(eq(loans.id, loanUpdate.id), eq(loans.databaseId, loanUpdate.databaseId)));
     }
-    return result;
+    return createdPayment;
   });
 }
 
@@ -833,10 +836,10 @@ export async function createVehicleBundle(data: InsertVehicle, cashEntry?: Inser
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.transaction(async (tx) => {
-    const result = await tx.insert(vehicles).values(data);
-    const vehicleId = Number((result as unknown as Array<{ insertId?: number }>)[0]?.insertId || 0) || undefined;
+    const [createdVehicle] = await tx.insert(vehicles).values(data).returning({ id: vehicles.id });
+    const vehicleId = createdVehicle?.id;
     if (cashEntry && vehicleId && Number(cashEntry.amount) > 0) await tx.insert(cashFlow).values({ ...cashEntry, vehicleId, sourceKey: `VEHICLE_PURCHASE:${vehicleId}` });
-    return { vehicleId, result };
+    return { vehicleId, result: createdVehicle };
   });
 }
 
@@ -896,8 +899,8 @@ export async function createVehicleSaleBundle(data: InsertVehicleSale, vehicleId
   return db.transaction(async (tx) => {
     const vehicle = (await tx.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.databaseId, databaseId))).limit(1))[0];
     if (!vehicle || vehicle.status !== "disponivel") throw new Error("Veículo não disponível no estoque ativo.");
-    const result = await tx.insert(vehicleSales).values(data);
-    const saleId = Number((result as unknown as Array<{ insertId?: number }>)[0]?.insertId || 0) || undefined;
+    const [createdSale] = await tx.insert(vehicleSales).values(data).returning({ id: vehicleSales.id });
+    const saleId = createdSale?.id;
     await tx.update(vehicles).set({ status: "vendido", clientId: data.clientId ?? null, salePrice: data.saleAmount }).where(and(eq(vehicles.id, vehicleId), eq(vehicles.databaseId, databaseId)));
     if (cashEntry && Number(data.receivedAmount) > 0) await tx.insert(cashFlow).values({ ...cashEntry, vehicleId, vehicleSaleId: saleId, sourceKey: saleId ? `VEHICLE_SALE_INITIAL:${saleId}` : undefined });
     return { saleId, vehicle };
