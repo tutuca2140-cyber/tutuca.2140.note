@@ -83,8 +83,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-border p-4 flex items-center justify-between">
+    <div className="min-h-screen bg-muted/30">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur border-b border-border px-4 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
@@ -99,15 +99,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       <aside
         className={`
-          fixed top-0 left-0 z-40 h-screen w-64 bg-white border-r border-border
+          fixed top-0 left-0 z-40 h-screen w-64 bg-background border-r border-border
           transition-transform duration-300 ease-in-out
           ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
           lg:translate-x-0
         `}
       >
         <div className="flex flex-col h-full">
-          <div className="p-6 border-b border-border">
-            <h1 className="text-2xl font-bold text-primary tracking-[0.1em]">
+          <div className="px-6 py-5 border-b border-border">
+            <h1 className="text-xl font-bold text-primary tracking-[0.12em]">
               NOTE NOTE
             </h1>
             <p className="text-xs text-muted-foreground mt-1 tracking-wide">
@@ -137,7 +137,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
           </div>
 
-          <nav className="flex-1 overflow-y-auto p-4 space-y-1">
+          <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
             {navigation
               .filter((item) => item.show)
               .map((item) => {
@@ -148,7 +148,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   <Link key={item.name} href={item.href}>
                     <a
                       className={`
-                        flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
+                        flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                         transition-colors
                         ${
                           active
@@ -183,7 +183,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                       <Link key={item.name} href={item.href}>
                         <a
                           className={`
-                            flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
+                            flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                             transition-colors
                             ${
                               active
@@ -217,8 +217,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       </aside>
 
       <div className="lg:pl-64">
-        <main className="pt-20 lg:pt-0 p-6">
-          {children}
+        <main className="pt-20 px-4 pb-8 sm:px-6 lg:pt-0 lg:px-8 lg:py-8">
+          <div className="mx-auto w-full max-w-[1600px]">
+            {children}
+          </div>
         </main>
       </div>
 

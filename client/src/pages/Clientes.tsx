@@ -110,8 +110,8 @@ export default function Clientes() {
                 <DialogTitle>Novo Cliente</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
                     <Label htmlFor="name">Nome Completo *</Label>
                     <Input
                       id="name"
@@ -162,7 +162,7 @@ export default function Clientes() {
                       {(agents ?? []).filter((agent) => agent.status === "ACTIVE").map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
                     </select>
                   </div>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <Label htmlFor="email">E-mail</Label>
                     <Input
                       id="email"
@@ -171,7 +171,7 @@ export default function Clientes() {
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     />
                   </div>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <Label htmlFor="address">Endereço</Label>
                     <Input
                       id="address"
@@ -179,7 +179,7 @@ export default function Clientes() {
                       onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                     />
                   </div>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <Label htmlFor="commercialAddress">Endereço comercial</Label>
                     <Input
                       id="commercialAddress"
@@ -206,7 +206,7 @@ export default function Clientes() {
                       placeholder="SP"
                     />
                   </div>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <Label htmlFor="zipCode">CEP</Label>
                     <Input
                       id="zipCode"
@@ -215,7 +215,7 @@ export default function Clientes() {
                       placeholder="00000-000"
                     />
                   </div>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <Label htmlFor="notes">Observações</Label>
                     <Textarea
                       id="notes"
