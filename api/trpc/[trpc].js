@@ -516,6 +516,12 @@ function diagnoseCriticalSchema() {
   _schemaDiagnostic = (async () => {
     if (!process.env.DATABASE_URL) return;
     const sqlClient = neon(process.env.DATABASE_URL);
+    const tableRows = await sqlClient`
+      select table_name
+      from information_schema.tables
+      where table_schema = 'public' and table_type = 'BASE TABLE'
+      order by table_name
+    `;
     const rows = await sqlClient`
       select table_name, column_name
       from information_schema.columns
@@ -545,7 +551,11 @@ function diagnoseCriticalSchema() {
       const missing = columns.filter((column) => !actual.get(table)?.has(column));
       return missing.length ? [[table, missing]] : [];
     }));
-    console.info("[Database] Critical schema diagnostic", { missingTables, missingColumns });
+    console.info("[Database] Critical schema diagnostic", {
+      availableTables: tableRows.map((row) => String(row.table_name)),
+      missingTables,
+      missingColumns
+    });
   })().catch((error) => console.error("[Database] Schema diagnostic failed", error));
   return _schemaDiagnostic;
 }
