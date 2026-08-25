@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import {
   getSql,
+  ensureAuthUserColumns,
   makeSessionToken,
   readJsonBody,
   sendJson,
@@ -31,9 +32,8 @@ export default async function handler(req: any, res: any) {
       return sendJson(res, 400, { success: false, message: "Confirme corretamente que você não é um robô." });
     }
 
+    await ensureAuthUserColumns();
     const sql = getSql();
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
 
     const rows = await sql`
       SELECT

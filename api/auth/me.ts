@@ -1,5 +1,6 @@
 import {
   getSql,
+  ensureAuthUserColumns,
   readCookie,
   sendJson,
   SESSION_COOKIE_NAME,
@@ -16,8 +17,8 @@ export default async function handler(req: any, res: any) {
       return sendJson(res, 401, { authenticated: false });
     }
 
+    await ensureAuthUserColumns();
     const sql = getSql();
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
 
     const rows = await sql`
       SELECT
