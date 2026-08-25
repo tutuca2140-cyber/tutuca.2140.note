@@ -36,6 +36,36 @@ export async function getDb() {
   return _db;
 }
 
+/** Teste efêmero de escrita usado apenas para validar deployments Preview. */
+export async function runPreviewWriteCheck() {
+  if (process.env.VERCEL_ENV !== "preview") throw new Error("Preview write check is unavailable");
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async (tx) => {
+    const [activeDatabase] = await tx.select().from(databases).where(eq(databases.isActive, true)).limit(1);
+    const [actor] = await tx.select().from(users).where(eq(users.isActive, true)).limit(1);
+    if (!activeDatabase || !actor) throw new Error("Banco ativo ou usuário de teste não encontrado.");
+    const marker = `PREVIEW_WRITE_CHECK_${Date.now()}`;
+    const now = new Date();
+    const endDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const [agent] = await tx.insert(agents).values({ databaseId: activeDatabase.id, name: marker, defaultCommissionPercentage: "2.50", status: "ACTIVE", createdBy: actor.id }).returning({ id: agents.id });
+    const [client] = await tx.insert(clients).values({ databaseId: activeDatabase.id, name: marker, createdBy: actor.id }).returning({ id: clients.id });
+    const [loan] = await tx.insert(loans).values({ databaseId: activeDatabase.id, clientId: client.id, amount: "100.00", interestType: "simple", interestRate: "1.0000", ratePeriod: "month", installments: 1, installmentAmount: "101.00", totalAmount: "101.00", remainingBalance: "100.00", principalBalance: "100.00", accruedInterest: "0.00", totalPaid: "0.00", startDate: now, endDate, status: "ativo", description: marker, createdBy: actor.id }).returning({ id: loans.id });
+    await tx.insert(cashFlow).values({ databaseId: activeDatabase.id, type: "SAIDA", category: "PREVIEW_WRITE_CHECK", description: marker, amount: "100.00", movementDate: now, clientId: client.id, loanId: loan.id, sourceKey: marker, createdBy: actor.id });
+    const [vehicle] = await tx.insert(vehicles).values({ databaseId: activeDatabase.id, vehicleType: "OUTRO", model: marker, price: "1000.00", purchasePrice: "0.00", expenses: "0.00", status: "disponivel", createdBy: actor.id }).returning({ id: vehicles.id });
+    const [financing] = await tx.insert(vehicleFinancings).values({ databaseId: activeDatabase.id, vehicleId: vehicle.id, clientId: client.id, vehiclePrice: "1000.00", downPayment: "100.00", financedAmount: "900.00", interestRate: "1.00", installments: 10, installmentAmount: "95.00", totalAmount: "950.00", startDate: now, endDate, status: "ativo", notes: marker, createdBy: actor.id }).returning({ id: vehicleFinancings.id });
+
+    await tx.delete(vehicleFinancings).where(eq(vehicleFinancings.id, financing.id));
+    await tx.delete(cashFlow).where(eq(cashFlow.sourceKey, marker));
+    await tx.delete(loans).where(eq(loans.id, loan.id));
+    await tx.delete(vehicles).where(eq(vehicles.id, vehicle.id));
+    await tx.delete(clients).where(eq(clients.id, client.id));
+    await tx.delete(agents).where(eq(agents.id, agent.id));
+    return { ok: true, checked: ["agent", "client", "loan", "cashFlow", "vehicle", "vehicleFinancing"] };
+  });
+}
+
 // ==================== USERS ====================
 
 export async function upsertUser(user: InsertUser): Promise<void> {

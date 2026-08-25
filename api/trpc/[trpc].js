@@ -162,30 +162,7 @@ var adminProcedure = t.procedure.use(
 );
 
 // server/_core/systemRouter.ts
-var systemRouter = router({
-  health: publicProcedure.input(
-    z.object({
-      timestamp: z.number().min(0, "timestamp cannot be negative")
-    })
-  ).query(() => ({
-    ok: true
-  })),
-  notifyOwner: adminProcedure.input(
-    z.object({
-      title: z.string().min(1, "title is required"),
-      content: z.string().min(1, "content is required")
-    })
-  ).mutation(async ({ input }) => {
-    const delivered = await notifyOwner(input);
-    return {
-      success: delivered
-    };
-  })
-});
-
-// server/routers.ts
 import { TRPCError as TRPCError3 } from "@trpc/server";
-import { z as z2 } from "zod";
 
 // server/db.ts
 import { eq, and, desc, sql } from "drizzle-orm";
@@ -520,6 +497,32 @@ async function getDb() {
     }
   }
   return _db;
+}
+async function runPreviewWriteCheck() {
+  if (process.env.VERCEL_ENV !== "preview") throw new Error("Preview write check is unavailable");
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async (tx) => {
+    const [activeDatabase] = await tx.select().from(databases).where(eq(databases.isActive, true)).limit(1);
+    const [actor] = await tx.select().from(users).where(eq(users.isActive, true)).limit(1);
+    if (!activeDatabase || !actor) throw new Error("Banco ativo ou usu\xE1rio de teste n\xE3o encontrado.");
+    const marker = `PREVIEW_WRITE_CHECK_${Date.now()}`;
+    const now = /* @__PURE__ */ new Date();
+    const endDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1e3);
+    const [agent] = await tx.insert(agents).values({ databaseId: activeDatabase.id, name: marker, defaultCommissionPercentage: "2.50", status: "ACTIVE", createdBy: actor.id }).returning({ id: agents.id });
+    const [client] = await tx.insert(clients).values({ databaseId: activeDatabase.id, name: marker, createdBy: actor.id }).returning({ id: clients.id });
+    const [loan] = await tx.insert(loans).values({ databaseId: activeDatabase.id, clientId: client.id, amount: "100.00", interestType: "simple", interestRate: "1.0000", ratePeriod: "month", installments: 1, installmentAmount: "101.00", totalAmount: "101.00", remainingBalance: "100.00", principalBalance: "100.00", accruedInterest: "0.00", totalPaid: "0.00", startDate: now, endDate, status: "ativo", description: marker, createdBy: actor.id }).returning({ id: loans.id });
+    await tx.insert(cashFlow).values({ databaseId: activeDatabase.id, type: "SAIDA", category: "PREVIEW_WRITE_CHECK", description: marker, amount: "100.00", movementDate: now, clientId: client.id, loanId: loan.id, sourceKey: marker, createdBy: actor.id });
+    const [vehicle] = await tx.insert(vehicles).values({ databaseId: activeDatabase.id, vehicleType: "OUTRO", model: marker, price: "1000.00", purchasePrice: "0.00", expenses: "0.00", status: "disponivel", createdBy: actor.id }).returning({ id: vehicles.id });
+    const [financing] = await tx.insert(vehicleFinancings).values({ databaseId: activeDatabase.id, vehicleId: vehicle.id, clientId: client.id, vehiclePrice: "1000.00", downPayment: "100.00", financedAmount: "900.00", interestRate: "1.00", installments: 10, installmentAmount: "95.00", totalAmount: "950.00", startDate: now, endDate, status: "ativo", notes: marker, createdBy: actor.id }).returning({ id: vehicleFinancings.id });
+    await tx.delete(vehicleFinancings).where(eq(vehicleFinancings.id, financing.id));
+    await tx.delete(cashFlow).where(eq(cashFlow.sourceKey, marker));
+    await tx.delete(loans).where(eq(loans.id, loan.id));
+    await tx.delete(vehicles).where(eq(vehicles.id, vehicle.id));
+    await tx.delete(clients).where(eq(clients.id, client.id));
+    await tx.delete(agents).where(eq(agents.id, agent.id));
+    return { ok: true, checked: ["agent", "client", "loan", "cashFlow", "vehicle", "vehicleFinancing"] };
+  });
 }
 async function upsertUser(user) {
   if (!user.openId) {
@@ -1390,7 +1393,37 @@ async function updateLocalPassword(userId, passwordHash) {
   await db.delete(localSessions).where(eq(localSessions.userId, userId));
 }
 
+// server/_core/systemRouter.ts
+var systemRouter = router({
+  health: publicProcedure.input(
+    z.object({
+      timestamp: z.number().min(0, "timestamp cannot be negative")
+    })
+  ).query(() => ({
+    ok: true
+  })),
+  previewWriteCheck: publicProcedure.input(z.object({ key: z.string().min(1) })).mutation(async ({ input }) => {
+    if (process.env.VERCEL_ENV !== "preview" || input.key !== process.env.VERCEL_GIT_COMMIT_SHA) {
+      throw new TRPCError3({ code: "NOT_FOUND", message: "Not found" });
+    }
+    return runPreviewWriteCheck();
+  }),
+  notifyOwner: adminProcedure.input(
+    z.object({
+      title: z.string().min(1, "title is required"),
+      content: z.string().min(1, "content is required")
+    })
+  ).mutation(async ({ input }) => {
+    const delivered = await notifyOwner(input);
+    return {
+      success: delivered
+    };
+  })
+});
+
 // server/routers.ts
+import { TRPCError as TRPCError4 } from "@trpc/server";
+import { z as z2 } from "zod";
 import * as bcrypt from "bcrypt";
 import { nanoid } from "nanoid";
 var optionalText = z2.string().optional();
@@ -1414,7 +1447,7 @@ var stripLegacyCpf = (client) => {
 };
 var adminProcedure2 = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin" && ctx.user.role !== "super_admin") {
-    throw new TRPCError3({
+    throw new TRPCError4({
       code: "FORBIDDEN",
       message: "Acesso negado. Apenas administradores podem acessar este recurso."
     });
@@ -1423,7 +1456,7 @@ var adminProcedure2 = protectedProcedure.use(({ ctx, next }) => {
 });
 var superAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "super_admin") {
-    throw new TRPCError3({ code: "FORBIDDEN", message: "Apenas o Super Admin pode gerenciar usu\xE1rios." });
+    throw new TRPCError4({ code: "FORBIDDEN", message: "Apenas o Super Admin pode gerenciar usu\xE1rios." });
   }
   return next({ ctx });
 });
@@ -1453,20 +1486,20 @@ var appRouter = router({
     })).mutation(async ({ input, ctx }) => {
       const user = await getUserByUsername(input.username);
       if (!user || !user.passwordHash) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "UNAUTHORIZED",
           message: "Usu\xE1rio ou senha inv\xE1lidos"
         });
       }
       const passwordMatch = await bcrypt.compare(input.password, user.passwordHash);
       if (!passwordMatch) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "UNAUTHORIZED",
           message: "Usu\xE1rio ou senha inv\xE1lidos"
         });
       }
       if (!user.isActive) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Usu\xE1rio desativado"
         });
@@ -1495,14 +1528,14 @@ var appRouter = router({
     })).mutation(async ({ input }) => {
       const existingUser = await getUserByUsername(input.username);
       if (existingUser) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "CONFLICT",
           message: "Usu\xE1rio j\xE1 existe"
         });
       }
       const existingEmail = await getUserByEmail(input.email);
       if (existingEmail) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "CONFLICT",
           message: "Email j\xE1 cadastrado"
         });
@@ -1540,11 +1573,11 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     })).mutation(async ({ input }) => {
       const resetToken = await getPasswordResetToken(input.token);
       if (!resetToken) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Token inv\xE1lido ou expirado" });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "Token inv\xE1lido ou expirado" });
       }
       const user = await getUserById(resetToken.userId);
       if (!user || user.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Esta conta n\xE3o pode usar recupera\xE7\xE3o de senha." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "Esta conta n\xE3o pode usar recupera\xE7\xE3o de senha." });
       }
       const passwordHash = await bcrypt.hash(input.password, 10);
       await updateLocalPassword(user.id, passwordHash);
@@ -1576,10 +1609,10 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       role: z2.enum(["user", "admin"]).default("user")
     })).mutation(async ({ input, ctx }) => {
       if (await getUserByUsername(input.username)) {
-        throw new TRPCError3({ code: "CONFLICT", message: "Nome de usu\xE1rio j\xE1 cadastrado." });
+        throw new TRPCError4({ code: "CONFLICT", message: "Nome de usu\xE1rio j\xE1 cadastrado." });
       }
       if (await getUserByEmail(input.email)) {
-        throw new TRPCError3({ code: "CONFLICT", message: "E-mail j\xE1 cadastrado." });
+        throw new TRPCError4({ code: "CONFLICT", message: "E-mail j\xE1 cadastrado." });
       }
       const passwordHash = await bcrypt.hash(input.password, 10);
       const created = await createLocalUser({ ...input, passwordHash });
@@ -1596,12 +1629,12 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       role: z2.enum(["user", "admin"])
     })).mutation(async ({ input, ctx }) => {
       const target = await getUserById(input.userId);
-      if (!target) throw new TRPCError3({ code: "NOT_FOUND", message: "Usu\xE1rio n\xE3o encontrado." });
-      if (target.username?.toLowerCase() === "draco") throw new TRPCError3({ code: "FORBIDDEN", message: "O Super Admin protegido n\xE3o pode ser editado." });
+      if (!target) throw new TRPCError4({ code: "NOT_FOUND", message: "Usu\xE1rio n\xE3o encontrado." });
+      if (target.username?.toLowerCase() === "draco") throw new TRPCError4({ code: "FORBIDDEN", message: "O Super Admin protegido n\xE3o pode ser editado." });
       const usernameOwner = await getUserByUsername(input.username);
-      if (usernameOwner && usernameOwner.id !== input.userId) throw new TRPCError3({ code: "CONFLICT", message: "Nome de usu\xE1rio j\xE1 cadastrado." });
+      if (usernameOwner && usernameOwner.id !== input.userId) throw new TRPCError4({ code: "CONFLICT", message: "Nome de usu\xE1rio j\xE1 cadastrado." });
       const emailOwner = await getUserByEmail(input.email);
-      if (emailOwner && emailOwner.id !== input.userId) throw new TRPCError3({ code: "CONFLICT", message: "E-mail j\xE1 cadastrado." });
+      if (emailOwner && emailOwner.id !== input.userId) throw new TRPCError4({ code: "CONFLICT", message: "E-mail j\xE1 cadastrado." });
       const { userId, ...data } = input;
       await updateLocalUser(userId, data);
       await createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || "Super Admin", action: "update_user", entity: "users", entityId: userId, details: `Usu\xE1rio editado: ${input.username}`, status: "success" });
@@ -1618,7 +1651,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     })).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (targetUser?.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "As permiss\xF5es do super administrador Draco s\xE3o imut\xE1veis." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "As permiss\xF5es do super administrador Draco s\xE3o imut\xE1veis." });
       }
       const { userId, ...permissions } = input;
       await updateUserPermissions(userId, permissions);
@@ -1639,7 +1672,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     })).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (targetUser?.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ter o perfil alterado." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ter o perfil alterado." });
       }
       await updateUserRole(input.userId, input.role);
       await createAuditLog({
@@ -1659,7 +1692,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     })).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (targetUser?.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ser desativado." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ser desativado." });
       }
       await toggleUserActive(input.userId, input.isActive);
       if (!input.isActive) await deleteUserSessions(input.userId);
@@ -1680,10 +1713,10 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     })).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (!targetUser) {
-        throw new TRPCError3({ code: "NOT_FOUND", message: "Usu\xE1rio n\xE3o encontrado." });
+        throw new TRPCError4({ code: "NOT_FOUND", message: "Usu\xE1rio n\xE3o encontrado." });
       }
       if (targetUser.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "A senha do super administrador Draco n\xE3o pode ser alterada." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "A senha do super administrador Draco n\xE3o pode ser alterada." });
       }
       const passwordHash = await bcrypt.hash(input.password, 10);
       await updateLocalPassword(targetUser.id, passwordHash);
@@ -1702,7 +1735,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     delete: adminProcedure2.input(z2.object({ userId: z2.number() })).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (targetUser?.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ser exclu\xEDdo." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ser exclu\xEDdo." });
       }
       await deleteUser(input.userId);
       await createAuditLog({
@@ -1780,7 +1813,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     delete: adminProcedure2.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
       const dbInfo = await getDatabaseById(input.id);
       if (dbInfo?.isActive) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "BAD_REQUEST",
           message: "N\xE3o \xE9 poss\xEDvel deletar o banco de dados ativo"
         });
@@ -1802,7 +1835,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   agents: router({
     list: protectedProcedure.input(z2.object({ includeInactive: z2.boolean().default(true).optional() }).optional()).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar agentes." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar agentes." });
       }
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
@@ -1810,7 +1843,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     getById: protectedProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
       const agent = await getAgentById(input.id);
-      if (!agent) throw new TRPCError3({ code: "NOT_FOUND", message: "Agente n\xE3o encontrado." });
+      if (!agent) throw new TRPCError4({ code: "NOT_FOUND", message: "Agente n\xE3o encontrado." });
       return agent;
     }),
     create: protectedProcedure.input(z2.object({
@@ -1818,10 +1851,10 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       defaultCommissionPercentage: z2.coerce.number().min(0).max(100)
     })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canInsert) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir agentes." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir agentes." });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const result = await createAgent({
         databaseId: activeDb.id,
         name: input.name.trim(),
@@ -1846,12 +1879,12 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       defaultCommissionPercentage: z2.coerce.number().min(0).max(100).optional()
     })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para editar agentes." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para editar agentes." });
       }
       const activeDb = await getActiveDatabase();
       const targetAgent = activeDb ? await getAgentById(input.id) : void 0;
       if (!activeDb || !targetAgent || targetAgent.databaseId !== activeDb.id) {
-        throw new TRPCError3({ code: "NOT_FOUND", message: "Agente n\xE3o encontrado no banco ativo." });
+        throw new TRPCError4({ code: "NOT_FOUND", message: "Agente n\xE3o encontrado no banco ativo." });
       }
       const { id, defaultCommissionPercentage, ...rest } = input;
       await updateAgent(id, {
@@ -1871,12 +1904,12 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     deactivate: protectedProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para desativar agentes." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para desativar agentes." });
       }
       const activeDb = await getActiveDatabase();
       const targetAgent = activeDb ? await getAgentById(input.id) : void 0;
       if (!activeDb || !targetAgent || targetAgent.databaseId !== activeDb.id) {
-        throw new TRPCError3({ code: "NOT_FOUND", message: "Agente n\xE3o encontrado no banco ativo." });
+        throw new TRPCError4({ code: "NOT_FOUND", message: "Agente n\xE3o encontrado no banco ativo." });
       }
       await deactivateAgent(input.id, activeDb.id);
       await createAuditLog({
@@ -1896,7 +1929,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       endDate: z2.string().optional()
     })).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o hist\xF3rico." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o hist\xF3rico." });
       }
       const activeDb = await getActiveDatabase();
       if (!activeDb) return { payments: [], totals: { totalPayments: 0, totalPaymentAmount: 0, totalCommission: 0, averageCommission: 0 } };
@@ -1911,7 +1944,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   // ==================== CLIENTS ====================
   clients: router({
     list: protectedProcedure.query(async ({ ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar clientes." });
+      if (!ctx.user.canView) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar clientes." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       return (await getClientsByDatabase(activeDb.id)).map(stripLegacyCpf);
@@ -1924,11 +1957,11 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return stripLegacyCpf(client);
     }),
     profile: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input, ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar clientes." });
+      if (!ctx.user.canView) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar clientes." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return void 0;
       const profile = await getClientProfile(input.id, activeDb.id);
-      if (!profile) throw new TRPCError3({ code: "NOT_FOUND", message: "Cliente n\xE3o encontrado no banco ativo." });
+      if (!profile) throw new TRPCError4({ code: "NOT_FOUND", message: "Cliente n\xE3o encontrado no banco ativo." });
       return { ...profile, client: stripLegacyCpf(profile.client) };
     }),
     create: protectedProcedure.input(z2.object({
@@ -1949,13 +1982,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "BAD_REQUEST",
           message: "Nenhum banco de dados ativo"
         });
       }
       if (!ctx.user.canInsert) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados"
         });
@@ -2007,15 +2040,15 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       notes: optionalText
     })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados"
         });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
       const currentClient = await getClientById(input.id);
-      if (!currentClient || currentClient.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Cliente n\xE3o encontrado no banco ativo." });
+      if (!currentClient || currentClient.databaseId !== activeDb.id) throw new TRPCError4({ code: "NOT_FOUND", message: "Cliente n\xE3o encontrado no banco ativo." });
       const { id, birthDate, ...data } = input;
       await updateClientInDatabase(id, { ...data, ...birthDate !== void 0 ? { birthDate: birthDate ? new Date(birthDate) : null } : {} }, activeDb.id);
       await createAuditLog({
@@ -2032,15 +2065,15 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     delete: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canDelete) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Voc\xEA n\xE3o tem permiss\xE3o para deletar dados"
         });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
       const currentClient = await getClientById(input.id);
-      if (!currentClient || currentClient.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Cliente n\xE3o encontrado no banco ativo." });
+      if (!currentClient || currentClient.databaseId !== activeDb.id) throw new TRPCError4({ code: "NOT_FOUND", message: "Cliente n\xE3o encontrado no banco ativo." });
       await deleteClientInDatabase(input.id, activeDb.id);
       await createAuditLog({
         userId: ctx.user.id,
@@ -2058,20 +2091,20 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   // ==================== LOANS ====================
   loans: router({
     list: protectedProcedure.query(async ({ ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
+      if (!ctx.user.canView) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       return await getLoansByDatabase(activeDb.id);
     }),
     getById: protectedProcedure.input(z2.object({ id: z2.number() })).query(async ({ input, ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
+      if (!ctx.user.canView) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return null;
       const loan = await getLoanById(input.id);
       return loan?.databaseId === activeDb.id ? loan : null;
     }),
     details: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input, ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar detalhes." });
+      if (!ctx.user.canView) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar detalhes." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return null;
       const loan = await getLoanById(input.id);
@@ -2085,7 +2118,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return { loan, client: client && client.databaseId === activeDb.id ? client : null, payments: payments2, interestHistory, cashFlow: cashFlow2 };
     }),
     getByClient: protectedProcedure.input(z2.object({ clientId: z2.number() })).query(async ({ input, ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
+      if (!ctx.user.canView) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       const client = await getClientById(input.clientId);
@@ -2093,7 +2126,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return await getLoansByClient(input.clientId, activeDb.id);
     }),
     history: protectedProcedure.input(z2.object({ loanId: z2.number().int().positive() })).query(async ({ input, ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o hist\xF3rico." });
+      if (!ctx.user.canView) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o hist\xF3rico." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       const loan = await getLoanById(input.loanId);
@@ -2101,14 +2134,14 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return getLoanInterestHistory(input.loanId, activeDb.id);
     }),
     generateInterest: protectedProcedure.input(z2.object({ loanId: z2.number().int().positive(), periodReference: z2.string().trim().min(1).max(20) })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canEdit) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para lan\xE7ar juros." });
+      if (!ctx.user.canEdit) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para lan\xE7ar juros." });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const loan = await getLoanById(input.loanId);
-      if (!loan || loan.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Empr\xE9stimo n\xE3o encontrado no banco ativo." });
-      if (loan.status === "pago" || loan.status === "cancelado") throw new TRPCError3({ code: "BAD_REQUEST", message: "N\xE3o \xE9 poss\xEDvel lan\xE7ar juros em um empr\xE9stimo encerrado." });
+      if (!loan || loan.databaseId !== activeDb.id) throw new TRPCError4({ code: "NOT_FOUND", message: "Empr\xE9stimo n\xE3o encontrado no banco ativo." });
+      if (loan.status === "pago" || loan.status === "cancelado") throw new TRPCError4({ code: "BAD_REQUEST", message: "N\xE3o \xE9 poss\xEDvel lan\xE7ar juros em um empr\xE9stimo encerrado." });
       if (await getLoanInterestPeriod(input.loanId, activeDb.id, input.periodReference)) {
-        throw new TRPCError3({ code: "CONFLICT", message: "Os juros deste per\xEDodo j\xE1 foram lan\xE7ados." });
+        throw new TRPCError4({ code: "CONFLICT", message: "Os juros deste per\xEDodo j\xE1 foram lan\xE7ados." });
       }
       const principalBalance = Number(loan.principalBalance || loan.amount);
       const interest = calculateInterestOnBalance(principalBalance, Number(loan.interestRate));
@@ -2148,33 +2181,33 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "BAD_REQUEST",
           message: "Nenhum banco de dados ativo"
         });
       }
       if (!ctx.user.canInsert) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados"
         });
       }
       const client = await getClientById(input.clientId);
-      if (!client || client.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+      if (!client || client.databaseId !== activeDb.id) throw new TRPCError4({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
       const principal = Number(input.amount);
       const ratePercent = Number(input.interestRate);
       if (!Number.isFinite(principal) || principal <= 0 || !Number.isFinite(ratePercent) || ratePercent < 0) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Valor principal ou taxa de juros inv\xE1lidos." });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "Valor principal ou taxa de juros inv\xE1lidos." });
       }
       const interestType = input.interestType ?? "simple";
       const ratePeriod = input.ratePeriod ?? "month";
       const periods = input.installments ?? 1;
       const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
       const startDate = new Date(input.startDate);
-      if (Number.isNaN(startDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data inicial inv\xE1lida." });
+      if (Number.isNaN(startDate.getTime())) throw new TRPCError4({ code: "BAD_REQUEST", message: "Data inicial inv\xE1lida." });
       const endDate = input.endDate ? new Date(input.endDate) : addPeriods(startDate, plan.periods, ratePeriod);
-      if (Number.isNaN(endDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data final inv\xE1lida." });
-      if (endDate < startDate) throw new TRPCError3({ code: "BAD_REQUEST", message: "A data final deve ser igual ou posterior \xE0 data inicial." });
+      if (Number.isNaN(endDate.getTime())) throw new TRPCError4({ code: "BAD_REQUEST", message: "Data final inv\xE1lida." });
+      if (endDate < startDate) throw new TRPCError4({ code: "BAD_REQUEST", message: "A data final deve ser igual ou posterior \xE0 data inicial." });
       const result = await createLoanBundle({
         clientId: input.clientId,
         amount: plan.principal.toFixed(2),
@@ -2233,21 +2266,21 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       status: z2.enum(["ativo", "pago", "atrasado", "cancelado"]).optional(),
       description: z2.string().optional()
     })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canEdit) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados" });
+      if (!ctx.user.canEdit) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados" });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const currentLoan = await getLoanById(input.id);
-      if (!currentLoan || currentLoan.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Empr\xE9stimo n\xE3o encontrado no banco ativo." });
+      if (!currentLoan || currentLoan.databaseId !== activeDb.id) throw new TRPCError4({ code: "NOT_FOUND", message: "Empr\xE9stimo n\xE3o encontrado no banco ativo." });
       if (input.clientId !== void 0) {
         const client = await getClientById(input.clientId);
-        if (!client || client.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+        if (!client || client.databaseId !== activeDb.id) throw new TRPCError4({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
       }
       const startDate = input.startDate ? new Date(input.startDate) : currentLoan.startDate;
       const endDate = input.endDate ? new Date(input.endDate) : currentLoan.endDate;
-      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Datas do empr\xE9stimo inv\xE1lidas." });
+      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) throw new TRPCError4({ code: "BAD_REQUEST", message: "Datas do empr\xE9stimo inv\xE1lidas." });
       const principal = input.amount !== void 0 ? Number(input.amount) : Number(currentLoan.amount);
       const ratePercent = input.interestRate !== void 0 ? Number(input.interestRate) : Number(currentLoan.interestRate);
-      if (!Number.isFinite(principal) || principal <= 0 || !Number.isFinite(ratePercent) || ratePercent < 0) throw new TRPCError3({ code: "BAD_REQUEST", message: "Valor principal ou taxa de juros inv\xE1lidos." });
+      if (!Number.isFinite(principal) || principal <= 0 || !Number.isFinite(ratePercent) || ratePercent < 0) throw new TRPCError4({ code: "BAD_REQUEST", message: "Valor principal ou taxa de juros inv\xE1lidos." });
       const interestType = input.interestType ?? currentLoan.interestType;
       const ratePeriod = input.ratePeriod ?? currentLoan.ratePeriod;
       const periods = input.installments ?? currentLoan.installments ?? 1;
@@ -2272,15 +2305,15 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     delete: protectedProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canDelete) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Voc\xEA n\xE3o tem permiss\xE3o para deletar dados"
         });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const currentLoan = await getLoanById(input.id);
-      if (!currentLoan || currentLoan.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Empr\xE9stimo n\xE3o encontrado no banco ativo." });
+      if (!currentLoan || currentLoan.databaseId !== activeDb.id) throw new TRPCError4({ code: "NOT_FOUND", message: "Empr\xE9stimo n\xE3o encontrado no banco ativo." });
       const result = await deleteLoanSafely(input.id, activeDb.id);
       await createAuditLog({
         userId: ctx.user.id,
@@ -2327,46 +2360,46 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       commissionPercentage: z2.coerce.number().min(0).max(100).optional()
     })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
-      if (!ctx.user.canInsert) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados" });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
+      if (!ctx.user.canInsert) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados" });
       if (input.loanId === void 0 === (input.vehicleFinancingId === void 0)) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Informe exatamente um empr\xE9stimo ou um financiamento." });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "Informe exatamente um empr\xE9stimo ou um financiamento." });
       }
       const loan = input.loanId === void 0 ? void 0 : await getLoanById(input.loanId);
       const vehicleFinancing = input.vehicleFinancingId === void 0 ? void 0 : await getVehicleFinancingById(input.vehicleFinancingId);
       if (input.loanId !== void 0 && (!loan || loan.databaseId !== activeDb.id || ["pago", "cancelado"].includes(loan.status))) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Empr\xE9stimo inv\xE1lido, encerrado ou fora do banco ativo." });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "Empr\xE9stimo inv\xE1lido, encerrado ou fora do banco ativo." });
       }
       if (input.vehicleFinancingId !== void 0 && (!vehicleFinancing || vehicleFinancing.databaseId !== activeDb.id || ["pago", "cancelado"].includes(vehicleFinancing.status))) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Financiamento inv\xE1lido, encerrado ou fora do banco ativo." });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "Financiamento inv\xE1lido, encerrado ou fora do banco ativo." });
       }
       const paymentAmount = Number(input.amount);
-      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) throw new TRPCError3({ code: "BAD_REQUEST", message: "O valor do pagamento deve ser maior que zero." });
+      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) throw new TRPCError4({ code: "BAD_REQUEST", message: "O valor do pagamento deve ser maior que zero." });
       const paymentDate = new Date(input.paymentDate);
       const dueDate = new Date(input.dueDate);
-      if (Number.isNaN(paymentDate.getTime()) || Number.isNaN(dueDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "As datas do pagamento s\xE3o inv\xE1lidas." });
+      if (Number.isNaN(paymentDate.getTime()) || Number.isNaN(dueDate.getTime())) throw new TRPCError4({ code: "BAD_REQUEST", message: "As datas do pagamento s\xE3o inv\xE1lidas." });
       let commissionPercentage = 0;
       let agentId;
       if (input.agentId !== void 0) {
         const agent = await getAgentById(input.agentId);
-        if (!agent || agent.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Agente inv\xE1lido para o banco ativo." });
-        if (agent.status !== "ACTIVE") throw new TRPCError3({ code: "BAD_REQUEST", message: "Agentes inativos n\xE3o podem ser selecionados em novos pagamentos." });
+        if (!agent || agent.databaseId !== activeDb.id) throw new TRPCError4({ code: "BAD_REQUEST", message: "Agente inv\xE1lido para o banco ativo." });
+        if (agent.status !== "ACTIVE") throw new TRPCError4({ code: "BAD_REQUEST", message: "Agentes inativos n\xE3o podem ser selecionados em novos pagamentos." });
         agentId = agent.id;
         commissionPercentage = input.commissionPercentage ?? Number(agent.defaultCommissionPercentage || 0);
       } else if (input.commissionPercentage !== void 0 && input.commissionPercentage !== 0) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "A comiss\xE3o s\xF3 pode ser informada quando um agente \xE9 selecionado." });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "A comiss\xE3o s\xF3 pode ser informada quando um agente \xE9 selecionado." });
       }
       const priorPayments = loan ? await getPaymentsByLoan(loan.id, activeDb.id) : await getPaymentsByFinancing(vehicleFinancing.id, activeDb.id);
       const contractPrincipal = loan ? Number(loan.principalBalance || loan.amount) : Number(vehicleFinancing?.financedAmount || 0);
       const accruedInterest = loan ? Number(loan.accruedInterest || 0) : Math.max(0, Number(vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0) - contractPrincipal);
       const priorPaid = priorPayments.filter((payment) => payment.status === "pago").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
       const balanceBefore = loan ? roundMoney(contractPrincipal + accruedInterest) : Math.max(0, Number(vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0) - priorPaid);
-      if (input.status === "pago" && paymentAmount > balanceBefore + 0.01) throw new TRPCError3({ code: "BAD_REQUEST", message: "O pagamento n\xE3o pode exceder o saldo do contrato." });
+      if (input.status === "pago" && paymentAmount > balanceBefore + 0.01) throw new TRPCError4({ code: "BAD_REQUEST", message: "O pagamento n\xE3o pode exceder o saldo do contrato." });
       const allocation = input.status === "pago" ? loan ? allocateBalancePayment(paymentAmount, accruedInterest, contractPrincipal) : allocatePayment(paymentAmount, Number(vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0), accruedInterest, priorPayments.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0), balanceBefore) : { principalAmount: 0, interestAmount: 0, remainingBalance: balanceBefore };
       const commissionAmount = Math.round(paymentAmount * commissionPercentage) / 100;
       const netAmount = Math.round((paymentAmount - commissionAmount) * 100) / 100;
       const duplicate = await paymentAlreadyRegistered({ databaseId: activeDb.id, loanId: input.loanId, vehicleFinancingId: input.vehicleFinancingId, installmentNumber: input.installmentNumber, amount: input.amount, paymentDate, agentId });
-      if (duplicate) throw new TRPCError3({ code: "CONFLICT", message: "Este pagamento e sua comiss\xE3o j\xE1 foram registrados." });
+      if (duplicate) throw new TRPCError4({ code: "CONFLICT", message: "Este pagamento e sua comiss\xE3o j\xE1 foram registrados." });
       const paymentData = {
         loanId: input.loanId,
         vehicleFinancingId: input.vehicleFinancingId,
@@ -2425,16 +2458,16 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       dueDate: z2.string().optional(),
       notes: z2.string().optional()
     })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canEdit) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados" });
+      if (!ctx.user.canEdit) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados" });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const current = await getPaymentById(input.id);
-      if (!current || current.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Pagamento n\xE3o encontrado no banco ativo." });
+      if (!current || current.databaseId !== activeDb.id) throw new TRPCError4({ code: "NOT_FOUND", message: "Pagamento n\xE3o encontrado no banco ativo." });
       const amount = input.amount !== void 0 ? Number(input.amount) : Number(current.amount);
-      if (!Number.isFinite(amount) || amount <= 0) throw new TRPCError3({ code: "BAD_REQUEST", message: "O valor do pagamento deve ser maior que zero." });
+      if (!Number.isFinite(amount) || amount <= 0) throw new TRPCError4({ code: "BAD_REQUEST", message: "O valor do pagamento deve ser maior que zero." });
       const paymentDate = input.paymentDate ? new Date(input.paymentDate) : current.paymentDate;
       const dueDate = input.dueDate ? new Date(input.dueDate) : current.dueDate;
-      if (Number.isNaN(paymentDate.getTime()) || Number.isNaN(dueDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "As datas do pagamento s\xE3o inv\xE1lidas." });
+      if (Number.isNaN(paymentDate.getTime()) || Number.isNaN(dueDate.getTime())) throw new TRPCError4({ code: "BAD_REQUEST", message: "As datas do pagamento s\xE3o inv\xE1lidas." });
       const result = await updatePaymentBundle(input.id, activeDb.id, {
         amount: amount.toFixed(2),
         status: input.status ?? current.status,
@@ -2446,11 +2479,11 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return { success: true, message: "Pagamento atualizado e caixa reconciliado.", result };
     }),
     delete: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canDelete) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para excluir pagamentos." });
+      if (!ctx.user.canDelete) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para excluir pagamentos." });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const current = await getPaymentById(input.id);
-      if (!current || current.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Pagamento n\xE3o encontrado no banco ativo." });
+      if (!current || current.databaseId !== activeDb.id) throw new TRPCError4({ code: "NOT_FOUND", message: "Pagamento n\xE3o encontrado no banco ativo." });
       const result = await deletePaymentBundle(input.id, activeDb.id);
       await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "delete_payment", entity: "payments", entityId: input.id, databaseId: activeDb.id, details: "Pagamento removido; caixa e saldo recalculados.", status: "warning" });
       return { success: true, message: "Pagamento exclu\xEDdo e caixa reconciliado.", result };
@@ -2459,7 +2492,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   // ==================== CASH FLOW ====================
   cashFlow: router({
     list: protectedProcedure.query(async ({ ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o fluxo de caixa." });
+      if (!ctx.user.canView) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o fluxo de caixa." });
       const activeDb = await getActiveDatabase();
       return activeDb ? getCashFlowByDatabase(activeDb.id) : [];
     }),
@@ -2472,11 +2505,11 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       responsible: z2.string().optional(),
       notes: z2.string().optional()
     })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canInsert) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar movimenta\xE7\xF5es." });
+      if (!ctx.user.canInsert) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar movimenta\xE7\xF5es." });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const movementDate = new Date(input.movementDate);
-      if (Number.isNaN(movementDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data da movimenta\xE7\xE3o inv\xE1lida." });
+      if (Number.isNaN(movementDate.getTime())) throw new TRPCError4({ code: "BAD_REQUEST", message: "Data da movimenta\xE7\xE3o inv\xE1lida." });
       await createCashFlowEntry({ ...input, amount: input.amount.toFixed(2), movementDate, databaseId: activeDb.id, createdBy: ctx.user.id });
       return { success: true };
     })
@@ -2513,20 +2546,20 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "BAD_REQUEST",
           message: "Nenhum banco de dados ativo"
         });
       }
       if (!ctx.user.canInsert) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados"
         });
       }
       if (input.clientId !== void 0) {
         const client = await getClientById(input.clientId);
-        if (!client || client.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+        if (!client || client.databaseId !== activeDb.id) throw new TRPCError4({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
       }
       const purchasePrice = input.purchasePrice.toFixed(2);
       const vehicleData = {
@@ -2583,18 +2616,18 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       description: z2.string().optional().nullable()
     })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados"
         });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
       const currentVehicle = await getVehicleById(input.id);
-      if (!currentVehicle || currentVehicle.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Ve\xEDculo n\xE3o encontrado no banco ativo." });
+      if (!currentVehicle || currentVehicle.databaseId !== activeDb.id) throw new TRPCError4({ code: "NOT_FOUND", message: "Ve\xEDculo n\xE3o encontrado no banco ativo." });
       if (input.clientId !== void 0 && input.clientId !== null) {
         const client = await getClientById(input.clientId);
-        if (!client || client.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+        if (!client || client.databaseId !== activeDb.id) throw new TRPCError4({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
       }
       const { id, ...data } = input;
       const normalizedData = {
@@ -2618,15 +2651,15 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     delete: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canDelete) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Voc\xEA n\xE3o tem permiss\xE3o para deletar dados"
         });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
       const currentVehicle = await getVehicleById(input.id);
-      if (!currentVehicle || currentVehicle.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Ve\xEDculo n\xE3o encontrado no banco ativo." });
+      if (!currentVehicle || currentVehicle.databaseId !== activeDb.id) throw new TRPCError4({ code: "NOT_FOUND", message: "Ve\xEDculo n\xE3o encontrado no banco ativo." });
       await deleteVehicleInDatabase(input.id, activeDb.id);
       await createAuditLog({
         userId: ctx.user.id,
@@ -2644,7 +2677,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   // ==================== VEHICLE SALES ====================
   vehicleSales: router({
     list: protectedProcedure.query(async ({ ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar vendas." });
+      if (!ctx.user.canView) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar vendas." });
       const activeDb = await getActiveDatabase();
       return activeDb ? getVehicleSalesByDatabase(activeDb.id) : [];
     }),
@@ -2657,14 +2690,14 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       saleDate: z2.string(),
       notes: z2.string().optional()
     })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canInsert) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar vendas." });
+      if (!ctx.user.canInsert) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar vendas." });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const saleDate = new Date(input.saleDate);
-      if (Number.isNaN(saleDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data da venda inv\xE1lida." });
+      if (Number.isNaN(saleDate.getTime())) throw new TRPCError4({ code: "BAD_REQUEST", message: "Data da venda inv\xE1lida." });
       if (input.clientId !== void 0) {
         const client = await getClientById(input.clientId);
-        if (!client || client.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+        if (!client || client.databaseId !== activeDb.id) throw new TRPCError4({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
       }
       const receivedAmount = Math.min(input.receivedAmount, input.saleAmount);
       const data = {
@@ -2693,11 +2726,11 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return result;
     }),
     receive: protectedProcedure.input(z2.object({ saleId: z2.number().int().positive(), amount: z2.coerce.number().positive(), movementDate: z2.string() })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canInsert) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar recebimentos." });
+      if (!ctx.user.canInsert) throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar recebimentos." });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb) throw new TRPCError4({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const movementDate = new Date(input.movementDate);
-      if (Number.isNaN(movementDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data do recebimento inv\xE1lida." });
+      if (Number.isNaN(movementDate.getTime())) throw new TRPCError4({ code: "BAD_REQUEST", message: "Data do recebimento inv\xE1lida." });
       const result = await receiveVehicleSaleBundle(input.saleId, activeDb.id, input.amount.toFixed(2), movementDate, ctx.user.id);
       return { success: true, ...result };
     })
@@ -2728,13 +2761,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "BAD_REQUEST",
           message: "Nenhum banco de dados ativo"
         });
       }
       if (!ctx.user.canInsert) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados"
         });
@@ -2744,21 +2777,21 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         getVehicleById(input.vehicleId)
       ]);
       if (!client || client.databaseId !== activeDb.id) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
       }
       if (!vehicle || vehicle.databaseId !== activeDb.id) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Ve\xEDculo inv\xE1lido para o banco ativo." });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "Ve\xEDculo inv\xE1lido para o banco ativo." });
       }
       const startDate = new Date(input.startDate);
       const endDate = new Date(input.endDate);
       if (endDate < startDate) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "A data final deve ser igual ou posterior \xE0 data inicial." });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "A data final deve ser igual ou posterior \xE0 data inicial." });
       }
       if (Number(input.downPayment) > Number(input.vehiclePrice)) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "A entrada n\xE3o pode ser maior que o pre\xE7o do ve\xEDculo." });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "A entrada n\xE3o pode ser maior que o pre\xE7o do ve\xEDculo." });
       }
       if (Number(input.totalAmount) < Number(input.financedAmount)) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "O valor total n\xE3o pode ser menor que o valor financiado." });
+        throw new TRPCError4({ code: "BAD_REQUEST", message: "O valor total n\xE3o pode ser menor que o valor financiado." });
       }
       const result = await createVehicleFinancing({
         ...input,
@@ -2784,7 +2817,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       notes: z2.string().optional()
     })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
-        throw new TRPCError3({
+        throw new TRPCError4({
           code: "FORBIDDEN",
           message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados"
         });
@@ -2850,7 +2883,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     agentPerformance: protectedProcedure.input(z2.object({ startDate: z2.string().optional(), endDate: z2.string().optional() }).optional()).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar performance." });
+        throw new TRPCError4({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar performance." });
       }
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
