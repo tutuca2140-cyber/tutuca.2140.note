@@ -20,7 +20,7 @@ import {
   userDatabaseAccess
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
-import { allocatePayment, allocateBalancePayment, roundMoney } from "../shared/finance";
+import { addPeriods, allocatePayment, allocateBalancePayment, roundMoney } from "../shared/finance";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 type DatabaseScope = { userId: number; role: string };
@@ -174,7 +174,30 @@ export async function updateUserRole(userId: number, role: 'user' | 'admin' | 's
 export async function toggleUserActive(userId: number, isActive: boolean) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ isActive }).where(eq(users.id, userId));
+  await db.update(users).set(isActive ? { isActive: true, failedLoginAttempts: 0 } : { isActive: false }).where(eq(users.id, userId));
+}
+
+export async function registerFailedLogin(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const [updated] = await db.update(users)
+    .set({ failedLoginAttempts: sql`${users.failedLoginAttempts} + 1`, updatedAt: new Date() })
+    .where(eq(users.id, userId))
+    .returning({ failedLoginAttempts: users.failedLoginAttempts });
+  const attempts = updated?.failedLoginAttempts ?? 0;
+  if (attempts >= 2) {
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ isActive: false }).where(eq(users.id, userId));
+      await tx.delete(localSessions).where(eq(localSessions.userId, userId));
+    });
+  }
+  return attempts;
+}
+
+export async function resetFailedLogin(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ failedLoginAttempts: 0 }).where(eq(users.id, userId));
 }
 
 export async function updateLocalUser(userId: number, data: {
@@ -188,6 +211,7 @@ export async function updateLocalUser(userId: number, data: {
   canDelete?: boolean;
   canGenerateReports?: boolean;
   canAccessSettings?: boolean;
+  dashboardOnly?: boolean;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -1253,18 +1277,21 @@ export async function getDashboardStats(databaseId: number) {
   if (!db) return null;
 
   try {
-    const [activeLoansResult, paidLoansResult, pendingPaymentsResult, cashInResult, cashOutResult, clientsResult, loanRows, loanPaymentRows, vehicleRows, vehicleSaleRows, vehiclePurchaseRows] = await Promise.all([
+    const [activeLoansResult, paidLoansResult, pendingPaymentsResult, cashInResult, cashOutResult, clientsResult, loanRows, loanPaymentRows, vehicleRows, vehicleSaleRows, vehiclePurchaseRows, financingRows, allPaymentRows, clientRows] = await Promise.all([
       db.select({ count: sql<number>`count(*)`, total: sql<string>`sum(${loans.totalAmount})` }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, 'ativo'))),
       db.select({ count: sql<number>`count(*)`, total: sql<string>`sum(${loans.totalAmount})` }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, 'pago'))),
       db.select({ count: sql<number>`count(*)`, total: sql<string>`sum(${payments.amount})` }).from(payments).where(and(eq(payments.databaseId, databaseId), eq(payments.status, 'pendente'))),
       db.select({ total: sql<string>`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, 'ENTRADA'))),
       db.select({ total: sql<string>`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, 'SAIDA'))),
       db.select({ count: sql<number>`count(*)` }).from(clients).where(eq(clients.databaseId, databaseId)),
-      db.select({ amount: loans.amount, remainingBalance: loans.remainingBalance, accruedInterest: loans.accruedInterest, status: loans.status, endDate: loans.endDate }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
+      db.select({ id: loans.id, clientId: loans.clientId, amount: loans.amount, remainingBalance: loans.remainingBalance, accruedInterest: loans.accruedInterest, status: loans.status, startDate: loans.startDate, endDate: loans.endDate, installments: loans.installments, installmentAmount: loans.installmentAmount, ratePeriod: loans.ratePeriod, description: loans.description }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
       db.select({ amount: payments.amount, interestAmount: payments.interestAmount, principalAmount: payments.principalAmount, status: payments.status, loanId: payments.loanId }).from(payments).where(and(eq(payments.databaseId, databaseId), sql`${payments.loanId} is not null`)),
-      db.select({ expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
+      db.select({ id: vehicles.id, model: vehicles.model, brand: vehicles.brand, status: vehicles.status, expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
       db.select({ saleAmount: vehicleSales.saleAmount, purchasePrice: vehicles.purchasePrice, expenses: vehicles.expenses }).from(vehicleSales).innerJoin(vehicles, eq(vehicleSales.vehicleId, vehicles.id)).where(and(eq(vehicleSales.databaseId, databaseId), eq(vehicles.databaseId, databaseId))),
       db.select({ amount: cashFlow.amount }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, 'SAIDA'), eq(cashFlow.category, 'COMPRA_VEICULO'))),
+      db.select().from(vehicleFinancings).where(and(eq(vehicleFinancings.databaseId, databaseId), sql`${vehicleFinancings.status} <> 'cancelado'`)),
+      db.select().from(payments).where(eq(payments.databaseId, databaseId)),
+      db.select({ id: clients.id, name: clients.name }).from(clients).where(eq(clients.databaseId, databaseId)),
     ]);
 
     const totalEntradas = Number(cashInResult[0]?.total || 0);
@@ -1282,6 +1309,59 @@ export async function getDashboardStats(databaseId: number) {
     const overdueLoans = loanRowsNotCancelled.filter((loan) => loan.status === 'atrasado' || (loan.status === 'ativo' && new Date(loan.endDate).getTime() < Date.now()));
     const totalOverdue = overdueLoans.reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
     const totalVehiclePurchases = vehiclePurchaseRows.reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+    const clientNames = new Map(clientRows.map((client) => [client.id, client.name]));
+    const vehicleNames = new Map(vehicleRows.map((vehicle) => [vehicle.id, `${vehicle.brand ?? ''} ${vehicle.model}`.trim()]));
+    const dateFormatter = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+    });
+    const dateKey = (date: Date) => {
+      const parts = Object.fromEntries(dateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+      return `${parts.year}-${parts.month}-${parts.day}`;
+    };
+    const todayKey = dateKey(new Date());
+    type DueItem = { clientId: number; clientName: string; amount: number; product: string; dueDate: Date; installmentNumber: number; contractType: 'emprestimo' | 'financiamento' };
+    const dueItems: DueItem[] = [];
+    const paidKeys = new Set(allPaymentRows.filter((payment) => payment.status === 'pago').map((payment) =>
+      payment.loanId
+        ? `loan:${payment.loanId}:${payment.installmentNumber}`
+        : `financing:${payment.vehicleFinancingId}:${payment.installmentNumber}`
+    ));
+    for (const loan of loanRows.filter((item) => ['ativo', 'atrasado'].includes(item.status))) {
+      for (let installmentNumber = 1; installmentNumber <= loan.installments; installmentNumber += 1) {
+        if (paidKeys.has(`loan:${loan.id}:${installmentNumber}`)) continue;
+        dueItems.push({
+          clientId: loan.clientId,
+          clientName: clientNames.get(loan.clientId) ?? `Cliente #${loan.clientId}`,
+          amount: Number(loan.installmentAmount),
+          product: loan.description?.trim() || `Empréstimo #${loan.id}`,
+          dueDate: addPeriods(new Date(loan.startDate), installmentNumber, loan.ratePeriod as 'day' | 'week' | 'month' | 'year'),
+          installmentNumber,
+          contractType: 'emprestimo',
+        });
+      }
+    }
+    for (const financing of financingRows.filter((item) => ['ativo', 'atrasado'].includes(item.status))) {
+      for (let installmentNumber = 1; installmentNumber <= financing.installments; installmentNumber += 1) {
+        if (paidKeys.has(`financing:${financing.id}:${installmentNumber}`)) continue;
+        dueItems.push({
+          clientId: financing.clientId,
+          clientName: clientNames.get(financing.clientId) ?? `Cliente #${financing.clientId}`,
+          amount: Number(financing.installmentAmount),
+          product: vehicleNames.get(financing.vehicleId) ?? `Financiamento #${financing.id}`,
+          dueDate: addPeriods(new Date(financing.startDate), installmentNumber, 'month'),
+          installmentNumber,
+          contractType: 'financiamento',
+        });
+      }
+    }
+    const serializeDue = (item: DueItem) => ({ ...item, dueDate: item.dueDate.toISOString() });
+    const dueTodayItems = dueItems.filter((item) => dateKey(item.dueDate) === todayKey).sort((a, b) => a.clientName.localeCompare(b.clientName));
+    const overdueItems = dueItems.filter((item) => dateKey(item.dueDate) < todayKey).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+    const dueToday = dueTodayItems.slice(0, 100).map(serializeDue);
+    const overdue = overdueItems.slice(0, 100).map(serializeDue);
+    const financedVehicleIds = new Set(financingRows.map((financing) => financing.vehicleId));
+    const soldVehicleIds = new Set([...vehicleRows.filter((vehicle) => vehicle.status === 'vendido').map((vehicle) => vehicle.id), ...Array.from(financedVehicleIds)]);
+    const vehiclePayments = allPaymentRows.filter((payment) => payment.vehicleFinancingId !== null);
 
     return {
       activeLoans: { count: Number(activeLoansResult[0]?.count || 0), total: Number(activeLoansResult[0]?.total || 0) },
@@ -1294,6 +1374,13 @@ export async function getDashboardStats(databaseId: number) {
       vehicleProfit: roundMoney(vehicleProfit),
       vehicleExpenses: roundMoney(vehicleExpenses),
       vehicleSalesCount: vehicleSaleRows.length,
+      collections: { dueToday, overdue },
+      vehicleMetrics: {
+        carsSold: soldVehicleIds.size,
+        financings: financingRows.length,
+        installmentsPaid: vehiclePayments.filter((payment) => payment.status === 'pago').length,
+        installmentsOverdue: overdueItems.filter((item) => item.contractType === 'financiamento').length,
+      },
       loanMetrics: {
         totalLent: roundMoney(totalLent),
         totalReceived: roundMoney(totalReceived),
@@ -1328,6 +1415,7 @@ export async function createLocalUser(data: {
   canDelete?: boolean;
   canGenerateReports?: boolean;
   canAccessSettings?: boolean;
+  dashboardOnly?: boolean;
 }): Promise<any> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -1346,6 +1434,7 @@ export async function createLocalUser(data: {
       canDelete: data.canDelete ?? false,
       canGenerateReports: data.canGenerateReports ?? false,
       canAccessSettings: data.canAccessSettings ?? false,
+      dashboardOnly: data.dashboardOnly ?? false,
       isActive: true,
       emailVerified: false,
       lastSignedIn: new Date(),
@@ -1461,7 +1550,7 @@ export async function consumePasswordResetToken(tokenId: number) {
 export async function updateLocalPassword(userId: number, passwordHash: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(users).set({ passwordHash, loginMethod: 'local' }).where(eq(users.id, userId));
+  await db.update(users).set({ passwordHash, loginMethod: 'local', failedLoginAttempts: 0 }).where(eq(users.id, userId));
   await db.delete(localSessions).where(eq(localSessions.userId, userId));
 }
 

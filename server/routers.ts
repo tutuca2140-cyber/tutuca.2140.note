@@ -9,6 +9,7 @@ import * as bcrypt from "bcrypt";
 import { nanoid } from "nanoid";
 import { notifyOwner } from "./_core/notification";
 import { addPeriods, allocatePayment, allocateBalancePayment, calculateInterestOnBalance, calculateLoanPlan, roundMoney } from "../shared/finance";
+import { createLoginCaptcha, verifyLoginCaptcha } from "../shared/login-captcha";
 
 const optionalText = z.string().optional();
 const optionalEmail = z.union([z.string().email(), z.literal('')]).optional();
@@ -30,9 +31,13 @@ const stripLegacyCpf = <T extends { cpf?: unknown }>(client: T): Omit<T, 'cpf'> 
   return withoutCpf;
 };
 
-const protectedProcedure = baseProtectedProcedure.use(({ ctx, next }) =>
-  db.withUserDatabaseScope({ userId: ctx.user.id, role: ctx.user.role }, () => next({ ctx })),
-);
+const protectedProcedure = baseProtectedProcedure.use(({ ctx, next, path }) => {
+  const dashboardAllowed = path.startsWith('dashboard.') || ['databases.list', 'databases.getActive', 'databases.setActive'].includes(path);
+  if (ctx.user.dashboardOnly && !dashboardAllowed) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Este usuário possui acesso somente ao dashboard.' });
+  }
+  return db.withUserDatabaseScope({ userId: ctx.user.id, role: ctx.user.role }, () => next({ ctx }));
+});
 
 // Admin procedure - requer role admin ou super_admin
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -57,6 +62,7 @@ export const appRouter = router({
   
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    captcha: publicProcedure.query(() => createLoginCaptcha()),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -81,8 +87,13 @@ export const appRouter = router({
         username: z.string().min(1),
         password: z.string().min(1),
         rememberMe: z.boolean().optional().default(false),
+        captchaToken: z.string().min(1),
+        captchaAnswer: z.string().min(1),
       }))
       .mutation(async ({ input, ctx }) => {
+        if (!verifyLoginCaptcha(input.captchaToken, input.captchaAnswer)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Confirme corretamente que você não é um robô.' });
+        }
         const user = await db.getUserByUsername(input.username);
         
         if (!user || !user.passwordHash) {
@@ -94,9 +105,13 @@ export const appRouter = router({
 
         const passwordMatch = await bcrypt.compare(input.password, user.passwordHash);
         if (!passwordMatch) {
+          if (user.role === 'super_admin' || user.username?.toLowerCase() === 'draco') {
+            throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Usuário ou senha inválidos' });
+          }
+          const attempts = await db.registerFailedLogin(user.id);
           throw new TRPCError({
-            code: 'UNAUTHORIZED',
-            message: 'Usuário ou senha inválidos'
+            code: attempts >= 2 ? 'FORBIDDEN' : 'UNAUTHORIZED',
+            message: attempts >= 2 ? 'Usuário desativado após duas tentativas incorretas. Solicite a reativação ao Super Admin.' : 'Usuário ou senha inválidos. Mais uma tentativa incorreta desativará a conta.'
           });
         }
 
@@ -106,6 +121,7 @@ export const appRouter = router({
             message: 'Usuário desativado'
           });
         }
+        await db.resetFailedLogin(user.id);
 
         // Criar sessão
         const token = nanoid(32);
@@ -251,6 +267,7 @@ export const appRouter = router({
         canDelete: z.boolean().default(false),
         canGenerateReports: z.boolean().default(false),
         canAccessSettings: z.boolean().default(false),
+        dashboardOnly: z.boolean().default(false),
         databaseIds: z.array(z.number().int().positive()).max(3).default([]),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -303,6 +320,7 @@ export const appRouter = router({
         canDelete: z.boolean(),
         canGenerateReports: z.boolean(),
         canAccessSettings: z.boolean(),
+        dashboardOnly: z.boolean(),
         databaseIds: z.array(z.number().int().positive()).max(3),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -1796,6 +1814,8 @@ export const appRouter = router({
           vehicleProfit: 0,
           vehicleExpenses: 0,
           vehicleSalesCount: 0,
+          collections: { dueToday: [], overdue: [] },
+          vehicleMetrics: { carsSold: 0, financings: 0, installmentsPaid: 0, installmentsOverdue: 0 },
           loanMetrics: {
             totalLent: 0,
             totalReceived: 0,

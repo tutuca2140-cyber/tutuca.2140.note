@@ -8,6 +8,8 @@ export function ensurePreviewBusinessSchema() {
   if (bootstrapPromise) return bootstrapPromise;
   bootstrapPromise = (async () => {
     const sql = neon(process.env.DATABASE_URL!);
+    await sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
+    await sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
     await sql`CREATE TABLE IF NOT EXISTS "databases" ("id" serial PRIMARY KEY, "name" varchar(255) NOT NULL UNIQUE, "description" text, "type" varchar(64) NOT NULL, "isActive" boolean DEFAULT false NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql`CREATE TABLE IF NOT EXISTS "user_database_access" ("id" serial PRIMARY KEY, "userId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE, "databaseId" integer NOT NULL REFERENCES "databases"("id") ON DELETE CASCADE, "isActive" boolean DEFAULT false NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS "user_database_access_user_database_unique" ON "user_database_access" ("userId", "databaseId")`;

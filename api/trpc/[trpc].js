@@ -211,6 +211,8 @@ var users = pgTable("users", {
   canDelete: boolean("canDelete").default(false).notNull(),
   canGenerateReports: boolean("canGenerateReports").default(false).notNull(),
   canAccessSettings: boolean("canAccessSettings").default(false).notNull(),
+  dashboardOnly: boolean("dashboardOnly").default(false).notNull(),
+  failedLoginAttempts: integer("failedLoginAttempts").default(0).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   emailVerified: boolean("emailVerified").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -633,7 +635,25 @@ async function updateUserRole(userId, role) {
 async function toggleUserActive(userId, isActive) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ isActive }).where(eq(users.id, userId));
+  await db.update(users).set(isActive ? { isActive: true, failedLoginAttempts: 0 } : { isActive: false }).where(eq(users.id, userId));
+}
+async function registerFailedLogin(userId) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const [updated] = await db.update(users).set({ failedLoginAttempts: sql`${users.failedLoginAttempts} + 1`, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, userId)).returning({ failedLoginAttempts: users.failedLoginAttempts });
+  const attempts = updated?.failedLoginAttempts ?? 0;
+  if (attempts >= 2) {
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ isActive: false }).where(eq(users.id, userId));
+      await tx.delete(localSessions).where(eq(localSessions.userId, userId));
+    });
+  }
+  return attempts;
+}
+async function resetFailedLogin(userId) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ failedLoginAttempts: 0 }).where(eq(users.id, userId));
 }
 async function updateLocalUser(userId, data) {
   const db = await getDb();
@@ -1410,18 +1430,21 @@ async function getDashboardStats(databaseId) {
   const db = await getDb();
   if (!db) return null;
   try {
-    const [activeLoansResult, paidLoansResult, pendingPaymentsResult, cashInResult, cashOutResult, clientsResult, loanRows, loanPaymentRows, vehicleRows, vehicleSaleRows, vehiclePurchaseRows] = await Promise.all([
+    const [activeLoansResult, paidLoansResult, pendingPaymentsResult, cashInResult, cashOutResult, clientsResult, loanRows, loanPaymentRows, vehicleRows, vehicleSaleRows, vehiclePurchaseRows, financingRows, allPaymentRows, clientRows] = await Promise.all([
       db.select({ count: sql`count(*)`, total: sql`sum(${loans.totalAmount})` }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, "ativo"))),
       db.select({ count: sql`count(*)`, total: sql`sum(${loans.totalAmount})` }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, "pago"))),
       db.select({ count: sql`count(*)`, total: sql`sum(${payments.amount})` }).from(payments).where(and(eq(payments.databaseId, databaseId), eq(payments.status, "pendente"))),
       db.select({ total: sql`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "ENTRADA"))),
       db.select({ total: sql`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "SAIDA"))),
       db.select({ count: sql`count(*)` }).from(clients).where(eq(clients.databaseId, databaseId)),
-      db.select({ amount: loans.amount, remainingBalance: loans.remainingBalance, accruedInterest: loans.accruedInterest, status: loans.status, endDate: loans.endDate }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
+      db.select({ id: loans.id, clientId: loans.clientId, amount: loans.amount, remainingBalance: loans.remainingBalance, accruedInterest: loans.accruedInterest, status: loans.status, startDate: loans.startDate, endDate: loans.endDate, installments: loans.installments, installmentAmount: loans.installmentAmount, ratePeriod: loans.ratePeriod, description: loans.description }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
       db.select({ amount: payments.amount, interestAmount: payments.interestAmount, principalAmount: payments.principalAmount, status: payments.status, loanId: payments.loanId }).from(payments).where(and(eq(payments.databaseId, databaseId), sql`${payments.loanId} is not null`)),
-      db.select({ expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
+      db.select({ id: vehicles.id, model: vehicles.model, brand: vehicles.brand, status: vehicles.status, expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
       db.select({ saleAmount: vehicleSales.saleAmount, purchasePrice: vehicles.purchasePrice, expenses: vehicles.expenses }).from(vehicleSales).innerJoin(vehicles, eq(vehicleSales.vehicleId, vehicles.id)).where(and(eq(vehicleSales.databaseId, databaseId), eq(vehicles.databaseId, databaseId))),
-      db.select({ amount: cashFlow.amount }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "SAIDA"), eq(cashFlow.category, "COMPRA_VEICULO")))
+      db.select({ amount: cashFlow.amount }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "SAIDA"), eq(cashFlow.category, "COMPRA_VEICULO"))),
+      db.select().from(vehicleFinancings).where(and(eq(vehicleFinancings.databaseId, databaseId), sql`${vehicleFinancings.status} <> 'cancelado'`)),
+      db.select().from(payments).where(eq(payments.databaseId, databaseId)),
+      db.select({ id: clients.id, name: clients.name }).from(clients).where(eq(clients.databaseId, databaseId))
     ]);
     const totalEntradas = Number(cashInResult[0]?.total || 0);
     const totalSaidas = Number(cashOutResult[0]?.total || 0);
@@ -1438,6 +1461,57 @@ async function getDashboardStats(databaseId) {
     const overdueLoans = loanRowsNotCancelled.filter((loan) => loan.status === "atrasado" || loan.status === "ativo" && new Date(loan.endDate).getTime() < Date.now());
     const totalOverdue = overdueLoans.reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
     const totalVehiclePurchases = vehiclePurchaseRows.reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+    const clientNames = new Map(clientRows.map((client) => [client.id, client.name]));
+    const vehicleNames = new Map(vehicleRows.map((vehicle) => [vehicle.id, `${vehicle.brand ?? ""} ${vehicle.model}`.trim()]));
+    const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+    const dateKey = (date) => {
+      const parts = Object.fromEntries(dateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+      return `${parts.year}-${parts.month}-${parts.day}`;
+    };
+    const todayKey = dateKey(/* @__PURE__ */ new Date());
+    const dueItems = [];
+    const paidKeys = new Set(allPaymentRows.filter((payment) => payment.status === "pago").map(
+      (payment) => payment.loanId ? `loan:${payment.loanId}:${payment.installmentNumber}` : `financing:${payment.vehicleFinancingId}:${payment.installmentNumber}`
+    ));
+    for (const loan of loanRows.filter((item) => ["ativo", "atrasado"].includes(item.status))) {
+      for (let installmentNumber = 1; installmentNumber <= loan.installments; installmentNumber += 1) {
+        if (paidKeys.has(`loan:${loan.id}:${installmentNumber}`)) continue;
+        dueItems.push({
+          clientId: loan.clientId,
+          clientName: clientNames.get(loan.clientId) ?? `Cliente #${loan.clientId}`,
+          amount: Number(loan.installmentAmount),
+          product: loan.description?.trim() || `Empr\xE9stimo #${loan.id}`,
+          dueDate: addPeriods(new Date(loan.startDate), installmentNumber, loan.ratePeriod),
+          installmentNumber,
+          contractType: "emprestimo"
+        });
+      }
+    }
+    for (const financing of financingRows.filter((item) => ["ativo", "atrasado"].includes(item.status))) {
+      for (let installmentNumber = 1; installmentNumber <= financing.installments; installmentNumber += 1) {
+        if (paidKeys.has(`financing:${financing.id}:${installmentNumber}`)) continue;
+        dueItems.push({
+          clientId: financing.clientId,
+          clientName: clientNames.get(financing.clientId) ?? `Cliente #${financing.clientId}`,
+          amount: Number(financing.installmentAmount),
+          product: vehicleNames.get(financing.vehicleId) ?? `Financiamento #${financing.id}`,
+          dueDate: addPeriods(new Date(financing.startDate), installmentNumber, "month"),
+          installmentNumber,
+          contractType: "financiamento"
+        });
+      }
+    }
+    const serializeDue = (item) => ({ ...item, dueDate: item.dueDate.toISOString() });
+    const dueToday = dueItems.filter((item) => dateKey(item.dueDate) === todayKey).sort((a, b) => a.clientName.localeCompare(b.clientName)).map(serializeDue);
+    const overdue = dueItems.filter((item) => dateKey(item.dueDate) < todayKey).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime()).map(serializeDue);
+    const financedVehicleIds = new Set(financingRows.map((financing) => financing.vehicleId));
+    const soldVehicleIds = /* @__PURE__ */ new Set([...vehicleRows.filter((vehicle) => vehicle.status === "vendido").map((vehicle) => vehicle.id), ...Array.from(financedVehicleIds)]);
+    const vehiclePayments = allPaymentRows.filter((payment) => payment.vehicleFinancingId !== null);
     return {
       activeLoans: { count: Number(activeLoansResult[0]?.count || 0), total: Number(activeLoansResult[0]?.total || 0) },
       paidLoans: { count: Number(paidLoansResult[0]?.count || 0), total: Number(paidLoansResult[0]?.total || 0) },
@@ -1449,6 +1523,13 @@ async function getDashboardStats(databaseId) {
       vehicleProfit: roundMoney(vehicleProfit),
       vehicleExpenses: roundMoney(vehicleExpenses),
       vehicleSalesCount: vehicleSaleRows.length,
+      collections: { dueToday, overdue },
+      vehicleMetrics: {
+        carsSold: soldVehicleIds.size,
+        financings: financingRows.length,
+        installmentsPaid: vehiclePayments.filter((payment) => payment.status === "pago").length,
+        installmentsOverdue: overdue.filter((item) => item.contractType === "financiamento").length
+      },
       loanMetrics: {
         totalLent: roundMoney(totalLent),
         totalReceived: roundMoney(totalReceived),
@@ -1484,6 +1565,7 @@ async function createLocalUser(data) {
       canDelete: data.canDelete ?? false,
       canGenerateReports: data.canGenerateReports ?? false,
       canAccessSettings: data.canAccessSettings ?? false,
+      dashboardOnly: data.dashboardOnly ?? false,
       isActive: true,
       emailVerified: false,
       lastSignedIn: /* @__PURE__ */ new Date()
@@ -1569,13 +1651,44 @@ async function consumePasswordResetToken(tokenId) {
 async function updateLocalPassword(userId, passwordHash) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(users).set({ passwordHash, loginMethod: "local" }).where(eq(users.id, userId));
+  await db.update(users).set({ passwordHash, loginMethod: "local", failedLoginAttempts: 0 }).where(eq(users.id, userId));
   await db.delete(localSessions).where(eq(localSessions.userId, userId));
 }
 
 // server/routers.ts
 import * as bcrypt from "bcrypt";
 import { nanoid } from "nanoid";
+
+// shared/login-captcha.ts
+import crypto from "node:crypto";
+var secret = () => process.env.JWT_SECRET || "note-note-preview-captcha";
+function createLoginCaptcha() {
+  const left = crypto.randomInt(1, 10);
+  const right = crypto.randomInt(1, 10);
+  const payload = Buffer.from(JSON.stringify({
+    answer: left + right,
+    expiresAt: Date.now() + 5 * 60 * 1e3,
+    nonce: crypto.randomBytes(12).toString("hex")
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
+  return { question: `${left} + ${right} = ?`, token: `${payload}.${signature}` };
+}
+function verifyLoginCaptcha(token, answer) {
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return false;
+  const expected = crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) return false;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return parsed.expiresAt >= Date.now() && Number(answer) === parsed.answer;
+  } catch {
+    return false;
+  }
+}
+
+// server/routers.ts
 var optionalText = z2.string().optional();
 var optionalEmail = z2.union([z2.string().email(), z2.literal("")]).optional();
 var optionalAddress = z2.record(z2.string(), z2.string()).optional();
@@ -1595,9 +1708,13 @@ var stripLegacyCpf = (client) => {
   const { cpf: _cpf, ...withoutCpf } = client;
   return withoutCpf;
 };
-var protectedProcedure2 = protectedProcedure.use(
-  ({ ctx, next }) => withUserDatabaseScope({ userId: ctx.user.id, role: ctx.user.role }, () => next({ ctx }))
-);
+var protectedProcedure2 = protectedProcedure.use(({ ctx, next, path }) => {
+  const dashboardAllowed = path.startsWith("dashboard.") || ["databases.list", "databases.getActive", "databases.setActive"].includes(path);
+  if (ctx.user.dashboardOnly && !dashboardAllowed) {
+    throw new TRPCError3({ code: "FORBIDDEN", message: "Este usu\xE1rio possui acesso somente ao dashboard." });
+  }
+  return withUserDatabaseScope({ userId: ctx.user.id, role: ctx.user.role }, () => next({ ctx }));
+});
 var adminProcedure2 = protectedProcedure2.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin" && ctx.user.role !== "super_admin") {
     throw new TRPCError3({
@@ -1617,6 +1734,7 @@ var appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
+    captcha: publicProcedure.query(() => createLoginCaptcha()),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -1635,8 +1753,13 @@ var appRouter = router({
     loginLocal: publicProcedure.input(z2.object({
       username: z2.string().min(1),
       password: z2.string().min(1),
-      rememberMe: z2.boolean().optional().default(false)
+      rememberMe: z2.boolean().optional().default(false),
+      captchaToken: z2.string().min(1),
+      captchaAnswer: z2.string().min(1)
     })).mutation(async ({ input, ctx }) => {
+      if (!verifyLoginCaptcha(input.captchaToken, input.captchaAnswer)) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Confirme corretamente que voc\xEA n\xE3o \xE9 um rob\xF4." });
+      }
       const user = await getUserByUsername(input.username);
       if (!user || !user.passwordHash) {
         throw new TRPCError3({
@@ -1646,9 +1769,13 @@ var appRouter = router({
       }
       const passwordMatch = await bcrypt.compare(input.password, user.passwordHash);
       if (!passwordMatch) {
+        if (user.role === "super_admin" || user.username?.toLowerCase() === "draco") {
+          throw new TRPCError3({ code: "UNAUTHORIZED", message: "Usu\xE1rio ou senha inv\xE1lidos" });
+        }
+        const attempts = await registerFailedLogin(user.id);
         throw new TRPCError3({
-          code: "UNAUTHORIZED",
-          message: "Usu\xE1rio ou senha inv\xE1lidos"
+          code: attempts >= 2 ? "FORBIDDEN" : "UNAUTHORIZED",
+          message: attempts >= 2 ? "Usu\xE1rio desativado ap\xF3s duas tentativas incorretas. Solicite a reativa\xE7\xE3o ao Super Admin." : "Usu\xE1rio ou senha inv\xE1lidos. Mais uma tentativa incorreta desativar\xE1 a conta."
         });
       }
       if (!user.isActive) {
@@ -1657,6 +1784,7 @@ var appRouter = router({
           message: "Usu\xE1rio desativado"
         });
       }
+      await resetFailedLogin(user.id);
       const token = nanoid(32);
       const sessionDuration = input.rememberMe ? 30 * 24 * 60 * 60 * 1e3 : 8 * 60 * 60 * 1e3;
       const expiresAt = new Date(Date.now() + sessionDuration);
@@ -1766,6 +1894,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       canDelete: z2.boolean().default(false),
       canGenerateReports: z2.boolean().default(false),
       canAccessSettings: z2.boolean().default(false),
+      dashboardOnly: z2.boolean().default(false),
       databaseIds: z2.array(z2.number().int().positive()).max(3).default([])
     })).mutation(async ({ input, ctx }) => {
       if (await getUserByUsername(input.username)) {
@@ -1815,6 +1944,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       canDelete: z2.boolean(),
       canGenerateReports: z2.boolean(),
       canAccessSettings: z2.boolean(),
+      dashboardOnly: z2.boolean(),
       databaseIds: z2.array(z2.number().int().positive()).max(3)
     })).mutation(async ({ input, ctx }) => {
       const target = await getUserById(input.userId);
@@ -3089,6 +3219,8 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           vehicleProfit: 0,
           vehicleExpenses: 0,
           vehicleSalesCount: 0,
+          collections: { dueToday: [], overdue: [] },
+          vehicleMetrics: { carsSold: 0, financings: 0, installmentsPaid: 0, installmentsOverdue: 0 },
           loanMetrics: {
             totalLent: 0,
             totalReceived: 0,
@@ -3235,8 +3367,8 @@ var SDKServer = class {
     return new Map(Object.entries(parsed));
   }
   getSessionSecret() {
-    const secret = ENV.cookieSecret;
-    return new TextEncoder().encode(secret);
+    const secret2 = ENV.cookieSecret;
+    return new TextEncoder().encode(secret2);
   }
   /**
    * Create a session token for a Manus user openId
@@ -3370,6 +3502,8 @@ function ensurePreviewBusinessSchema() {
   if (bootstrapPromise) return bootstrapPromise;
   bootstrapPromise = (async () => {
     const sql2 = neon(process.env.DATABASE_URL);
+    await sql2`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
+    await sql2`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
     await sql2`CREATE TABLE IF NOT EXISTS "databases" ("id" serial PRIMARY KEY, "name" varchar(255) NOT NULL UNIQUE, "description" text, "type" varchar(64) NOT NULL, "isActive" boolean DEFAULT false NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`CREATE TABLE IF NOT EXISTS "user_database_access" ("id" serial PRIMARY KEY, "userId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE, "databaseId" integer NOT NULL REFERENCES "databases"("id") ON DELETE CASCADE, "isActive" boolean DEFAULT false NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`CREATE UNIQUE INDEX IF NOT EXISTS "user_database_access_user_database_unique" ON "user_database_access" ("userId", "databaseId")`;

@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -19,9 +19,26 @@ export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showRecovery, setShowRecovery] = useState(false);
+  const [notRobot, setNotRobot] = useState(false);
+  const [captcha, setCaptcha] = useState({ question: "", token: "" });
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
+
+  const refreshCaptcha = useCallback(async () => {
+    const response = await fetch("/api/auth/captcha", { cache: "no-store" });
+    const result = await response.json();
+    if (response.ok && result?.success) setCaptcha({ question: result.question, token: result.token });
+  }, []);
+
+  useEffect(() => {
+    void refreshCaptcha();
+  }, [refreshCaptcha]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!notRobot || !captchaAnswer.trim()) {
+      toast.error("Marque “Não sou um robô” e resolva a verificação.");
+      return;
+    }
     setIsLoading(true);
 
     try {
@@ -35,6 +52,8 @@ export default function Login() {
           username,
           password,
           rememberMe,
+          captchaToken: captcha.token,
+          captchaAnswer,
         }),
       });
 
@@ -48,6 +67,8 @@ export default function Login() {
       setLocation("/dashboard");
     } catch (error: any) {
       toast.error(error?.message || "Não foi possível realizar o login.");
+      setCaptchaAnswer("");
+      void refreshCaptcha();
     } finally {
       setIsLoading(false);
     }
@@ -127,6 +148,34 @@ export default function Login() {
                     />
                     Lembrar-me neste dispositivo por 30 dias
                   </label>
+
+                  <div className="space-y-3 rounded-xl border bg-slate-50 p-4">
+                    <label className="flex items-center gap-3 text-sm font-medium">
+                      <input
+                        type="checkbox"
+                        checked={notRobot}
+                        onChange={e => setNotRobot(e.target.checked)}
+                        disabled={isLoading}
+                        className="h-5 w-5"
+                      />
+                      Não sou um robô
+                    </label>
+                    {notRobot ? (
+                      <div>
+                        <Label htmlFor="captcha">Verificação: {captcha.question}</Label>
+                        <Input
+                          id="captcha"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          value={captchaAnswer}
+                          onChange={e => setCaptchaAnswer(e.target.value)}
+                          disabled={isLoading}
+                          className="mt-2"
+                          required
+                        />
+                      </div>
+                    ) : null}
+                  </div>
 
                   <Button type="submit" className="w-full" disabled={isLoading}>
                     {isLoading ? "Entrando..." : "Entrar"}

@@ -21,6 +21,8 @@ export const users = pgTable("users", {
   canDelete: boolean("canDelete").default(false).notNull(),
   canGenerateReports: boolean("canGenerateReports").default(false).notNull(),
   canAccessSettings: boolean("canAccessSettings").default(false).notNull(),
+  dashboardOnly: boolean("dashboardOnly").default(false).notNull(),
+  failedLoginAttempts: integer("failedLoginAttempts").default(0).notNull(),
   
   isActive: boolean("isActive").default(true).notNull(),
   emailVerified: boolean("emailVerified").default(false).notNull(),

@@ -17,6 +17,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const sql = getSql();
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
 
     const rows = await sql`
       SELECT
@@ -31,6 +32,7 @@ export default async function handler(req: any, res: any) {
         u."canDelete",
         u."canGenerateReports",
         u."canAccessSettings",
+        u."dashboardOnly",
         u."isActive"
       FROM local_sessions s
       INNER JOIN users u ON u.id = s."userId"

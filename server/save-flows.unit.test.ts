@@ -235,4 +235,13 @@ describe("fluxos de gravação", () => {
       .rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(dbMock.createLocalUser).not.toHaveBeenCalled();
   });
+
+  it("restringe o perfil mais simples somente ao dashboard", async () => {
+    const dashboardContext = {
+      ...context,
+      user: { ...context.user!, role: "user" as const, dashboardOnly: true },
+    } as TrpcContext;
+    await expect(appRouter.createCaller(dashboardContext).clients.list())
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });

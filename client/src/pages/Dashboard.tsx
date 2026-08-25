@@ -11,6 +11,9 @@ import {
   ArrowUpRight,
   Clock3,
   ReceiptText,
+  Car,
+  CalendarDays,
+  AlertTriangle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -329,6 +332,24 @@ export default function Dashboard() {
               </p>
             </CardContent>
           </Card>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Card><CardHeader className="flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Carros vendidos</CardTitle><Car className="h-4 w-4 text-primary" /></CardHeader><CardContent><p className="text-2xl font-bold">{stats?.vehicleMetrics?.carsSold ?? 0}</p><p className="text-xs text-muted-foreground">Vendidos ou financiados</p></CardContent></Card>
+          <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Financiamentos</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold">{stats?.vehicleMetrics?.financings ?? 0}</p><p className="text-xs text-muted-foreground">Contratos não cancelados</p></CardContent></Card>
+          <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Parcelas pagas</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-emerald-600">{stats?.vehicleMetrics?.installmentsPaid ?? 0}</p><p className="text-xs text-muted-foreground">Financiamentos de veículos</p></CardContent></Card>
+          <Card className="border-rose-200"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Parcelas em atraso</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-rose-600">{stats?.vehicleMetrics?.installmentsOverdue ?? 0}</p><p className="text-xs text-muted-foreground">Financiamentos vencidos</p></CardContent></Card>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card className="border-amber-200"><CardHeader><CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-amber-600" />Clientes que pagam hoje</CardTitle></CardHeader><CardContent className="space-y-2">
+            {(stats?.collections?.dueToday ?? []).map(item => <div key={`${item.contractType}-${item.clientId}-${item.installmentNumber}`} className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_auto]"><div><p className="font-medium">{item.clientName}</p><p className="text-xs text-muted-foreground">{item.product} · Parcela {item.installmentNumber}</p></div><p className="font-semibold text-amber-700">{formatCurrency(item.amount)}</p></div>)}
+            {!stats?.collections?.dueToday?.length ? <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma cobrança vence hoje.</p> : null}
+          </CardContent></Card>
+          <Card className="border-rose-200"><CardHeader><CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-rose-600" />Clientes em atraso</CardTitle></CardHeader><CardContent className="max-h-96 space-y-2 overflow-y-auto">
+            {(stats?.collections?.overdue ?? []).map(item => <div key={`${item.contractType}-${item.clientId}-${item.installmentNumber}`} className="grid gap-2 rounded-lg border border-rose-100 p-3 sm:grid-cols-[1fr_auto]"><div><p className="font-medium">{item.clientName}</p><p className="text-xs text-muted-foreground">{item.product} · Parcela {item.installmentNumber} · Venceu em {new Date(item.dueDate).toLocaleDateString("pt-BR")}</p></div><p className="font-semibold text-rose-600">{formatCurrency(item.amount)}</p></div>)}
+            {!stats?.collections?.overdue?.length ? <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma cobrança em atraso.</p> : null}
+          </CardContent></Card>
         </div>
 
         <Card className="border-primary/20">

@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import bcrypt from "bcrypt";
 import { appRouter } from "./routers";
+import { createLoginCaptcha } from "../shared/login-captcha";
+
+const captchaInput = () => {
+  const captcha = createLoginCaptcha();
+  const [left, right] = captcha.question.match(/\d+/g)!.map(Number);
+  return { captchaToken: captcha.token, captchaAnswer: String(left + right) };
+};
 import * as db from "./db";
 import type { TrpcContext } from "./_core/context";
 import { COOKIE_NAME } from "@shared/const";
@@ -56,6 +63,7 @@ describe("super administrador Draco", () => {
     const result = await caller.auth.loginLocal({
       username: "Draco",
       password: "762762",
+      ...captchaInput(),
     });
 
     expect(result).toEqual({ success: true });
@@ -71,7 +79,7 @@ describe("super administrador Draco", () => {
     const rememberedCookies: string[] = [];
     const rememberedMaxAges: number[] = [];
     const rememberedCaller = appRouter.createCaller(createAdminContext(rememberedCookies, rememberedMaxAges));
-    await rememberedCaller.auth.loginLocal({ username: "Draco", password: "762762", rememberMe: true });
+    await rememberedCaller.auth.loginLocal({ username: "Draco", password: "762762", rememberMe: true, ...captchaInput() });
     expect(rememberedMaxAges[0]).toBe(30 * 24 * 60 * 60 * 1000);
 
     await db.deleteLocalSession(cookieValues[0]!);
