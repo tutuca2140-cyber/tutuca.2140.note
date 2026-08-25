@@ -165,7 +165,7 @@ export default function Financiamentos() {
                 <DialogTitle>Novo Financiamento de Veículo</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleCreateSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <Label htmlFor="clientId">Cliente *</Label>
                     <Select value={formData.clientId} onValueChange={(value) => setFormData({ ...formData, clientId: value })}>
@@ -425,7 +425,7 @@ export default function Financiamentos() {
             <DialogTitle>Editar Financiamento #{selectedFinancing?.id}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleEditSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor="vehiclePrice">Preço do Veículo *</Label>
                 <Input

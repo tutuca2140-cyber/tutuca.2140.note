@@ -29,6 +29,13 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   return next({ ctx });
 });
 
+const superAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== 'super_admin') {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Apenas o Super Admin pode gerenciar usuários.' });
+  }
+  return next({ ctx });
+});
+
 export const appRouter = router({
   system: systemRouter,
   
@@ -215,6 +222,51 @@ export const appRouter = router({
         return await db.getUserById(input.id);
       }),
 
+    create: superAdminProcedure
+      .input(z.object({
+        username: z.string().trim().min(3).max(100),
+        email: z.string().trim().email(),
+        name: z.string().trim().min(1).max(200),
+        password: z.string().min(6),
+        role: z.enum(['user', 'admin']).default('user'),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (await db.getUserByUsername(input.username)) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'Nome de usuário já cadastrado.' });
+        }
+        if (await db.getUserByEmail(input.email)) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'E-mail já cadastrado.' });
+        }
+        const passwordHash = await bcrypt.hash(input.password, 10);
+        const created = await db.createLocalUser({ ...input, passwordHash });
+        const createdUser = await db.getUserByUsername(input.username);
+        if (createdUser && input.role !== 'user') await db.updateUserRole(createdUser.id, input.role);
+        await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || 'Super Admin', action: 'create_user', entity: 'users', entityId: createdUser?.id, details: `Usuário criado: ${input.username}`, status: 'success' });
+        return createdUser ?? created;
+      }),
+
+    update: superAdminProcedure
+      .input(z.object({
+        userId: z.number(),
+        username: z.string().trim().min(3).max(100),
+        email: z.string().trim().email(),
+        name: z.string().trim().min(1).max(200),
+        role: z.enum(['user', 'admin']),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const target = await db.getUserById(input.userId);
+        if (!target) throw new TRPCError({ code: 'NOT_FOUND', message: 'Usuário não encontrado.' });
+        if (target.username?.toLowerCase() === 'draco') throw new TRPCError({ code: 'FORBIDDEN', message: 'O Super Admin protegido não pode ser editado.' });
+        const usernameOwner = await db.getUserByUsername(input.username);
+        if (usernameOwner && usernameOwner.id !== input.userId) throw new TRPCError({ code: 'CONFLICT', message: 'Nome de usuário já cadastrado.' });
+        const emailOwner = await db.getUserByEmail(input.email);
+        if (emailOwner && emailOwner.id !== input.userId) throw new TRPCError({ code: 'CONFLICT', message: 'E-mail já cadastrado.' });
+        const { userId, ...data } = input;
+        await db.updateLocalUser(userId, data);
+        await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || 'Super Admin', action: 'update_user', entity: 'users', entityId: userId, details: `Usuário editado: ${input.username}`, status: 'success' });
+        return { success: true };
+      }),
+
     updatePermissions: adminProcedure
       .input(z.object({
         userId: z.number(),
@@ -274,7 +326,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    toggleActive: adminProcedure
+    toggleActive: superAdminProcedure
       .input(z.object({
         userId: z.number(),
         isActive: z.boolean()
@@ -286,6 +338,7 @@ export const appRouter = router({
         }
 
         await db.toggleUserActive(input.userId, input.isActive);
+        if (!input.isActive) await db.deleteUserSessions(input.userId);
         
         await db.createAuditLog({
           userId: ctx.user.id,
@@ -300,7 +353,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    adminResetPassword: adminProcedure
+    adminResetPassword: superAdminProcedure
       .input(z.object({
         userId: z.number(),
         password: z.string().min(6),
@@ -316,6 +369,7 @@ export const appRouter = router({
 
         const passwordHash = await bcrypt.hash(input.password, 10);
         await db.updateLocalPassword(targetUser.id, passwordHash);
+        await db.deleteUserSessions(targetUser.id);
         await db.createAuditLog({
           userId: ctx.user.id,
           username: ctx.user.name || ctx.user.email || 'Admin',

@@ -21,7 +21,11 @@ type UseAuthOptions = {
 };
 
 export function useAuth(options?: UseAuthOptions) {
-  const { redirectOnUnauthenticated = false, redirectPath = "/login" } = options ?? {};
+  const {
+    redirectOnUnauthenticated = false,
+    redirectPath = "/login",
+  } = options ?? {};
+
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -29,6 +33,7 @@ export function useAuth(options?: UseAuthOptions) {
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+
     try {
       const response = await fetch("/api/auth/me", {
         method: "GET",
@@ -42,6 +47,7 @@ export function useAuth(options?: UseAuthOptions) {
       }
 
       const data = await response.json();
+
       if (!response.ok || !data?.authenticated || !data?.user) {
         throw new Error(data?.message || "Não foi possível validar a sessão.");
       }
@@ -49,7 +55,8 @@ export function useAuth(options?: UseAuthOptions) {
       setUser(data.user);
       return data.user as AuthUser;
     } catch (err) {
-      const normalized = err instanceof Error ? err : new Error("Falha ao validar sessão.");
+      const normalized =
+        err instanceof Error ? err : new Error("Falha ao validar sessão.");
       setError(normalized);
       setUser(null);
       return null;
@@ -60,19 +67,35 @@ export function useAuth(options?: UseAuthOptions) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
     } finally {
       setUser(null);
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   useEffect(() => {
-    if (!redirectOnUnauthenticated || loading || user || typeof window === "undefined") return;
+    if (!redirectOnUnauthenticated) return;
+    if (loading) return;
+    if (user) return;
+    if (typeof window === "undefined") return;
     if (window.location.pathname === redirectPath) return;
-    window.location.replace(redirectPath);
+
+    window.location.href = redirectPath;
   }, [loading, redirectOnUnauthenticated, redirectPath, user]);
 
-  return { user, loading, error, isAuthenticated: Boolean(user), refresh, logout };
+  return {
+    user,
+    loading,
+    error,
+    isAuthenticated: Boolean(user),
+    refresh,
+    logout,
+  };
 }
