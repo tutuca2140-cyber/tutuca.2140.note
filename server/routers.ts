@@ -43,7 +43,7 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 
 const superAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== 'super_admin') {
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'Apenas o Super Admin pode gerenciar usuários.' });
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Apenas o Super Admin pode acessar este recurso.' });
   }
   return next({ ctx });
 });
@@ -978,9 +978,9 @@ export const appRouter = router({
           installments: plan.periods,
           installmentAmount: plan.installmentAmount.toFixed(2),
           totalAmount: plan.totalAmount.toFixed(2),
-          remainingBalance: plan.principal.toFixed(2),
+          remainingBalance: plan.totalAmount.toFixed(2),
           principalBalance: plan.principal.toFixed(2),
-          accruedInterest: '0.00',
+          accruedInterest: plan.interestAmount.toFixed(2),
           totalPaid: '0.00',
           lastInterestPeriod: null,
           startDate,
@@ -1050,8 +1050,20 @@ export const appRouter = router({
         const interestType = input.interestType ?? currentLoan.interestType;
         const ratePeriod = input.ratePeriod ?? currentLoan.ratePeriod;
         const periods = input.installments ?? currentLoan.installments ?? 1;
-        const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
         const { id, status, description, clientId } = input;
+        const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
+        const financialTermsChanged = input.amount !== undefined
+          || input.interestType !== undefined
+          || input.interestRate !== undefined
+          || input.ratePeriod !== undefined
+          || input.installments !== undefined
+          || input.installmentAmount !== undefined
+          || input.totalAmount !== undefined;
+        const hasInitialInterest = Boolean(await db.getLoanInterestPeriod(
+          id,
+          activeDb.id,
+          db.INITIAL_LOAN_INTEREST_PERIOD,
+        ));
         await db.updateLoanInDatabase(id, activeDb.id, {
           clientId,
           amount: plan.principal.toFixed(2),
@@ -1059,13 +1071,13 @@ export const appRouter = router({
           interestRate: ratePercent.toFixed(4),
           ratePeriod,
           installments: plan.periods,
-          installmentAmount: input.installmentAmount ?? plan.installmentAmount.toFixed(2),
-          totalAmount: input.totalAmount ?? plan.totalAmount.toFixed(2),
+          installmentAmount: plan.installmentAmount.toFixed(2),
+          totalAmount: plan.totalAmount.toFixed(2),
           startDate,
           endDate,
           ...(status !== undefined ? { status } : {}),
           ...(description !== undefined ? { description } : {}),
-        });
+        }, financialTermsChanged || hasInitialInterest ? plan.interestAmount : undefined);
         await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || 'Usuário', action: 'update_loan', entity: 'loans', entityId: id, databaseId: activeDb.id, details: JSON.stringify(input), status: 'success' });
         return { success: true, message: 'Empréstimo atualizado com sucesso.' };
       }),
@@ -1311,6 +1323,28 @@ export const appRouter = router({
       await db.createCashFlowEntry({ ...input, amount: input.amount.toFixed(2), movementDate, databaseId: activeDb.id, createdBy: ctx.user.id });
       return { success: true };
     }),
+    delete: superAdminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
+        const result = await db.deleteManualCashFlowEntry(input.id, activeDb.id);
+        if (!result.deleted) {
+          if (result.reason === 'not_found') throw new TRPCError({ code: 'NOT_FOUND', message: 'Lançamento não encontrado no banco ativo.' });
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Lançamentos automáticos devem ser corrigidos na operação de origem e não podem ser excluídos diretamente do caixa.' });
+        }
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.email || 'Super Admin',
+          action: 'delete_manual_cash_flow',
+          entity: 'cash_flow',
+          entityId: result.entry.id,
+          databaseId: activeDb.id,
+          details: JSON.stringify({ type: result.entry.type, category: result.entry.category, description: result.entry.description, amount: result.entry.amount }),
+          status: 'warning',
+        });
+        return { success: true, message: 'Lançamento manual excluído do caixa.' };
+      }),
   }),
 
   // ==================== VEHICLES ====================
@@ -1723,6 +1757,7 @@ export const appRouter = router({
             totalInterestReceived: 0,
             totalPrincipalAmortized: 0,
             totalOpen: 0,
+            totalInterestOpen: 0,
             overdueCount: 0,
             totalOverdue: 0,
             totalVehiclePurchases: 0,

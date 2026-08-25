@@ -8,6 +8,7 @@ const dbMock = vi.hoisted(() => ({
   createAgent: vi.fn(),
   createVehicleFinancing: vi.fn(),
   createLoanBundle: vi.fn(),
+  deleteManualCashFlowEntry: vi.fn(),
   createAuditLog: vi.fn(),
 }));
 
@@ -117,8 +118,61 @@ describe("fluxos de gravação", () => {
     });
     expect(result).toMatchObject({ loanId: 23 });
     expect(dbMock.createLoanBundle).toHaveBeenCalledWith(
-      expect.objectContaining({ databaseId: 7, clientId: 11, amount: "1000.00", createdBy: 1 }),
+      expect.objectContaining({
+        databaseId: 7,
+        clientId: 11,
+        amount: "1000.00",
+        accruedInterest: "500.00",
+        remainingBalance: "1500.00",
+        totalAmount: "1500.00",
+        createdBy: 1,
+      }),
       expect.objectContaining({ databaseId: 7, type: "SAIDA", clientId: 11, amount: "1000.00", createdBy: 1 }),
     );
+  });
+
+  it("inclui imediatamente 30% de juros no saldo sem inflar a saída de caixa", async () => {
+    dbMock.createLoanBundle.mockResolvedValue({ loanId: 24, result: { id: 24 } });
+    await appRouter.createCaller(context).loans.create({
+      clientId: 11,
+      amount: "1000.00",
+      interestRate: "30.00",
+      installments: 1,
+      startDate: "2026-08-25T12:00:00.000Z",
+    });
+    expect(dbMock.createLoanBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: "1000.00",
+        accruedInterest: "300.00",
+        remainingBalance: "1300.00",
+        totalAmount: "1300.00",
+      }),
+      expect.objectContaining({ amount: "1000.00", category: "LIBERACAO_EMPRESTIMO" }),
+    );
+  });
+
+  it("permite ao Super Admin excluir um lançamento manual do caixa", async () => {
+    dbMock.deleteManualCashFlowEntry.mockResolvedValue({
+      deleted: true,
+      entry: { id: 31, type: "SAIDA", category: "OUTROS", description: "Despesa manual", amount: "25.00" },
+    });
+    await expect(appRouter.createCaller(context).cashFlow.delete({ id: 31 })).resolves.toMatchObject({ success: true });
+    expect(dbMock.deleteManualCashFlowEntry).toHaveBeenCalledWith(31, 7);
+    expect(dbMock.createAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "delete_manual_cash_flow", entityId: 31 }));
+  });
+
+  it("bloqueia exclusão direta de movimentos automáticos", async () => {
+    dbMock.deleteManualCashFlowEntry.mockResolvedValue({
+      deleted: false,
+      reason: "automatic",
+      entry: { id: 32, type: "SAIDA", category: "LIBERACAO_EMPRESTIMO", description: "Liberação", amount: "1000.00" },
+    });
+    await expect(appRouter.createCaller(context).cashFlow.delete({ id: 32 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("nega a exclusão no caixa para quem não é Super Admin", async () => {
+    const adminContext = { ...context, user: { ...context.user!, role: "admin" as const } } as TrpcContext;
+    await expect(appRouter.createCaller(adminContext).cashFlow.delete({ id: 31 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(dbMock.deleteManualCashFlowEntry).not.toHaveBeenCalled();
   });
 });

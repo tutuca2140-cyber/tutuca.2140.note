@@ -759,6 +759,7 @@ async function getClientProfile(clientId, databaseId) {
     financialHistory: { totalPaid, totalInterest, totalPrincipal, totalCommissions, remainingBalance, paymentCount: paymentsForClient.length }
   };
 }
+var INITIAL_LOAN_INTEREST_PERIOD = "CONTRATO_INICIAL";
 async function createLoanBundle(data, cashEntry) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -766,6 +767,19 @@ async function createLoanBundle(data, cashEntry) {
     const [createdLoan] = await tx.insert(loans).values(data).returning({ id: loans.id });
     const loanId = createdLoan?.id;
     if (!loanId) throw new Error("N\xE3o foi poss\xEDvel identificar o empr\xE9stimo criado.");
+    if (Number(data.accruedInterest || 0) > 0) {
+      await tx.insert(loanInterestHistory).values({
+        databaseId: data.databaseId,
+        loanId,
+        periodReference: INITIAL_LOAN_INTEREST_PERIOD,
+        previousPrincipalBalance: data.amount,
+        interestGenerated: data.accruedInterest,
+        paymentAmount: "0.00",
+        interestPaid: "0.00",
+        principalAmortized: "0.00",
+        updatedPrincipalBalance: data.amount
+      });
+    }
     await tx.insert(cashFlow).values({
       ...cashEntry,
       loanId,
@@ -826,7 +840,7 @@ async function recalculateLoanWithTransaction(tx, loanId, databaseId) {
       netAmount: roundMoney(Number(payment.amount || 0) - Number(payment.amount || 0) * Number(payment.commissionPercentage || 0) / 100).toFixed(2)
     }).where(eq(payments.id, payment.id));
   }
-  const nextStatus = principalBalance + interestPool <= 0 ? "pago" : new Date(loan.endDate) < /* @__PURE__ */ new Date() ? "atrasado" : "ativo";
+  const nextStatus = loan.status === "cancelado" ? "cancelado" : principalBalance + interestPool <= 0 ? "pago" : new Date(loan.endDate) < /* @__PURE__ */ new Date() ? "atrasado" : "ativo";
   await tx.update(loans).set({
     principalBalance: principalBalance.toFixed(2),
     accruedInterest: interestPool.toFixed(2),
@@ -910,10 +924,55 @@ async function updateLoanBalance(id, databaseId, data) {
   if (!db) return;
   await db.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
 }
-async function updateLoanInDatabase(id, databaseId, data) {
+async function updateLoanInDatabase(id, databaseId, data, initialInterest) {
   const db = await getDb();
   if (!db) return;
-  await db.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
+  return db.transaction(async (tx) => {
+    await tx.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
+    if (initialInterest !== void 0) {
+      const initialRows = await tx.select().from(loanInterestHistory).where(and(
+        eq(loanInterestHistory.loanId, id),
+        eq(loanInterestHistory.databaseId, databaseId),
+        eq(loanInterestHistory.periodReference, INITIAL_LOAN_INTEREST_PERIOD)
+      )).limit(1);
+      const principal = String(data.amount || "0.00");
+      if (initialInterest > 0) {
+        const historyValues = {
+          previousPrincipalBalance: principal,
+          interestGenerated: roundMoney(initialInterest).toFixed(2),
+          paymentAmount: "0.00",
+          interestPaid: "0.00",
+          principalAmortized: "0.00",
+          updatedPrincipalBalance: principal
+        };
+        if (initialRows[0]) {
+          await tx.update(loanInterestHistory).set(historyValues).where(eq(loanInterestHistory.id, initialRows[0].id));
+        } else {
+          await tx.insert(loanInterestHistory).values({
+            databaseId,
+            loanId: id,
+            periodReference: INITIAL_LOAN_INTEREST_PERIOD,
+            ...historyValues
+          });
+        }
+      } else if (initialRows[0]) {
+        await tx.delete(loanInterestHistory).where(eq(loanInterestHistory.id, initialRows[0].id));
+      }
+      await recalculateLoanWithTransaction(tx, id, databaseId);
+    }
+    const cashUpdate = {};
+    if (data.amount !== void 0) cashUpdate.amount = data.amount;
+    if (data.startDate !== void 0) cashUpdate.movementDate = data.startDate;
+    if (data.clientId !== void 0) cashUpdate.clientId = data.clientId;
+    if (data.description !== void 0) cashUpdate.notes = data.description;
+    if (Object.keys(cashUpdate).length > 0) {
+      await tx.update(cashFlow).set(cashUpdate).where(and(
+        eq(cashFlow.loanId, id),
+        eq(cashFlow.databaseId, databaseId),
+        eq(cashFlow.category, "LIBERACAO_EMPRESTIMO")
+      ));
+    }
+  });
 }
 async function getLoansByClient(clientId, databaseId) {
   const db = await getDb();
@@ -1093,6 +1152,31 @@ async function getCashFlowByDatabase(databaseId) {
   if (!db) return [];
   return db.select().from(cashFlow).where(eq(cashFlow.databaseId, databaseId)).orderBy(desc(cashFlow.movementDate));
 }
+var automaticCashCategories = /* @__PURE__ */ new Set([
+  "LIBERACAO_EMPRESTIMO",
+  "JUROS_EMPRESTIMO",
+  "PAGAMENTO_EMPRESTIMO",
+  "QUITACAO_EMPRESTIMO",
+  "PAGAMENTO_FINANCIAMENTO",
+  "COMPRA_VEICULO",
+  "VENDA_VEICULO",
+  "RECEBIMENTO_VENDA_VEICULO"
+]);
+function isManualCashFlowEntry(entry) {
+  return !entry.sourceKey && !entry.paymentId && !entry.loanId && !entry.vehicleId && !entry.vehicleSaleId && !automaticCashCategories.has(entry.category);
+}
+async function deleteManualCashFlowEntry(id, databaseId) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async (tx) => {
+    const rows = await tx.select().from(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId))).limit(1);
+    const entry = rows[0];
+    if (!entry) return { deleted: false, reason: "not_found" };
+    if (!isManualCashFlowEntry(entry)) return { deleted: false, reason: "automatic", entry };
+    await tx.delete(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId)));
+    return { deleted: true, entry };
+  });
+}
 async function getCashFlowByLoan(loanId, databaseId) {
   const db = await getDb();
   if (!db) return [];
@@ -1236,7 +1320,7 @@ async function getDashboardStats(databaseId) {
       db.select({ total: sql`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "ENTRADA"))),
       db.select({ total: sql`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "SAIDA"))),
       db.select({ count: sql`count(*)` }).from(clients).where(eq(clients.databaseId, databaseId)),
-      db.select({ amount: loans.amount, remainingBalance: loans.remainingBalance, status: loans.status, endDate: loans.endDate }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
+      db.select({ amount: loans.amount, remainingBalance: loans.remainingBalance, accruedInterest: loans.accruedInterest, status: loans.status, endDate: loans.endDate }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
       db.select({ amount: payments.amount, interestAmount: payments.interestAmount, principalAmount: payments.principalAmount, status: payments.status, loanId: payments.loanId }).from(payments).where(and(eq(payments.databaseId, databaseId), sql`${payments.loanId} is not null`)),
       db.select({ expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
       db.select({ saleAmount: vehicleSales.saleAmount, purchasePrice: vehicles.purchasePrice, expenses: vehicles.expenses }).from(vehicleSales).innerJoin(vehicles, eq(vehicleSales.vehicleId, vehicles.id)).where(and(eq(vehicleSales.databaseId, databaseId), eq(vehicles.databaseId, databaseId))),
@@ -1253,6 +1337,7 @@ async function getDashboardStats(databaseId) {
     const totalInterestReceived = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0);
     const totalPrincipalAmortized = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.principalAmount || 0), 0);
     const totalOpen = loanRowsNotCancelled.filter((loan) => !["pago", "cancelado"].includes(loan.status)).reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
+    const totalInterestOpen = loanRowsNotCancelled.filter((loan) => !["pago", "cancelado"].includes(loan.status)).reduce((sum, loan) => sum + Number(loan.accruedInterest || 0), 0);
     const overdueLoans = loanRowsNotCancelled.filter((loan) => loan.status === "atrasado" || loan.status === "ativo" && new Date(loan.endDate).getTime() < Date.now());
     const totalOverdue = overdueLoans.reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
     const totalVehiclePurchases = vehiclePurchaseRows.reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
@@ -1273,6 +1358,7 @@ async function getDashboardStats(databaseId) {
         totalInterestReceived: roundMoney(totalInterestReceived),
         totalPrincipalAmortized: roundMoney(totalPrincipalAmortized),
         totalOpen: roundMoney(totalOpen),
+        totalInterestOpen: roundMoney(totalInterestOpen),
         overdueCount: overdueLoans.length,
         totalOverdue: roundMoney(totalOverdue),
         totalVehiclePurchases: roundMoney(totalVehiclePurchases),
@@ -1423,7 +1509,7 @@ var adminProcedure2 = protectedProcedure.use(({ ctx, next }) => {
 });
 var superAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "super_admin") {
-    throw new TRPCError3({ code: "FORBIDDEN", message: "Apenas o Super Admin pode gerenciar usu\xE1rios." });
+    throw new TRPCError3({ code: "FORBIDDEN", message: "Apenas o Super Admin pode acessar este recurso." });
   }
   return next({ ctx });
 });
@@ -2184,9 +2270,9 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         installments: plan.periods,
         installmentAmount: plan.installmentAmount.toFixed(2),
         totalAmount: plan.totalAmount.toFixed(2),
-        remainingBalance: plan.principal.toFixed(2),
+        remainingBalance: plan.totalAmount.toFixed(2),
         principalBalance: plan.principal.toFixed(2),
-        accruedInterest: "0.00",
+        accruedInterest: plan.interestAmount.toFixed(2),
         totalPaid: "0.00",
         lastInterestPeriod: null,
         startDate,
@@ -2251,8 +2337,14 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       const interestType = input.interestType ?? currentLoan.interestType;
       const ratePeriod = input.ratePeriod ?? currentLoan.ratePeriod;
       const periods = input.installments ?? currentLoan.installments ?? 1;
-      const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
       const { id, status, description, clientId } = input;
+      const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
+      const financialTermsChanged = input.amount !== void 0 || input.interestType !== void 0 || input.interestRate !== void 0 || input.ratePeriod !== void 0 || input.installments !== void 0 || input.installmentAmount !== void 0 || input.totalAmount !== void 0;
+      const hasInitialInterest = Boolean(await getLoanInterestPeriod(
+        id,
+        activeDb.id,
+        INITIAL_LOAN_INTEREST_PERIOD
+      ));
       await updateLoanInDatabase(id, activeDb.id, {
         clientId,
         amount: plan.principal.toFixed(2),
@@ -2260,13 +2352,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         interestRate: ratePercent.toFixed(4),
         ratePeriod,
         installments: plan.periods,
-        installmentAmount: input.installmentAmount ?? plan.installmentAmount.toFixed(2),
-        totalAmount: input.totalAmount ?? plan.totalAmount.toFixed(2),
+        installmentAmount: plan.installmentAmount.toFixed(2),
+        totalAmount: plan.totalAmount.toFixed(2),
         startDate,
         endDate,
         ...status !== void 0 ? { status } : {},
         ...description !== void 0 ? { description } : {}
-      });
+      }, financialTermsChanged || hasInitialInterest ? plan.interestAmount : void 0);
       await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "update_loan", entity: "loans", entityId: id, databaseId: activeDb.id, details: JSON.stringify(input), status: "success" });
       return { success: true, message: "Empr\xE9stimo atualizado com sucesso." };
     }),
@@ -2479,6 +2571,26 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (Number.isNaN(movementDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data da movimenta\xE7\xE3o inv\xE1lida." });
       await createCashFlowEntry({ ...input, amount: input.amount.toFixed(2), movementDate, databaseId: activeDb.id, createdBy: ctx.user.id });
       return { success: true };
+    }),
+    delete: superAdminProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
+      const activeDb = await getActiveDatabase();
+      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      const result = await deleteManualCashFlowEntry(input.id, activeDb.id);
+      if (!result.deleted) {
+        if (result.reason === "not_found") throw new TRPCError3({ code: "NOT_FOUND", message: "Lan\xE7amento n\xE3o encontrado no banco ativo." });
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Lan\xE7amentos autom\xE1ticos devem ser corrigidos na opera\xE7\xE3o de origem e n\xE3o podem ser exclu\xEDdos diretamente do caixa." });
+      }
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.name || ctx.user.email || "Super Admin",
+        action: "delete_manual_cash_flow",
+        entity: "cash_flow",
+        entityId: result.entry.id,
+        databaseId: activeDb.id,
+        details: JSON.stringify({ type: result.entry.type, category: result.entry.category, description: result.entry.description, amount: result.entry.amount }),
+        status: "warning"
+      });
+      return { success: true, message: "Lan\xE7amento manual exclu\xEDdo do caixa." };
     })
   }),
   // ==================== VEHICLES ====================
@@ -2839,6 +2951,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
             totalInterestReceived: 0,
             totalPrincipalAmortized: 0,
             totalOpen: 0,
+            totalInterestOpen: 0,
             overdueCount: 0,
             totalOverdue: 0,
             totalVehiclePurchases: 0,

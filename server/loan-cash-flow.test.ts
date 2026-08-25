@@ -59,6 +59,8 @@ describe("ciclo financeiro de empréstimo e caixa", () => {
       const restoredLoan = await db.getLoanById(loanId);
       expect(Number(restoredLoan?.totalPaid)).toBe(0);
       expect(Number(restoredLoan?.principalBalance)).toBe(1200);
+      expect(Number(restoredLoan?.accruedInterest)).toBe(1152);
+      expect(Number(restoredLoan?.remainingBalance)).toBe(2352);
 
       const deleted = await caller.loans.delete({ id: loanId });
       expect(deleted.cancelled).toBe(true);
@@ -83,9 +85,12 @@ describe("ciclo financeiro de empréstimo e caixa", () => {
     const caller = appRouter.createCaller(context());
     let loanId = 0;
     try {
-      const created = await caller.loans.create({ clientId, amount: "1000.00", interestRate: "10", ratePeriod: "month", installments: 12, startDate: new Date().toISOString(), endDate: new Date(Date.now() + 86400000 * 30).toISOString() });
+      const created = await caller.loans.create({ clientId, amount: "1000.00", interestRate: "10", ratePeriod: "month", installments: 1, startDate: new Date().toISOString(), endDate: new Date(Date.now() + 86400000 * 30).toISOString() });
       loanId = created.loanId;
-      await caller.loans.generateInterest({ loanId, periodReference: `period-${suffix}` });
+      const openedLoan = await db.getLoanById(loanId);
+      expect(Number(openedLoan?.accruedInterest)).toBe(100);
+      expect(Number(openedLoan?.remainingBalance)).toBe(1100);
+      expect((await db.getLoanInterestHistory(loanId, database.id)).find((row) => row.periodReference === db.INITIAL_LOAN_INTEREST_PERIOD)).toMatchObject({ interestGenerated: "100.00" });
       await caller.payments.create({ loanId, installmentNumber: 1, amount: "100.00", paymentDate: new Date().toISOString(), dueDate: new Date().toISOString(), status: "pago" });
       const firstPayment = (await db.getPaymentsByLoan(loanId, database.id)).find((row) => row.installmentNumber === 1)!;
       expect(Number(firstPayment.interestAmount)).toBe(100);

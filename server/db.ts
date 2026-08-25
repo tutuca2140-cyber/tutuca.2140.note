@@ -8,7 +8,7 @@ import {
   loans, InsertLoan,
   loanInterestHistory, InsertLoanInterestHistory,
   payments, InsertPayment,
-  cashFlow, InsertCashFlow,
+  cashFlow, InsertCashFlow, CashFlow,
   vehicles, InsertVehicle,
   vehicleSales, InsertVehicleSale,
   vehicleFinancings, InsertVehicleFinancing,
@@ -356,6 +356,8 @@ export async function getClientProfile(clientId: number, databaseId: number) {
 
 // ==================== LOANS ====================
 
+export const INITIAL_LOAN_INTEREST_PERIOD = "CONTRATO_INICIAL";
+
 export async function createLoan(data: InsertLoan) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -371,6 +373,19 @@ export async function createLoanBundle(data: InsertLoan, cashEntry: Omit<InsertC
     const [createdLoan] = await tx.insert(loans).values(data).returning({ id: loans.id });
     const loanId = createdLoan?.id;
     if (!loanId) throw new Error("Não foi possível identificar o empréstimo criado.");
+    if (Number(data.accruedInterest || 0) > 0) {
+      await tx.insert(loanInterestHistory).values({
+        databaseId: data.databaseId,
+        loanId,
+        periodReference: INITIAL_LOAN_INTEREST_PERIOD,
+        previousPrincipalBalance: data.amount,
+        interestGenerated: data.accruedInterest!,
+        paymentAmount: '0.00',
+        interestPaid: '0.00',
+        principalAmortized: '0.00',
+        updatedPrincipalBalance: data.amount,
+      });
+    }
     await tx.insert(cashFlow).values({
       ...cashEntry,
       loanId,
@@ -450,7 +465,13 @@ async function recalculateLoanWithTransaction(tx: any, loanId: number, databaseI
       netAmount: roundMoney(Number(payment.amount || 0) - (Number(payment.amount || 0) * Number(payment.commissionPercentage || 0) / 100)).toFixed(2),
     }).where(eq(payments.id, payment.id));
   }
-  const nextStatus = principalBalance + interestPool <= 0 ? 'pago' : new Date(loan.endDate) < new Date() ? 'atrasado' : 'ativo';
+  const nextStatus = loan.status === 'cancelado'
+    ? 'cancelado'
+    : principalBalance + interestPool <= 0
+      ? 'pago'
+      : new Date(loan.endDate) < new Date()
+        ? 'atrasado'
+        : 'ativo';
   await tx.update(loans).set({
     principalBalance: principalBalance.toFixed(2),
     accruedInterest: interestPool.toFixed(2),
@@ -548,10 +569,57 @@ export async function updateLoanBalance(id: number, databaseId: number, data: Pa
   await db.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
 }
 
-export async function updateLoanInDatabase(id: number, databaseId: number, data: Partial<InsertLoan>) {
+export async function updateLoanInDatabase(id: number, databaseId: number, data: Partial<InsertLoan>, initialInterest?: number) {
   const db = await getDb();
   if (!db) return;
-  await db.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
+  return db.transaction(async (tx) => {
+    await tx.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
+
+    if (initialInterest !== undefined) {
+      const initialRows = await tx.select().from(loanInterestHistory).where(and(
+        eq(loanInterestHistory.loanId, id),
+        eq(loanInterestHistory.databaseId, databaseId),
+        eq(loanInterestHistory.periodReference, INITIAL_LOAN_INTEREST_PERIOD),
+      )).limit(1);
+      const principal = String(data.amount || '0.00');
+      if (initialInterest > 0) {
+        const historyValues = {
+          previousPrincipalBalance: principal,
+          interestGenerated: roundMoney(initialInterest).toFixed(2),
+          paymentAmount: '0.00',
+          interestPaid: '0.00',
+          principalAmortized: '0.00',
+          updatedPrincipalBalance: principal,
+        };
+        if (initialRows[0]) {
+          await tx.update(loanInterestHistory).set(historyValues).where(eq(loanInterestHistory.id, initialRows[0].id));
+        } else {
+          await tx.insert(loanInterestHistory).values({
+            databaseId,
+            loanId: id,
+            periodReference: INITIAL_LOAN_INTEREST_PERIOD,
+            ...historyValues,
+          });
+        }
+      } else if (initialRows[0]) {
+        await tx.delete(loanInterestHistory).where(eq(loanInterestHistory.id, initialRows[0].id));
+      }
+      await recalculateLoanWithTransaction(tx, id, databaseId);
+    }
+
+    const cashUpdate: Partial<InsertCashFlow> = {};
+    if (data.amount !== undefined) cashUpdate.amount = data.amount;
+    if (data.startDate !== undefined) cashUpdate.movementDate = data.startDate;
+    if (data.clientId !== undefined) cashUpdate.clientId = data.clientId;
+    if (data.description !== undefined) cashUpdate.notes = data.description;
+    if (Object.keys(cashUpdate).length > 0) {
+      await tx.update(cashFlow).set(cashUpdate).where(and(
+        eq(cashFlow.loanId, id),
+        eq(cashFlow.databaseId, databaseId),
+        eq(cashFlow.category, 'LIBERACAO_EMPRESTIMO'),
+      ));
+    }
+  });
 }
 
 export async function deleteLoan(id: number) {
@@ -802,6 +870,39 @@ export async function getCashFlowByDatabase(databaseId: number) {
   return db.select().from(cashFlow).where(eq(cashFlow.databaseId, databaseId)).orderBy(desc(cashFlow.movementDate));
 }
 
+const automaticCashCategories = new Set([
+  'LIBERACAO_EMPRESTIMO',
+  'JUROS_EMPRESTIMO',
+  'PAGAMENTO_EMPRESTIMO',
+  'QUITACAO_EMPRESTIMO',
+  'PAGAMENTO_FINANCIAMENTO',
+  'COMPRA_VEICULO',
+  'VENDA_VEICULO',
+  'RECEBIMENTO_VENDA_VEICULO',
+]);
+
+export function isManualCashFlowEntry(entry: Pick<CashFlow, 'sourceKey' | 'paymentId' | 'loanId' | 'vehicleId' | 'vehicleSaleId' | 'category'>) {
+  return !entry.sourceKey
+    && !entry.paymentId
+    && !entry.loanId
+    && !entry.vehicleId
+    && !entry.vehicleSaleId
+    && !automaticCashCategories.has(entry.category);
+}
+
+export async function deleteManualCashFlowEntry(id: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async (tx) => {
+    const rows = await tx.select().from(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId))).limit(1);
+    const entry = rows[0];
+    if (!entry) return { deleted: false as const, reason: 'not_found' as const };
+    if (!isManualCashFlowEntry(entry)) return { deleted: false as const, reason: 'automatic' as const, entry };
+    await tx.delete(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId)));
+    return { deleted: true as const, entry };
+  });
+}
+
 export async function getCashFlowByLoan(loanId: number, databaseId: number) {
   const db = await getDb();
   if (!db) return [];
@@ -1030,7 +1131,7 @@ export async function getDashboardStats(databaseId: number) {
       db.select({ total: sql<string>`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, 'ENTRADA'))),
       db.select({ total: sql<string>`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, 'SAIDA'))),
       db.select({ count: sql<number>`count(*)` }).from(clients).where(eq(clients.databaseId, databaseId)),
-      db.select({ amount: loans.amount, remainingBalance: loans.remainingBalance, status: loans.status, endDate: loans.endDate }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
+      db.select({ amount: loans.amount, remainingBalance: loans.remainingBalance, accruedInterest: loans.accruedInterest, status: loans.status, endDate: loans.endDate }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
       db.select({ amount: payments.amount, interestAmount: payments.interestAmount, principalAmount: payments.principalAmount, status: payments.status, loanId: payments.loanId }).from(payments).where(and(eq(payments.databaseId, databaseId), sql`${payments.loanId} is not null`)),
       db.select({ expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
       db.select({ saleAmount: vehicleSales.saleAmount, purchasePrice: vehicles.purchasePrice, expenses: vehicles.expenses }).from(vehicleSales).innerJoin(vehicles, eq(vehicleSales.vehicleId, vehicles.id)).where(and(eq(vehicleSales.databaseId, databaseId), eq(vehicles.databaseId, databaseId))),
@@ -1048,6 +1149,7 @@ export async function getDashboardStats(databaseId: number) {
     const totalInterestReceived = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0);
     const totalPrincipalAmortized = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.principalAmount || 0), 0);
     const totalOpen = loanRowsNotCancelled.filter((loan) => !['pago', 'cancelado'].includes(loan.status)).reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
+    const totalInterestOpen = loanRowsNotCancelled.filter((loan) => !['pago', 'cancelado'].includes(loan.status)).reduce((sum, loan) => sum + Number(loan.accruedInterest || 0), 0);
     const overdueLoans = loanRowsNotCancelled.filter((loan) => loan.status === 'atrasado' || (loan.status === 'ativo' && new Date(loan.endDate).getTime() < Date.now()));
     const totalOverdue = overdueLoans.reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
     const totalVehiclePurchases = vehiclePurchaseRows.reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
@@ -1069,6 +1171,7 @@ export async function getDashboardStats(databaseId: number) {
         totalInterestReceived: roundMoney(totalInterestReceived),
         totalPrincipalAmortized: roundMoney(totalPrincipalAmortized),
         totalOpen: roundMoney(totalOpen),
+        totalInterestOpen: roundMoney(totalInterestOpen),
         overdueCount: overdueLoans.length,
         totalOverdue: roundMoney(totalOverdue),
         totalVehiclePurchases: roundMoney(totalVehiclePurchases),
