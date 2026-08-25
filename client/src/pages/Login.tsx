@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Lock } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -58,11 +57,11 @@ export default function Login() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-lg bg-blue-600 text-white mb-4">
-            <Lock className="w-8 h-8" />
-          </div>
-
-          <h1 className="text-3xl font-bold text-gray-900">NOTE NOTE</h1>
+          <img
+            src="/note-note-logo.webp"
+            alt="Note Note"
+            className="mx-auto mb-4 w-full max-w-sm rounded-2xl border border-blue-900/10 object-contain shadow-lg"
+          />
           <p className="text-gray-600 mt-2">Sistema de Gestão Financeira</p>
         </div>
 

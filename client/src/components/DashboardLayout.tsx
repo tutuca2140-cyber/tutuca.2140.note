@@ -109,7 +109,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           >
             {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
-          <span className="font-bold text-primary tracking-wider">NOTE NOTE</span>
+          <img
+            src="/note-note-logo.webp"
+            alt="Note Note"
+            className="h-10 w-24 rounded-md object-cover object-center"
+          />
         </div>
       </div>
 
@@ -122,10 +126,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         `}
       >
         <div className="flex flex-col h-full">
-          <div className="px-6 py-5 border-b border-border">
-            <h1 className="text-xl font-bold text-primary tracking-[0.12em]">
-              NOTE NOTE
-            </h1>
+          <div className="px-4 py-4 border-b border-border">
+            <img
+              src="/note-note-logo.webp"
+              alt="Note Note"
+              className="h-auto w-full rounded-xl border border-border object-contain shadow-sm"
+            />
             <p className="text-xs text-muted-foreground mt-1 tracking-wide">
               Sistema de Gestão
             </p>
