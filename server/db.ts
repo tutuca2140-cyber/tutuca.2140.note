@@ -18,7 +18,7 @@ import {
   passwordResetTokens, InsertPasswordResetToken
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
-import { allocatePayment, allocateBalancePayment, calculateLoanPlan, roundMoney } from "../shared/finance";
+import { allocatePayment, allocateBalancePayment, roundMoney } from "../shared/finance";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -900,70 +900,6 @@ export async function deleteManualCashFlowEntry(id: number, databaseId: number) 
     if (!isManualCashFlowEntry(entry)) return { deleted: false as const, reason: 'automatic' as const, entry };
     await tx.delete(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId)));
     return { deleted: true as const, entry };
-  });
-}
-
-/** Sonda efêmera para confirmar o novo saldo e a exclusão manual no banco da Preview. */
-export async function runPreviewInterestCashDeleteCheck() {
-  if (process.env.VERCEL_ENV !== 'preview') throw new Error('Preview check is unavailable');
-  const db = await getDb();
-  if (!db) throw new Error('Database not available');
-  return db.transaction(async (tx) => {
-    const [activeDatabase] = await tx.select().from(databases).where(eq(databases.isActive, true)).limit(1);
-    const [actor] = await tx.select().from(users).where(and(eq(users.isActive, true), eq(users.role, 'super_admin'))).limit(1);
-    if (!activeDatabase || !actor) throw new Error('Banco ativo ou Super Admin não encontrado.');
-
-    const marker = `PREVIEW_INTEREST_CASH_${Date.now()}`;
-    const now = new Date();
-    const plan = calculateLoanPlan({ principal: 1000, ratePercent: 30, periods: 1, interestType: 'simple', ratePeriod: 'month' });
-    const [before] = await tx.select({
-      open: sql<string>`coalesce(sum(${loans.remainingBalance}), 0)`,
-      interest: sql<string>`coalesce(sum(${loans.accruedInterest}), 0)`,
-    }).from(loans).where(and(eq(loans.databaseId, activeDatabase.id), sql`${loans.status} not in ('pago', 'cancelado')`));
-
-    const [client] = await tx.insert(clients).values({ databaseId: activeDatabase.id, name: marker, createdBy: actor.id }).returning({ id: clients.id });
-    const [loan] = await tx.insert(loans).values({
-      databaseId: activeDatabase.id,
-      clientId: client.id,
-      amount: plan.principal.toFixed(2),
-      interestType: 'simple',
-      interestRate: '30.0000',
-      ratePeriod: 'month',
-      installments: 1,
-      installmentAmount: plan.installmentAmount.toFixed(2),
-      totalAmount: plan.totalAmount.toFixed(2),
-      remainingBalance: plan.totalAmount.toFixed(2),
-      principalBalance: plan.principal.toFixed(2),
-      accruedInterest: plan.interestAmount.toFixed(2),
-      totalPaid: '0.00',
-      startDate: now,
-      endDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-      status: 'ativo',
-      description: marker,
-      createdBy: actor.id,
-    }).returning({ id: loans.id });
-    await tx.insert(loanInterestHistory).values({ databaseId: activeDatabase.id, loanId: loan.id, periodReference: INITIAL_LOAN_INTEREST_PERIOD, previousPrincipalBalance: '1000.00', interestGenerated: '300.00', updatedPrincipalBalance: '1000.00' });
-    const [automatic] = await tx.insert(cashFlow).values({ databaseId: activeDatabase.id, type: 'SAIDA', category: 'LIBERACAO_EMPRESTIMO', description: marker, amount: '1000.00', movementDate: now, clientId: client.id, loanId: loan.id, sourceKey: `LOAN_RELEASE:${loan.id}`, createdBy: actor.id }).returning();
-    const [manual] = await tx.insert(cashFlow).values({ databaseId: activeDatabase.id, type: 'SAIDA', category: 'OUTROS', description: marker, amount: '25.00', movementDate: now, createdBy: actor.id }).returning();
-
-    if (plan.interestAmount !== 300 || plan.totalAmount !== 1300) throw new Error('Cálculo do saldo devedor divergente.');
-    if (!isManualCashFlowEntry(manual) || isManualCashFlowEntry(automatic)) throw new Error('Classificação manual/automática divergente.');
-    await tx.delete(cashFlow).where(eq(cashFlow.id, manual.id));
-    const [after] = await tx.select({
-      open: sql<string>`coalesce(sum(${loans.remainingBalance}), 0)`,
-      interest: sql<string>`coalesce(sum(${loans.accruedInterest}), 0)`,
-    }).from(loans).where(and(eq(loans.databaseId, activeDatabase.id), sql`${loans.status} not in ('pago', 'cancelado')`));
-    const manualRows = await tx.select({ id: cashFlow.id }).from(cashFlow).where(eq(cashFlow.id, manual.id));
-
-    const openDelta = roundMoney(Number(after.open) - Number(before.open));
-    const interestDelta = roundMoney(Number(after.interest) - Number(before.interest));
-    if (openDelta !== 1300 || interestDelta !== 300 || manualRows.length !== 0) throw new Error('Persistência ou exclusão divergente.');
-
-    await tx.delete(cashFlow).where(eq(cashFlow.loanId, loan.id));
-    await tx.delete(loanInterestHistory).where(eq(loanInterestHistory.loanId, loan.id));
-    await tx.delete(loans).where(eq(loans.id, loan.id));
-    await tx.delete(clients).where(eq(clients.id, client.id));
-    return { ok: true, checked: { principal: 1000, interest: 300, debt: 1300, cashRelease: 1000, manualDeleted: true, automaticProtected: true } };
   });
 }
 
