@@ -526,7 +526,7 @@ function diagnoseCriticalSchema() {
       select table_name, column_name
       from information_schema.columns
       where table_schema = 'public'
-        and table_name in ('users', 'localSessions', 'databases', 'clients', 'loans', 'cash_flow', 'payments', 'agents', 'auditLogs')
+        and table_name in ('users', 'local_sessions', 'databases', 'clients', 'loans', 'cash_flow', 'payments', 'agents', 'auditLogs')
       order by table_name, ordinal_position
     `;
     const actual = /* @__PURE__ */ new Map();
@@ -537,7 +537,7 @@ function diagnoseCriticalSchema() {
     }
     const expected = {
       users: ["id", "username", "role", "isActive", "canView", "canInsert", "canEdit", "canDelete"],
-      localSessions: ["token", "userId", "expiresAt"],
+      local_sessions: ["token", "userId", "expiresAt"],
       databases: ["id", "name", "type", "isActive", "createdBy"],
       clients: ["id", "databaseId", "name", "birthDate", "email", "phone", "whatsapp", "profession", "indicatorAgentId", "residentialAddress", "commercialAddress", "createdBy"],
       loans: ["id", "databaseId", "clientId", "amount", "interestType", "interestRate", "ratePeriod", "installments", "installmentAmount", "totalAmount", "remainingBalance", "principalBalance", "accruedInterest", "totalPaid", "startDate", "endDate", "status", "createdBy"],
@@ -3119,8 +3119,40 @@ var SDKServer = class {
 };
 var sdk = new SDKServer();
 
+// server/bootstrap-schema.ts
+import { neon as neon2 } from "@neondatabase/serverless";
+var bootstrapPromise = null;
+function ensurePreviewBusinessSchema() {
+  if (process.env.VERCEL_ENV !== "preview" || !process.env.DATABASE_URL) return Promise.resolve();
+  if (bootstrapPromise) return bootstrapPromise;
+  bootstrapPromise = (async () => {
+    const sql2 = neon2(process.env.DATABASE_URL);
+    await sql2`CREATE TABLE IF NOT EXISTS "databases" ("id" serial PRIMARY KEY, "name" varchar(255) NOT NULL UNIQUE, "description" text, "type" varchar(64) NOT NULL, "isActive" boolean DEFAULT false NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "agents" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "defaultCommissionPercentage" numeric(5,2) DEFAULT '0.00' NOT NULL, "status" varchar(64) DEFAULT 'ACTIVE' NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "clients" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "cpf" varchar(14), "birthDate" timestamp, "email" varchar(320), "phone" varchar(20), "whatsapp" varchar(20), "profession" varchar(120), "indicatorAgentId" integer, "address" text, "residentialAddress" jsonb, "commercialAddress" jsonb, "city" varchar(100), "state" varchar(2), "zipCode" varchar(10), "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "loans" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "clientId" integer NOT NULL, "amount" numeric(15,2) NOT NULL, "interestType" varchar(64) DEFAULT 'simple' NOT NULL, "interestRate" numeric(8,4) NOT NULL, "ratePeriod" varchar(64) DEFAULT 'month' NOT NULL, "installments" integer NOT NULL, "installmentAmount" numeric(15,2) NOT NULL, "totalAmount" numeric(15,2) NOT NULL, "remainingBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "principalBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "accruedInterest" numeric(15,2) DEFAULT '0.00' NOT NULL, "totalPaid" numeric(15,2) DEFAULT '0.00' NOT NULL, "lastInterestPeriod" varchar(20), "startDate" timestamp NOT NULL, "endDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'ativo' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "vehicles" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "clientId" integer, "vehicleType" varchar(64) DEFAULT 'OUTRO' NOT NULL, "brand" varchar(100), "model" varchar(100) NOT NULL, "year" integer, "color" varchar(50), "plate" varchar(20), "renavam" varchar(30), "chassi" varchar(50), "mileage" integer, "purchasePrice" numeric(15,2) DEFAULT '0.00' NOT NULL, "expenses" numeric(15,2) DEFAULT '0.00' NOT NULL, "salePrice" numeric(15,2), "purchaseDate" timestamp, "stockEntryDate" timestamp DEFAULT now() NOT NULL, "price" numeric(15,2) DEFAULT '0.00' NOT NULL, "status" varchar(64) DEFAULT 'disponivel' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "vehicleFinancings" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "vehicleId" integer NOT NULL, "clientId" integer NOT NULL, "vehiclePrice" numeric(15,2) NOT NULL, "downPayment" numeric(15,2) NOT NULL, "financedAmount" numeric(15,2) NOT NULL, "interestRate" numeric(5,2) NOT NULL, "installments" integer NOT NULL, "installmentAmount" numeric(15,2) NOT NULL, "totalAmount" numeric(15,2) NOT NULL, "startDate" timestamp NOT NULL, "endDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'ativo' NOT NULL, "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "loan_interest_history" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "loanId" integer NOT NULL, "periodReference" varchar(20) NOT NULL, "previousPrincipalBalance" numeric(15,2) NOT NULL, "interestGenerated" numeric(15,2) NOT NULL, "paymentAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "interestPaid" numeric(15,2) DEFAULT '0.00' NOT NULL, "principalAmortized" numeric(15,2) DEFAULT '0.00' NOT NULL, "updatedPrincipalBalance" numeric(15,2) NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE UNIQUE INDEX IF NOT EXISTS "loan_interest_history_loan_period_unique" ON "loan_interest_history" ("loanId", "periodReference")`;
+    await sql2`CREATE TABLE IF NOT EXISTS "payments" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "loanId" integer, "vehicleFinancingId" integer, "installmentNumber" integer NOT NULL, "amount" numeric(15,2) NOT NULL, "paymentDate" timestamp NOT NULL, "dueDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'pendente' NOT NULL, "lateFee" numeric(15,2) DEFAULT '0.00', "interest" numeric(15,2) DEFAULT '0.00', "principalAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "interestAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "remainingBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "notes" text, "agentId" integer, "commissionPercentage" numeric(5,2) DEFAULT '0.00' NOT NULL, "commissionAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "netAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "vehicle_sales" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "vehicleId" integer NOT NULL, "clientId" integer, "saleAmount" numeric(15,2) NOT NULL, "receivedAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "receivableBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "paymentMethod" varchar(30), "saleDate" timestamp NOT NULL, "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "cash_flow" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "type" varchar(64) NOT NULL, "category" varchar(120) NOT NULL, "description" text NOT NULL, "amount" numeric(15,2) NOT NULL, "movementDate" timestamp NOT NULL, "clientId" integer, "loanId" integer, "vehicleId" integer, "vehicleSaleId" integer, "paymentId" integer, "responsible" varchar(255), "notes" text, "sourceKey" varchar(180), "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE UNIQUE INDEX IF NOT EXISTS "cash_flow_source_key_unique" ON "cash_flow" ("sourceKey")`;
+    await sql2`CREATE TABLE IF NOT EXISTS "auditLogs" ("id" serial PRIMARY KEY, "userId" integer, "username" varchar(255), "action" varchar(100) NOT NULL, "entity" varchar(100), "entityId" integer, "databaseId" integer, "details" text, "ipAddress" varchar(45), "userAgent" text, "status" varchar(64) DEFAULT 'success' NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`INSERT INTO "databases" ("name", "description", "type", "isActive", "createdBy") SELECT 'Principal', 'Banco operacional principal', 'novo', true, u."id" FROM "users" u WHERE NOT EXISTS (SELECT 1 FROM "databases") ORDER BY CASE WHEN lower(coalesce(u."role", '')) = 'super_admin' THEN 0 ELSE 1 END, u."id" LIMIT 1`;
+    console.info("[Database] Preview operational schema is ready");
+  })().catch((error) => {
+    bootstrapPromise = null;
+    console.error("[Database] Preview schema bootstrap failed", error);
+    throw error;
+  });
+  return bootstrapPromise;
+}
+
 // server/_core/context.ts
 async function createContext(opts) {
+  await ensurePreviewBusinessSchema();
   await diagnoseCriticalSchema();
   let user = null;
   try {

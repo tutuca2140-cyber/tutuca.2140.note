@@ -2,6 +2,7 @@ import type { CreateExpressContextOptions } from "@trpc/server/adapters/express"
 import type { User } from "../../drizzle/schema";
 import { sdk } from "./sdk";
 import { diagnoseCriticalSchema } from "../db";
+import { ensurePreviewBusinessSchema } from "../bootstrap-schema";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -12,6 +13,7 @@ export type TrpcContext = {
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
+  await ensurePreviewBusinessSchema();
   await diagnoseCriticalSchema();
   let user: User | null = null;
 

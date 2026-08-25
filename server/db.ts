@@ -39,7 +39,7 @@ export function diagnoseCriticalSchema() {
       select table_name, column_name
       from information_schema.columns
       where table_schema = 'public'
-        and table_name in ('users', 'localSessions', 'databases', 'clients', 'loans', 'cash_flow', 'payments', 'agents', 'auditLogs')
+        and table_name in ('users', 'local_sessions', 'databases', 'clients', 'loans', 'cash_flow', 'payments', 'agents', 'auditLogs')
       order by table_name, ordinal_position
     `;
     const actual = new Map<string, Set<string>>();
@@ -50,7 +50,7 @@ export function diagnoseCriticalSchema() {
     }
     const expected: Record<string, string[]> = {
       users: ['id', 'username', 'role', 'isActive', 'canView', 'canInsert', 'canEdit', 'canDelete'],
-      localSessions: ['token', 'userId', 'expiresAt'],
+      local_sessions: ['token', 'userId', 'expiresAt'],
       databases: ['id', 'name', 'type', 'isActive', 'createdBy'],
       clients: ['id', 'databaseId', 'name', 'birthDate', 'email', 'phone', 'whatsapp', 'profession', 'indicatorAgentId', 'residentialAddress', 'commercialAddress', 'createdBy'],
       loans: ['id', 'databaseId', 'clientId', 'amount', 'interestType', 'interestRate', 'ratePeriod', 'installments', 'installmentAmount', 'totalAmount', 'remainingBalance', 'principalBalance', 'accruedInterest', 'totalPaid', 'startDate', 'endDate', 'status', 'createdBy'],
