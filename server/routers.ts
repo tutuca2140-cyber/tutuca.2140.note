@@ -1,7 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
+import { publicProcedure, router, protectedProcedure as baseProtectedProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "./db";
@@ -9,14 +9,35 @@ import * as bcrypt from "bcrypt";
 import { nanoid } from "nanoid";
 import { notifyOwner } from "./_core/notification";
 import { addPeriods, allocatePayment, allocateBalancePayment, calculateInterestOnBalance, calculateLoanPlan, roundMoney } from "../shared/finance";
+import { createLoginCaptcha, verifyLoginCaptcha } from "../shared/login-captcha";
 
 const optionalText = z.string().optional();
 const optionalEmail = z.union([z.string().email(), z.literal('')]).optional();
 const optionalAddress = z.record(z.string(), z.string()).optional();
+const positiveDecimal = (label: string) => z.string().trim().min(1, `${label} é obrigatório.`).refine(
+  (value) => Number.isFinite(Number(value)) && Number(value) > 0,
+  `${label} deve ser maior que zero.`,
+);
+const nonNegativeDecimal = (label: string) => z.string().trim().min(1, `${label} é obrigatório.`).refine(
+  (value) => Number.isFinite(Number(value)) && Number(value) >= 0,
+  `${label} não pode ser negativo.`,
+);
+const validDate = (label: string) => z.string().trim().min(1, `${label} é obrigatória.`).refine(
+  (value) => !Number.isNaN(new Date(value).getTime()),
+  `${label} é inválida.`,
+);
 const stripLegacyCpf = <T extends { cpf?: unknown }>(client: T): Omit<T, 'cpf'> => {
   const { cpf: _cpf, ...withoutCpf } = client;
   return withoutCpf;
 };
+
+const protectedProcedure = baseProtectedProcedure.use(({ ctx, next, path }) => {
+  const dashboardAllowed = path.startsWith('dashboard.') || ['databases.list', 'databases.getActive', 'databases.setActive'].includes(path);
+  if (ctx.user.dashboardOnly && !dashboardAllowed) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Este usuário possui acesso somente ao dashboard.' });
+  }
+  return db.withUserDatabaseScope({ userId: ctx.user.id, role: ctx.user.role }, () => next({ ctx }));
+});
 
 // Admin procedure - requer role admin ou super_admin
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -31,7 +52,7 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 
 const superAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== 'super_admin') {
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'Apenas o Super Admin pode gerenciar usuários.' });
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Apenas o Super Admin pode acessar este recurso.' });
   }
   return next({ ctx });
 });
@@ -41,6 +62,7 @@ export const appRouter = router({
   
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    captcha: publicProcedure.query(() => createLoginCaptcha()),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -65,8 +87,13 @@ export const appRouter = router({
         username: z.string().min(1),
         password: z.string().min(1),
         rememberMe: z.boolean().optional().default(false),
+        captchaToken: z.string().min(1),
+        captchaAnswer: z.string().min(1),
       }))
       .mutation(async ({ input, ctx }) => {
+        if (!verifyLoginCaptcha(input.captchaToken, input.captchaAnswer)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Confirme corretamente que você não é um robô.' });
+        }
         const user = await db.getUserByUsername(input.username);
         
         if (!user || !user.passwordHash) {
@@ -78,9 +105,13 @@ export const appRouter = router({
 
         const passwordMatch = await bcrypt.compare(input.password, user.passwordHash);
         if (!passwordMatch) {
+          if (user.role === 'super_admin' || user.username?.toLowerCase() === 'draco') {
+            throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Usuário ou senha inválidos' });
+          }
+          const attempts = await db.registerFailedLogin(user.id);
           throw new TRPCError({
-            code: 'UNAUTHORIZED',
-            message: 'Usuário ou senha inválidos'
+            code: attempts >= 2 ? 'FORBIDDEN' : 'UNAUTHORIZED',
+            message: attempts >= 2 ? 'Usuário desativado após duas tentativas incorretas. Solicite a reativação ao Super Admin.' : 'Usuário ou senha inválidos. Mais uma tentativa incorreta desativará a conta.'
           });
         }
 
@@ -90,6 +121,7 @@ export const appRouter = router({
             message: 'Usuário desativado'
           });
         }
+        await db.resetFailedLogin(user.id);
 
         // Criar sessão
         const token = nanoid(32);
@@ -229,6 +261,14 @@ export const appRouter = router({
         name: z.string().trim().min(1).max(200),
         password: z.string().min(6),
         role: z.enum(['user', 'admin']).default('user'),
+        canView: z.boolean().default(true),
+        canInsert: z.boolean().default(false),
+        canEdit: z.boolean().default(false),
+        canDelete: z.boolean().default(false),
+        canGenerateReports: z.boolean().default(false),
+        canAccessSettings: z.boolean().default(false),
+        dashboardOnly: z.boolean().default(false),
+        databaseIds: z.array(z.number().int().positive()).max(3).default([]),
       }))
       .mutation(async ({ input, ctx }) => {
         if (await db.getUserByUsername(input.username)) {
@@ -238,10 +278,32 @@ export const appRouter = router({
           throw new TRPCError({ code: 'CONFLICT', message: 'E-mail já cadastrado.' });
         }
         const passwordHash = await bcrypt.hash(input.password, 10);
-        const created = await db.createLocalUser({ ...input, passwordHash });
+        const { databaseIds, ...userInput } = input;
+        const created = await db.createLocalUser({ ...userInput, passwordHash });
         const createdUser = await db.getUserByUsername(input.username);
-        if (createdUser && input.role !== 'user') await db.updateUserRole(createdUser.id, input.role);
-        await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || 'Super Admin', action: 'create_user', entity: 'users', entityId: createdUser?.id, details: `Usuário criado: ${input.username}`, status: 'success' });
+        if (!createdUser) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Não foi possível confirmar o usuário criado.' });
+        await db.assignUserDatabases(createdUser.id, databaseIds);
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.username || ctx.user.email || 'Super Admin',
+          action: 'create_user',
+          entity: 'users',
+          entityId: createdUser?.id,
+          details: JSON.stringify({
+            username: input.username,
+            role: input.role,
+            permissions: {
+              canView: input.canView,
+              canInsert: input.canInsert,
+              canEdit: input.canEdit,
+              canDelete: input.canDelete,
+              canGenerateReports: input.canGenerateReports,
+              canAccessSettings: input.canAccessSettings,
+            },
+            databaseIds,
+          }),
+          status: 'success',
+        });
         return createdUser ?? created;
       }),
 
@@ -252,6 +314,14 @@ export const appRouter = router({
         email: z.string().trim().email(),
         name: z.string().trim().min(1).max(200),
         role: z.enum(['user', 'admin']),
+        canView: z.boolean(),
+        canInsert: z.boolean(),
+        canEdit: z.boolean(),
+        canDelete: z.boolean(),
+        canGenerateReports: z.boolean(),
+        canAccessSettings: z.boolean(),
+        dashboardOnly: z.boolean(),
+        databaseIds: z.array(z.number().int().positive()).max(3),
       }))
       .mutation(async ({ input, ctx }) => {
         const target = await db.getUserById(input.userId);
@@ -261,13 +331,14 @@ export const appRouter = router({
         if (usernameOwner && usernameOwner.id !== input.userId) throw new TRPCError({ code: 'CONFLICT', message: 'Nome de usuário já cadastrado.' });
         const emailOwner = await db.getUserByEmail(input.email);
         if (emailOwner && emailOwner.id !== input.userId) throw new TRPCError({ code: 'CONFLICT', message: 'E-mail já cadastrado.' });
-        const { userId, ...data } = input;
+        const { userId, databaseIds, ...data } = input;
         await db.updateLocalUser(userId, data);
+        await db.assignUserDatabases(userId, databaseIds);
         await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || 'Super Admin', action: 'update_user', entity: 'users', entityId: userId, details: `Usuário editado: ${input.username}`, status: 'success' });
         return { success: true };
       }),
 
-    updatePermissions: adminProcedure
+    updatePermissions: superAdminProcedure
       .input(z.object({
         userId: z.number(),
         canView: z.boolean().optional(),
@@ -300,7 +371,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    updateRole: adminProcedure
+    updateRole: superAdminProcedure
       .input(z.object({
         userId: z.number(),
         role: z.enum(['user', 'admin', 'super_admin'])
@@ -383,7 +454,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: adminProcedure
+    delete: superAdminProcedure
       .input(z.object({ userId: z.number() }))
       .mutation(async ({ input, ctx }) => {
         const targetUser = await db.getUserById(input.userId);
@@ -408,8 +479,8 @@ export const appRouter = router({
 
   // ==================== DATABASES ====================
   databases: router({
-    list: adminProcedure.query(async () => {
-      return await db.getAllDatabases();
+    list: protectedProcedure.query(async ({ ctx }) => {
+      return await db.getDatabasesForUser(ctx.user.id, ctx.user.role);
     }),
 
     getActive: protectedProcedure.query(async () => {
@@ -440,7 +511,7 @@ export const appRouter = router({
         return result;
       }),
 
-    setActive: adminProcedure
+    setActive: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
         await db.setActiveDatabase(input.id);
@@ -483,20 +554,17 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: adminProcedure
+    delete: superAdminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
         const dbInfo = await db.getDatabaseById(input.id);
         
-        // Não permitir deletar banco ativo
-        if (dbInfo?.isActive) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Não é possível deletar o banco de dados ativo'
-          });
-        }
-        
+        if (!dbInfo) throw new TRPCError({ code: 'NOT_FOUND', message: 'Banco de dados não encontrado.' });
         await db.deleteDatabase(input.id);
+        if (dbInfo.isActive) {
+          const remaining = await db.getAllDatabases();
+          if (remaining[0]) await db.setActiveDatabase(remaining[0].id);
+        }
         
         await db.createAuditLog({
           userId: ctx.user.id,
@@ -535,7 +603,7 @@ export const appRouter = router({
 
     create: protectedProcedure
       .input(z.object({
-        name: z.string().min(1).max(255),
+        name: z.string().trim().min(1).max(255),
         defaultCommissionPercentage: z.coerce.number().min(0).max(100),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -546,7 +614,7 @@ export const appRouter = router({
         if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
         const result = await db.createAgent({
           databaseId: activeDb.id,
-          name: input.name,
+          name: input.name.trim(),
           defaultCommissionPercentage: input.defaultCommissionPercentage.toFixed(2),
           status: 'ACTIVE',
           createdBy: ctx.user.id,
@@ -784,16 +852,9 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: protectedProcedure
+    delete: superAdminProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ input, ctx }) => {
-        if (!ctx.user.canDelete) {
-          throw new TRPCError({
-            code: 'FORBIDDEN',
-            message: 'Você não tem permissão para deletar dados'
-          });
-        }
-
         const activeDb = await db.getActiveDatabase();
         if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo' });
         const currentClient = await db.getClientById(input.id);
@@ -914,15 +975,15 @@ export const appRouter = router({
     create: protectedProcedure
       .input(z.object({
         clientId: z.number().int().positive(),
-        amount: z.string(),
+        amount: positiveDecimal('Valor principal'),
         interestType: z.enum(['simple', 'compound']).default('simple').optional(),
-        interestRate: z.string(),
+        interestRate: nonNegativeDecimal('Taxa de juros'),
         ratePeriod: z.enum(['day', 'week', 'month', 'year']).default('month').optional(),
         installments: z.coerce.number().int().positive().optional(),
         installmentAmount: z.string().optional(),
         totalAmount: z.string().optional(),
-        startDate: z.string(),
-        endDate: z.string().optional(),
+        startDate: validDate('Data inicial'),
+        endDate: validDate('Data final').optional(),
         description: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -955,6 +1016,7 @@ export const appRouter = router({
         if (Number.isNaN(startDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Data inicial inválida.' });
         const endDate = input.endDate ? new Date(input.endDate) : addPeriods(startDate, plan.periods, ratePeriod);
         if (Number.isNaN(endDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Data final inválida.' });
+        if (endDate < startDate) throw new TRPCError({ code: 'BAD_REQUEST', message: 'A data final deve ser igual ou posterior à data inicial.' });
 
         const result = await db.createLoanBundle({
           clientId: input.clientId,
@@ -965,9 +1027,9 @@ export const appRouter = router({
           installments: plan.periods,
           installmentAmount: plan.installmentAmount.toFixed(2),
           totalAmount: plan.totalAmount.toFixed(2),
-          remainingBalance: plan.principal.toFixed(2),
+          remainingBalance: plan.totalAmount.toFixed(2),
           principalBalance: plan.principal.toFixed(2),
-          accruedInterest: '0.00',
+          accruedInterest: plan.interestAmount.toFixed(2),
           totalPaid: '0.00',
           lastInterestPeriod: null,
           startDate,
@@ -1037,8 +1099,20 @@ export const appRouter = router({
         const interestType = input.interestType ?? currentLoan.interestType;
         const ratePeriod = input.ratePeriod ?? currentLoan.ratePeriod;
         const periods = input.installments ?? currentLoan.installments ?? 1;
-        const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
         const { id, status, description, clientId } = input;
+        const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
+        const financialTermsChanged = input.amount !== undefined
+          || input.interestType !== undefined
+          || input.interestRate !== undefined
+          || input.ratePeriod !== undefined
+          || input.installments !== undefined
+          || input.installmentAmount !== undefined
+          || input.totalAmount !== undefined;
+        const hasInitialInterest = Boolean(await db.getLoanInterestPeriod(
+          id,
+          activeDb.id,
+          db.INITIAL_LOAN_INTEREST_PERIOD,
+        ));
         await db.updateLoanInDatabase(id, activeDb.id, {
           clientId,
           amount: plan.principal.toFixed(2),
@@ -1046,13 +1120,13 @@ export const appRouter = router({
           interestRate: ratePercent.toFixed(4),
           ratePeriod,
           installments: plan.periods,
-          installmentAmount: input.installmentAmount ?? plan.installmentAmount.toFixed(2),
-          totalAmount: input.totalAmount ?? plan.totalAmount.toFixed(2),
+          installmentAmount: plan.installmentAmount.toFixed(2),
+          totalAmount: plan.totalAmount.toFixed(2),
           startDate,
           endDate,
           ...(status !== undefined ? { status } : {}),
           ...(description !== undefined ? { description } : {}),
-        });
+        }, financialTermsChanged || hasInitialInterest ? plan.interestAmount : undefined);
         await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || 'Usuário', action: 'update_loan', entity: 'loans', entityId: id, databaseId: activeDb.id, details: JSON.stringify(input), status: 'success' });
         return { success: true, message: 'Empréstimo atualizado com sucesso.' };
       }),
@@ -1298,6 +1372,28 @@ export const appRouter = router({
       await db.createCashFlowEntry({ ...input, amount: input.amount.toFixed(2), movementDate, databaseId: activeDb.id, createdBy: ctx.user.id });
       return { success: true };
     }),
+    delete: superAdminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
+        const result = await db.deleteManualCashFlowEntry(input.id, activeDb.id);
+        if (!result.deleted) {
+          if (result.reason === 'not_found') throw new TRPCError({ code: 'NOT_FOUND', message: 'Lançamento não encontrado no banco ativo.' });
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Lançamentos automáticos devem ser corrigidos na operação de origem e não podem ser excluídos diretamente do caixa.' });
+        }
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.email || 'Super Admin',
+          action: 'delete_manual_cash_flow',
+          entity: 'cash_flow',
+          entityId: result.entry.id,
+          databaseId: activeDb.id,
+          details: JSON.stringify({ type: result.entry.type, category: result.entry.category, description: result.entry.description, amount: result.entry.amount }),
+          status: 'warning',
+        });
+        return { success: true, message: 'Lançamento manual excluído do caixa.' };
+      }),
   }),
 
   // ==================== VEHICLES ====================
@@ -1557,22 +1653,23 @@ export const appRouter = router({
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
-        return await db.getVehicleFinancingById(input.id);
+        const activeDb = await db.getActiveDatabase();
+        const financing = await db.getVehicleFinancingById(input.id);
+        if (!activeDb || !financing || financing.databaseId !== activeDb.id) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Financiamento não encontrado no banco ativo.' });
+        }
+        return financing;
       }),
 
     create: protectedProcedure
       .input(z.object({
-        vehicleId: z.number(),
-        clientId: z.number(),
-        vehiclePrice: z.string(),
-        downPayment: z.string(),
-        financedAmount: z.string(),
-        interestRate: z.string(),
-        installments: z.number(),
-        installmentAmount: z.string(),
-        totalAmount: z.string(),
-        startDate: z.string(),
-        endDate: z.string(),
+        vehicleId: z.number().int().positive(),
+        clientId: z.number().int().positive(),
+        vehiclePrice: positiveDecimal('Preço do veículo'),
+        downPayment: nonNegativeDecimal('Entrada'),
+        interestRate: nonNegativeDecimal('Taxa de juros'),
+        installments: z.number().int().positive(),
+        startDate: validDate('Data inicial'),
         notes: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -1591,10 +1688,41 @@ export const appRouter = router({
           });
         }
 
+        const [client, vehicle] = await Promise.all([
+          db.getClientById(input.clientId),
+          db.getVehicleById(input.vehicleId),
+        ]);
+        if (!client || client.databaseId !== activeDb.id) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cliente inválido para o banco ativo.' });
+        }
+        if (!vehicle || vehicle.databaseId !== activeDb.id) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Veículo inválido para o banco ativo.' });
+        }
+        const startDate = new Date(input.startDate);
+        const vehiclePrice = Number(input.vehiclePrice);
+        const downPayment = Number(input.downPayment);
+        if (downPayment >= vehiclePrice) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'A entrada não pode ser maior que o preço do veículo.' });
+        }
+        const financedAmount = roundMoney(vehiclePrice - downPayment);
+        const plan = calculateLoanPlan({
+          principal: financedAmount,
+          ratePercent: Number(input.interestRate),
+          periods: input.installments,
+          interestType: 'simple',
+          ratePeriod: 'month',
+        });
+        const endDate = addPeriods(startDate, input.installments, 'month');
+
         const result = await db.createVehicleFinancing({
           ...input,
-          startDate: new Date(input.startDate),
-          endDate: new Date(input.endDate),
+          vehiclePrice: vehiclePrice.toFixed(2),
+          downPayment: downPayment.toFixed(2),
+          financedAmount: financedAmount.toFixed(2),
+          totalAmount: plan.totalAmount.toFixed(2),
+          installmentAmount: plan.installmentAmount.toFixed(2),
+          startDate,
+          endDate,
           databaseId: activeDb.id,
           createdBy: ctx.user.id
         });
@@ -1605,11 +1733,11 @@ export const appRouter = router({
           action: 'create_vehicle_financing',
           entity: 'vehicleFinancings',
           databaseId: activeDb.id,
-          details: `Financiamento criado: R$ ${input.financedAmount}`,
+          details: `Financiamento criado: principal R$ ${financedAmount.toFixed(2)}, total R$ ${plan.totalAmount.toFixed(2)}`,
           status: 'success'
         });
 
-        return result;
+        return { ...result, financedAmount, totalAmount: plan.totalAmount, installmentAmount: plan.installmentAmount, endDate };
       }),
 
     update: protectedProcedure
@@ -1626,10 +1754,14 @@ export const appRouter = router({
           });
         }
 
+        const activeDb = await db.getActiveDatabase();
+        const financing = await db.getVehicleFinancingById(input.id);
+        if (!activeDb || !financing || financing.databaseId !== activeDb.id) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Financiamento não encontrado no banco ativo.' });
+        }
         const { id, ...data } = input;
         await db.updateVehicleFinancing(id, data);
 
-        const activeDb = await db.getActiveDatabase();
         await db.createAuditLog({
           userId: ctx.user.id,
           username: ctx.user.name || ctx.user.email || 'Usuário',
@@ -1682,12 +1814,15 @@ export const appRouter = router({
           vehicleProfit: 0,
           vehicleExpenses: 0,
           vehicleSalesCount: 0,
+          collections: { dueToday: [], overdue: [] },
+          vehicleMetrics: { carsSold: 0, financings: 0, installmentsPaid: 0, installmentsOverdue: 0 },
           loanMetrics: {
             totalLent: 0,
             totalReceived: 0,
             totalInterestReceived: 0,
             totalPrincipalAmortized: 0,
             totalOpen: 0,
+            totalInterestOpen: 0,
             overdueCount: 0,
             totalOverdue: 0,
             totalVehiclePurchases: 0,

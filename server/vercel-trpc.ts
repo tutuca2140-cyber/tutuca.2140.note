@@ -13,6 +13,19 @@ app.use(
   createExpressMiddleware({
     router: appRouter,
     createContext,
+    onError({ error, path, type }) {
+      const cause = error.cause;
+      console.error("[tRPC] Request failed", {
+        path,
+        type,
+        code: error.code,
+        message: error.message,
+        cause: cause instanceof Error
+          ? { name: cause.name, message: cause.message, stack: cause.stack }
+          : cause,
+        stack: error.stack,
+      });
+    },
   })
 );
 

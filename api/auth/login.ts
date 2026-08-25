@@ -1,11 +1,13 @@
 import bcrypt from "bcrypt";
 import {
   getSql,
+  ensureAuthUserColumns,
   makeSessionToken,
   readJsonBody,
   sendJson,
   setSessionCookie,
 } from "./_shared.js";
+import { verifyLoginCaptcha } from "../../shared/login-captcha.js";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
@@ -17,6 +19,8 @@ export default async function handler(req: any, res: any) {
     const username = String(body?.username ?? "").trim();
     const password = String(body?.password ?? "");
     const rememberMe = Boolean(body?.rememberMe);
+    const captchaToken = String(body?.captchaToken ?? "");
+    const captchaAnswer = String(body?.captchaAnswer ?? "");
 
     if (!username || !password) {
       return sendJson(res, 400, {
@@ -24,7 +28,11 @@ export default async function handler(req: any, res: any) {
         message: "Informe usuário e senha.",
       });
     }
+    if (!verifyLoginCaptcha(captchaToken, captchaAnswer)) {
+      return sendJson(res, 400, { success: false, message: "Confirme corretamente que você não é um robô." });
+    }
 
+    await ensureAuthUserColumns();
     const sql = getSql();
 
     const rows = await sql`
@@ -41,6 +49,8 @@ export default async function handler(req: any, res: any) {
         "canDelete",
         "canGenerateReports",
         "canAccessSettings",
+        "dashboardOnly",
+        "failedLoginAttempts",
         "isActive"
       FROM users
       WHERE lower(username) = lower(${username})
@@ -58,9 +68,17 @@ export default async function handler(req: any, res: any) {
 
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) {
+      if (String(user.username).toLowerCase() === "draco" || user.role === "super_admin") {
+        return sendJson(res, 401, { success: false, message: "Usuário ou senha inválidos." });
+      }
+      const attempts = Number(user.failedLoginAttempts || 0) + 1;
+      await sql`UPDATE users SET "failedLoginAttempts" = ${attempts}, "isActive" = ${attempts < 2}, "updatedAt" = NOW() WHERE id = ${user.id}`;
+      if (attempts >= 2) await sql`DELETE FROM local_sessions WHERE "userId" = ${user.id}`;
       return sendJson(res, 401, {
         success: false,
-        message: "Usuário ou senha inválidos.",
+        message: attempts >= 2
+          ? "Usuário desativado após duas tentativas incorretas. Solicite a reativação ao Super Admin."
+          : "Usuário ou senha inválidos. Mais uma tentativa incorreta desativará a conta.",
       });
     }
 
@@ -83,6 +101,8 @@ export default async function handler(req: any, res: any) {
           "canDelete" = true,
           "canGenerateReports" = true,
           "canAccessSettings" = true,
+          "dashboardOnly" = false,
+          "failedLoginAttempts" = 0,
           "isActive" = true,
           "updatedAt" = NOW(),
           "lastSignedIn" = NOW()
@@ -91,7 +111,7 @@ export default async function handler(req: any, res: any) {
     } else {
       await sql`
         UPDATE users
-        SET "lastSignedIn" = NOW(), "updatedAt" = NOW()
+        SET "lastSignedIn" = NOW(), "failedLoginAttempts" = 0, "updatedAt" = NOW()
         WHERE id = ${user.id}
       `;
     }

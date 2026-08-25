@@ -21,6 +21,8 @@ export const users = pgTable("users", {
   canDelete: boolean("canDelete").default(false).notNull(),
   canGenerateReports: boolean("canGenerateReports").default(false).notNull(),
   canAccessSettings: boolean("canAccessSettings").default(false).notNull(),
+  dashboardOnly: boolean("dashboardOnly").default(false).notNull(),
+  failedLoginAttempts: integer("failedLoginAttempts").default(0).notNull(),
   
   isActive: boolean("isActive").default(true).notNull(),
   emailVerified: boolean("emailVerified").default(false).notNull(),
@@ -78,6 +80,20 @@ export const databases = pgTable("databases", {
 
 export type Database = typeof databases.$inferSelect;
 export type InsertDatabase = typeof databases.$inferInsert;
+
+/** Bancos em que cada usuário pode trabalhar (máximo de três, validado pela API). */
+export const userDatabaseAccess = pgTable("user_database_access", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  databaseId: integer("databaseId").notNull().references(() => databases.id, { onDelete: "cascade" }),
+  isActive: boolean("isActive").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userDatabaseUnique: uniqueIndex("user_database_access_user_database_unique").on(table.userId, table.databaseId),
+}));
+
+export type UserDatabaseAccess = typeof userDatabaseAccess.$inferSelect;
+export type InsertUserDatabaseAccess = typeof userDatabaseAccess.$inferInsert;
 
 /**
  * Clients table - Clientes dos empréstimos

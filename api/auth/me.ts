@@ -1,5 +1,6 @@
 import {
   getSql,
+  ensureAuthUserColumns,
   readCookie,
   sendJson,
   SESSION_COOKIE_NAME,
@@ -16,6 +17,7 @@ export default async function handler(req: any, res: any) {
       return sendJson(res, 401, { authenticated: false });
     }
 
+    await ensureAuthUserColumns();
     const sql = getSql();
 
     const rows = await sql`
@@ -31,6 +33,7 @@ export default async function handler(req: any, res: any) {
         u."canDelete",
         u."canGenerateReports",
         u."canAccessSettings",
+        u."dashboardOnly",
         u."isActive"
       FROM local_sessions s
       INNER JOIN users u ON u.id = s."userId"

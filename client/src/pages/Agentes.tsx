@@ -11,6 +11,7 @@ import { toast } from "sonner";
 
 const money = (value: string | number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
 const date = (value: string | Date) => new Date(value).toLocaleDateString("pt-BR");
+const percentageNumber = (value: string) => Number(value.trim().replace(",", "."));
 
 export default function Agentes() {
   const [showCreate, setShowCreate] = useState(false);
@@ -41,8 +42,14 @@ export default function Agentes() {
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
+    const normalizedName = name.trim();
+    const normalizedPercentage = percentageNumber(percentage);
+    if (!normalizedName) { toast.error("Informe o nome do agente."); return; }
+    if (!Number.isFinite(normalizedPercentage) || normalizedPercentage < 0 || normalizedPercentage > 100) {
+      toast.error("Informe uma comissão entre 0 e 100%."); return;
+    }
     try {
-      await createMutation.mutateAsync({ name, defaultCommissionPercentage: Number(percentage) });
+      await createMutation.mutateAsync({ name: normalizedName, defaultCommissionPercentage: normalizedPercentage });
       toast.success("Agente criado com sucesso.");
       setName("");
       setPercentage("0");
@@ -60,8 +67,14 @@ export default function Agentes() {
   };
 
   const handleUpdate = async (id: number) => {
+    const normalizedName = editName.trim();
+    const normalizedPercentage = percentageNumber(editPercentage);
+    if (!normalizedName) { toast.error("Informe o nome do agente."); return; }
+    if (!Number.isFinite(normalizedPercentage) || normalizedPercentage < 0 || normalizedPercentage > 100) {
+      toast.error("Informe uma comissão entre 0 e 100%."); return;
+    }
     try {
-      await updateMutation.mutateAsync({ id, name: editName, defaultCommissionPercentage: Number(editPercentage) });
+      await updateMutation.mutateAsync({ id, name: normalizedName, defaultCommissionPercentage: normalizedPercentage });
       toast.success("Agente atualizado. O histórico anterior foi preservado.");
       setEditingId(null);
       await refresh();

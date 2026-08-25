@@ -6,12 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { Plus, Database, Check } from "lucide-react";
+import { Plus, Database, Check, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 export default function AdminBancos() {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
@@ -23,6 +25,7 @@ export default function AdminBancos() {
   const { data: activeDb } = trpc.databases.getActive.useQuery();
   const createMutation = trpc.databases.create.useMutation();
   const setActiveMutation = trpc.databases.setActive.useMutation();
+  const deleteMutation = trpc.databases.delete.useMutation();
   const utils = trpc.useUtils();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -46,6 +49,17 @@ export default function AdminBancos() {
       utils.databases.getActive.invalidate();
     } catch (error: any) {
       toast.error(error.message || "Erro ao ativar banco");
+    }
+  };
+
+  const handleDelete = async (database: { id: number; name: string }) => {
+    if (!window.confirm(`Excluir definitivamente o banco “${database.name}” e todos os dados vinculados? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await deleteMutation.mutateAsync({ id: database.id });
+      await Promise.all([utils.databases.list.invalidate(), utils.databases.getActive.invalidate()]);
+      toast.success("Banco e todos os dados vinculados foram excluídos.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível excluir o banco.");
     }
   };
 
@@ -144,6 +158,7 @@ export default function AdminBancos() {
                       Ativar Banco
                     </Button>
                   )}
+                  {user?.role === "super_admin" && <Button size="sm" variant="destructive" className="w-full" onClick={() => handleDelete(db)} disabled={deleteMutation.isPending}><Trash2 className="mr-2 h-4 w-4" />Excluir definitivamente</Button>}
                 </CardContent>
               </Card>
             ))}

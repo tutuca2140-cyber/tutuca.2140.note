@@ -1,6 +1,7 @@
-import { eq, and, desc, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
+import { eq, and, desc, sql, inArray, or } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import { AsyncLocalStorage } from "node:async_hooks";
+import WebSocket from "ws";
 import { 
   InsertUser, users, 
   databases, InsertDatabase,
@@ -8,25 +9,33 @@ import {
   loans, InsertLoan,
   loanInterestHistory, InsertLoanInterestHistory,
   payments, InsertPayment,
-  cashFlow, InsertCashFlow,
+  cashFlow, InsertCashFlow, CashFlow,
   vehicles, InsertVehicle,
   vehicleSales, InsertVehicleSale,
   vehicleFinancings, InsertVehicleFinancing,
   auditLogs, InsertAuditLog,
   agents, InsertAgent,
   localSessions, InsertLocalSession,
-  passwordResetTokens, InsertPasswordResetToken
+  passwordResetTokens, InsertPasswordResetToken,
+  userDatabaseAccess
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
-import { allocatePayment, allocateBalancePayment, roundMoney } from "../shared/finance";
+import { addPeriods, allocatePayment, allocateBalancePayment, roundMoney } from "../shared/finance";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+type DatabaseScope = { userId: number; role: string };
+const databaseScope = new AsyncLocalStorage<DatabaseScope>();
+
+export function withUserDatabaseScope<T>(user: DatabaseScope, operation: () => T): T {
+  return databaseScope.run(user, operation);
+}
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      const sqlClient = neon(process.env.DATABASE_URL);
-      _db = drizzle(sqlClient);
+      // Os fluxos financeiros usam transações interativas. O driver neon-http
+      // não oferece esse recurso; WebSocket mantém empréstimo + caixa atômicos.
+      _db = drizzle({ connection: process.env.DATABASE_URL, ws: WebSocket });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -126,7 +135,14 @@ export async function getUserByOpenId(openId: string) {
 export async function getAllUsers() {
   const db = await getDb();
   if (!db) return [];
-  return await db.select().from(users).orderBy(desc(users.createdAt));
+  const rows = await db.select().from(users).orderBy(desc(users.createdAt));
+  return Promise.all(rows.map(async (user) => ({
+    ...user,
+    databaseIds: (await db.select({ databaseId: userDatabaseAccess.databaseId })
+      .from(userDatabaseAccess)
+      .where(eq(userDatabaseAccess.userId, user.id)))
+      .map((access) => access.databaseId),
+  })));
 }
 
 export async function getUserById(id: number) {
@@ -158,7 +174,30 @@ export async function updateUserRole(userId: number, role: 'user' | 'admin' | 's
 export async function toggleUserActive(userId: number, isActive: boolean) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ isActive }).where(eq(users.id, userId));
+  await db.update(users).set(isActive ? { isActive: true, failedLoginAttempts: 0 } : { isActive: false }).where(eq(users.id, userId));
+}
+
+export async function registerFailedLogin(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const [updated] = await db.update(users)
+    .set({ failedLoginAttempts: sql`${users.failedLoginAttempts} + 1`, updatedAt: new Date() })
+    .where(eq(users.id, userId))
+    .returning({ failedLoginAttempts: users.failedLoginAttempts });
+  const attempts = updated?.failedLoginAttempts ?? 0;
+  if (attempts >= 2) {
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ isActive: false }).where(eq(users.id, userId));
+      await tx.delete(localSessions).where(eq(localSessions.userId, userId));
+    });
+  }
+  return attempts;
+}
+
+export async function resetFailedLogin(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ failedLoginAttempts: 0 }).where(eq(users.id, userId));
 }
 
 export async function updateLocalUser(userId: number, data: {
@@ -166,6 +205,13 @@ export async function updateLocalUser(userId: number, data: {
   email?: string;
   name?: string;
   role?: 'user' | 'admin';
+  canView?: boolean;
+  canInsert?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canGenerateReports?: boolean;
+  canAccessSettings?: boolean;
+  dashboardOnly?: boolean;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -181,7 +227,10 @@ export async function deleteUserSessions(userId: number) {
 export async function deleteUser(userId: number) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(users).where(eq(users.id, userId));
+  await db.transaction(async (tx) => {
+    await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.userId, userId));
+    await tx.delete(users).where(eq(users.id, userId));
+  });
 }
 
 /**
@@ -235,6 +284,49 @@ export async function getAllDatabases() {
   return await db.select().from(databases).orderBy(desc(databases.createdAt));
 }
 
+export async function getDatabasesForUser(userId: number, role: string) {
+  const db = await getDb();
+  if (!db) return [];
+  if (role === 'super_admin') return getAllDatabases();
+  const assigned = await db.select({ database: databases })
+    .from(userDatabaseAccess)
+    .innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id))
+    .where(eq(userDatabaseAccess.userId, userId));
+  if (assigned.length || role !== 'admin') return assigned.map((row) => row.database);
+  // Compatibilidade para administradores antigos ainda não vinculados.
+  return getAllDatabases();
+}
+
+export async function getUserDatabaseIds(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ databaseId: userDatabaseAccess.databaseId })
+    .from(userDatabaseAccess)
+    .where(eq(userDatabaseAccess.userId, userId));
+  return rows.map((row) => row.databaseId);
+}
+
+export async function assignUserDatabases(userId: number, databaseIds: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const uniqueIds = Array.from(new Set(databaseIds));
+  if (uniqueIds.length > 3) throw new Error('Cada usuário pode ser vinculado a no máximo três bancos.');
+  if (uniqueIds.length) {
+    const existing = await db.select({ id: databases.id }).from(databases).where(inArray(databases.id, uniqueIds));
+    if (existing.length !== uniqueIds.length) throw new Error('Um ou mais bancos selecionados não existem.');
+  }
+  await db.transaction(async (tx) => {
+    await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.userId, userId));
+    if (uniqueIds.length) {
+      await tx.insert(userDatabaseAccess).values(uniqueIds.map((databaseId, index) => ({
+        userId,
+        databaseId,
+        isActive: index === 0,
+      })));
+    }
+  });
+}
+
 export async function getDatabaseById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
@@ -245,6 +337,22 @@ export async function getDatabaseById(id: number) {
 export async function getActiveDatabase() {
   const db = await getDb();
   if (!db) return undefined;
+  const scope = databaseScope.getStore();
+  if (scope && scope.role !== 'super_admin') {
+    const assigned = await db.select({ database: databases })
+      .from(userDatabaseAccess)
+      .innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id))
+      .where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.isActive, true)))
+      .limit(1);
+    if (assigned[0]) return assigned[0].database;
+    const fallback = await db.select({ database: databases })
+      .from(userDatabaseAccess)
+      .innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id))
+      .where(eq(userDatabaseAccess.userId, scope.userId))
+      .limit(1);
+    if (fallback[0]) return fallback[0].database;
+    if (scope.role !== 'admin') return undefined;
+  }
   const result = await db.select().from(databases).where(eq(databases.isActive, true)).limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
@@ -252,6 +360,20 @@ export async function getActiveDatabase() {
 export async function setActiveDatabase(id: number) {
   const db = await getDb();
   if (!db) return;
+  const scope = databaseScope.getStore();
+  if (scope && scope.role !== 'super_admin') {
+    const access = await db.select().from(userDatabaseAccess)
+      .where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.databaseId, id)))
+      .limit(1);
+    if (access[0]) {
+      await db.transaction(async (tx) => {
+        await tx.update(userDatabaseAccess).set({ isActive: false }).where(eq(userDatabaseAccess.userId, scope.userId));
+        await tx.update(userDatabaseAccess).set({ isActive: true }).where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.databaseId, id)));
+      });
+      return;
+    }
+    if (scope.role !== 'admin') throw new Error('Você não tem acesso a este banco de dados.');
+  }
   // Desativar todos
   await db.update(databases).set({ isActive: false });
   // Ativar o selecionado
@@ -267,7 +389,20 @@ export async function updateDatabase(id: number, data: Partial<InsertDatabase>) 
 export async function deleteDatabase(id: number) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(databases).where(eq(databases.id, id));
+  await db.transaction(async (tx) => {
+    await tx.delete(cashFlow).where(eq(cashFlow.databaseId, id));
+    await tx.delete(payments).where(eq(payments.databaseId, id));
+    await tx.delete(loanInterestHistory).where(eq(loanInterestHistory.databaseId, id));
+    await tx.delete(vehicleFinancings).where(eq(vehicleFinancings.databaseId, id));
+    await tx.delete(vehicleSales).where(eq(vehicleSales.databaseId, id));
+    await tx.delete(loans).where(eq(loans.databaseId, id));
+    await tx.delete(vehicles).where(eq(vehicles.databaseId, id));
+    await tx.delete(clients).where(eq(clients.databaseId, id));
+    await tx.delete(agents).where(eq(agents.databaseId, id));
+    await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.databaseId, id));
+    await tx.delete(auditLogs).where(eq(auditLogs.databaseId, id));
+    await tx.delete(databases).where(eq(databases.id, id));
+  });
 }
 
 // ==================== CLIENTS ====================
@@ -355,6 +490,8 @@ export async function getClientProfile(clientId: number, databaseId: number) {
 
 // ==================== LOANS ====================
 
+export const INITIAL_LOAN_INTEREST_PERIOD = "CONTRATO_INICIAL";
+
 export async function createLoan(data: InsertLoan) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -370,6 +507,19 @@ export async function createLoanBundle(data: InsertLoan, cashEntry: Omit<InsertC
     const [createdLoan] = await tx.insert(loans).values(data).returning({ id: loans.id });
     const loanId = createdLoan?.id;
     if (!loanId) throw new Error("Não foi possível identificar o empréstimo criado.");
+    if (Number(data.accruedInterest || 0) > 0) {
+      await tx.insert(loanInterestHistory).values({
+        databaseId: data.databaseId,
+        loanId,
+        periodReference: INITIAL_LOAN_INTEREST_PERIOD,
+        previousPrincipalBalance: data.amount,
+        interestGenerated: data.accruedInterest!,
+        paymentAmount: '0.00',
+        interestPaid: '0.00',
+        principalAmortized: '0.00',
+        updatedPrincipalBalance: data.amount,
+      });
+    }
     await tx.insert(cashFlow).values({
       ...cashEntry,
       loanId,
@@ -449,7 +599,13 @@ async function recalculateLoanWithTransaction(tx: any, loanId: number, databaseI
       netAmount: roundMoney(Number(payment.amount || 0) - (Number(payment.amount || 0) * Number(payment.commissionPercentage || 0) / 100)).toFixed(2),
     }).where(eq(payments.id, payment.id));
   }
-  const nextStatus = principalBalance + interestPool <= 0 ? 'pago' : new Date(loan.endDate) < new Date() ? 'atrasado' : 'ativo';
+  const nextStatus = loan.status === 'cancelado'
+    ? 'cancelado'
+    : principalBalance + interestPool <= 0
+      ? 'pago'
+      : new Date(loan.endDate) < new Date()
+        ? 'atrasado'
+        : 'ativo';
   await tx.update(loans).set({
     principalBalance: principalBalance.toFixed(2),
     accruedInterest: interestPool.toFixed(2),
@@ -547,10 +703,57 @@ export async function updateLoanBalance(id: number, databaseId: number, data: Pa
   await db.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
 }
 
-export async function updateLoanInDatabase(id: number, databaseId: number, data: Partial<InsertLoan>) {
+export async function updateLoanInDatabase(id: number, databaseId: number, data: Partial<InsertLoan>, initialInterest?: number) {
   const db = await getDb();
   if (!db) return;
-  await db.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
+  return db.transaction(async (tx) => {
+    await tx.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
+
+    if (initialInterest !== undefined) {
+      const initialRows = await tx.select().from(loanInterestHistory).where(and(
+        eq(loanInterestHistory.loanId, id),
+        eq(loanInterestHistory.databaseId, databaseId),
+        eq(loanInterestHistory.periodReference, INITIAL_LOAN_INTEREST_PERIOD),
+      )).limit(1);
+      const principal = String(data.amount || '0.00');
+      if (initialInterest > 0) {
+        const historyValues = {
+          previousPrincipalBalance: principal,
+          interestGenerated: roundMoney(initialInterest).toFixed(2),
+          paymentAmount: '0.00',
+          interestPaid: '0.00',
+          principalAmortized: '0.00',
+          updatedPrincipalBalance: principal,
+        };
+        if (initialRows[0]) {
+          await tx.update(loanInterestHistory).set(historyValues).where(eq(loanInterestHistory.id, initialRows[0].id));
+        } else {
+          await tx.insert(loanInterestHistory).values({
+            databaseId,
+            loanId: id,
+            periodReference: INITIAL_LOAN_INTEREST_PERIOD,
+            ...historyValues,
+          });
+        }
+      } else if (initialRows[0]) {
+        await tx.delete(loanInterestHistory).where(eq(loanInterestHistory.id, initialRows[0].id));
+      }
+      await recalculateLoanWithTransaction(tx, id, databaseId);
+    }
+
+    const cashUpdate: Partial<InsertCashFlow> = {};
+    if (data.amount !== undefined) cashUpdate.amount = data.amount;
+    if (data.startDate !== undefined) cashUpdate.movementDate = data.startDate;
+    if (data.clientId !== undefined) cashUpdate.clientId = data.clientId;
+    if (data.description !== undefined) cashUpdate.notes = data.description;
+    if (Object.keys(cashUpdate).length > 0) {
+      await tx.update(cashFlow).set(cashUpdate).where(and(
+        eq(cashFlow.loanId, id),
+        eq(cashFlow.databaseId, databaseId),
+        eq(cashFlow.category, 'LIBERACAO_EMPRESTIMO'),
+      ));
+    }
+  });
 }
 
 export async function deleteLoan(id: number) {
@@ -603,7 +806,9 @@ export async function createLoanInterestHistory(data: InsertLoanInterestHistory)
 export async function createAgent(data: InsertAgent) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  return await db.insert(agents).values(data);
+  const [created] = await db.insert(agents).values(data).returning();
+  if (!created) throw new Error("Não foi possível confirmar o agente criado.");
+  return created;
 }
 
 export async function getAgentsByDatabase(databaseId: number, includeInactive = true) {
@@ -799,6 +1004,39 @@ export async function getCashFlowByDatabase(databaseId: number) {
   return db.select().from(cashFlow).where(eq(cashFlow.databaseId, databaseId)).orderBy(desc(cashFlow.movementDate));
 }
 
+const automaticCashCategories = new Set([
+  'LIBERACAO_EMPRESTIMO',
+  'JUROS_EMPRESTIMO',
+  'PAGAMENTO_EMPRESTIMO',
+  'QUITACAO_EMPRESTIMO',
+  'PAGAMENTO_FINANCIAMENTO',
+  'COMPRA_VEICULO',
+  'VENDA_VEICULO',
+  'RECEBIMENTO_VENDA_VEICULO',
+]);
+
+export function isManualCashFlowEntry(entry: Pick<CashFlow, 'sourceKey' | 'paymentId' | 'loanId' | 'vehicleId' | 'vehicleSaleId' | 'category'>) {
+  return !entry.sourceKey
+    && !entry.paymentId
+    && !entry.loanId
+    && !entry.vehicleId
+    && !entry.vehicleSaleId
+    && !automaticCashCategories.has(entry.category);
+}
+
+export async function deleteManualCashFlowEntry(id: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async (tx) => {
+    const rows = await tx.select().from(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId))).limit(1);
+    const entry = rows[0];
+    if (!entry) return { deleted: false as const, reason: 'not_found' as const };
+    if (!isManualCashFlowEntry(entry)) return { deleted: false as const, reason: 'automatic' as const, entry };
+    await tx.delete(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId)));
+    return { deleted: true as const, entry };
+  });
+}
+
 export async function getCashFlowByLoan(loanId: number, databaseId: number) {
   const db = await getDb();
   if (!db) return [];
@@ -894,7 +1132,26 @@ export async function deleteVehicle(id: number) {
 export async function deleteVehicleInDatabase(id: number, databaseId: number) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(vehicles).where(and(eq(vehicles.id, id), eq(vehicles.databaseId, databaseId)));
+  await db.transaction(async (tx) => {
+    const financingRows = await tx.select({ id: vehicleFinancings.id }).from(vehicleFinancings)
+      .where(and(eq(vehicleFinancings.vehicleId, id), eq(vehicleFinancings.databaseId, databaseId)));
+    const saleRows = await tx.select({ id: vehicleSales.id }).from(vehicleSales)
+      .where(and(eq(vehicleSales.vehicleId, id), eq(vehicleSales.databaseId, databaseId)));
+    const financingIds = financingRows.map((row) => row.id);
+    const saleIds = saleRows.map((row) => row.id);
+    const paymentRows = financingIds.length
+      ? await tx.select({ id: payments.id }).from(payments).where(and(eq(payments.databaseId, databaseId), inArray(payments.vehicleFinancingId, financingIds)))
+      : [];
+    const paymentIds = paymentRows.map((row) => row.id);
+    const cashConditions = [eq(cashFlow.vehicleId, id)];
+    if (saleIds.length) cashConditions.push(inArray(cashFlow.vehicleSaleId, saleIds));
+    if (paymentIds.length) cashConditions.push(inArray(cashFlow.paymentId, paymentIds));
+    await tx.delete(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), or(...cashConditions)!));
+    if (paymentIds.length) await tx.delete(payments).where(inArray(payments.id, paymentIds));
+    if (financingIds.length) await tx.delete(vehicleFinancings).where(inArray(vehicleFinancings.id, financingIds));
+    if (saleIds.length) await tx.delete(vehicleSales).where(inArray(vehicleSales.id, saleIds));
+    await tx.delete(vehicles).where(and(eq(vehicles.id, id), eq(vehicles.databaseId, databaseId)));
+  });
 }
 
 export async function getVehicleSalesByDatabase(databaseId: number) {
@@ -945,8 +1202,9 @@ export async function receiveVehicleSaleBundle(saleId: number, databaseId: numbe
 export async function createVehicleFinancing(data: InsertVehicleFinancing) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(vehicleFinancings).values(data);
-  return result;
+  const [created] = await db.insert(vehicleFinancings).values(data).returning();
+  if (!created) throw new Error("Não foi possível confirmar o financiamento criado.");
+  return created;
 }
 
 export async function getVehicleFinancingsByDatabase(databaseId: number) {
@@ -1019,18 +1277,21 @@ export async function getDashboardStats(databaseId: number) {
   if (!db) return null;
 
   try {
-    const [activeLoansResult, paidLoansResult, pendingPaymentsResult, cashInResult, cashOutResult, clientsResult, loanRows, loanPaymentRows, vehicleRows, vehicleSaleRows, vehiclePurchaseRows] = await Promise.all([
+    const [activeLoansResult, paidLoansResult, pendingPaymentsResult, cashInResult, cashOutResult, clientsResult, loanRows, loanPaymentRows, vehicleRows, vehicleSaleRows, vehiclePurchaseRows, financingRows, allPaymentRows, clientRows] = await Promise.all([
       db.select({ count: sql<number>`count(*)`, total: sql<string>`sum(${loans.totalAmount})` }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, 'ativo'))),
       db.select({ count: sql<number>`count(*)`, total: sql<string>`sum(${loans.totalAmount})` }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, 'pago'))),
       db.select({ count: sql<number>`count(*)`, total: sql<string>`sum(${payments.amount})` }).from(payments).where(and(eq(payments.databaseId, databaseId), eq(payments.status, 'pendente'))),
       db.select({ total: sql<string>`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, 'ENTRADA'))),
       db.select({ total: sql<string>`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, 'SAIDA'))),
       db.select({ count: sql<number>`count(*)` }).from(clients).where(eq(clients.databaseId, databaseId)),
-      db.select({ amount: loans.amount, remainingBalance: loans.remainingBalance, status: loans.status, endDate: loans.endDate }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
+      db.select({ id: loans.id, clientId: loans.clientId, amount: loans.amount, remainingBalance: loans.remainingBalance, accruedInterest: loans.accruedInterest, status: loans.status, startDate: loans.startDate, endDate: loans.endDate, installments: loans.installments, installmentAmount: loans.installmentAmount, ratePeriod: loans.ratePeriod, description: loans.description }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
       db.select({ amount: payments.amount, interestAmount: payments.interestAmount, principalAmount: payments.principalAmount, status: payments.status, loanId: payments.loanId }).from(payments).where(and(eq(payments.databaseId, databaseId), sql`${payments.loanId} is not null`)),
-      db.select({ expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
+      db.select({ id: vehicles.id, model: vehicles.model, brand: vehicles.brand, status: vehicles.status, expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
       db.select({ saleAmount: vehicleSales.saleAmount, purchasePrice: vehicles.purchasePrice, expenses: vehicles.expenses }).from(vehicleSales).innerJoin(vehicles, eq(vehicleSales.vehicleId, vehicles.id)).where(and(eq(vehicleSales.databaseId, databaseId), eq(vehicles.databaseId, databaseId))),
       db.select({ amount: cashFlow.amount }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, 'SAIDA'), eq(cashFlow.category, 'COMPRA_VEICULO'))),
+      db.select().from(vehicleFinancings).where(and(eq(vehicleFinancings.databaseId, databaseId), sql`${vehicleFinancings.status} <> 'cancelado'`)),
+      db.select().from(payments).where(eq(payments.databaseId, databaseId)),
+      db.select({ id: clients.id, name: clients.name }).from(clients).where(eq(clients.databaseId, databaseId)),
     ]);
 
     const totalEntradas = Number(cashInResult[0]?.total || 0);
@@ -1044,9 +1305,63 @@ export async function getDashboardStats(databaseId: number) {
     const totalInterestReceived = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0);
     const totalPrincipalAmortized = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.principalAmount || 0), 0);
     const totalOpen = loanRowsNotCancelled.filter((loan) => !['pago', 'cancelado'].includes(loan.status)).reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
+    const totalInterestOpen = loanRowsNotCancelled.filter((loan) => !['pago', 'cancelado'].includes(loan.status)).reduce((sum, loan) => sum + Number(loan.accruedInterest || 0), 0);
     const overdueLoans = loanRowsNotCancelled.filter((loan) => loan.status === 'atrasado' || (loan.status === 'ativo' && new Date(loan.endDate).getTime() < Date.now()));
     const totalOverdue = overdueLoans.reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
     const totalVehiclePurchases = vehiclePurchaseRows.reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+    const clientNames = new Map(clientRows.map((client) => [client.id, client.name]));
+    const vehicleNames = new Map(vehicleRows.map((vehicle) => [vehicle.id, `${vehicle.brand ?? ''} ${vehicle.model}`.trim()]));
+    const dateFormatter = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+    });
+    const dateKey = (date: Date) => {
+      const parts = Object.fromEntries(dateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+      return `${parts.year}-${parts.month}-${parts.day}`;
+    };
+    const todayKey = dateKey(new Date());
+    type DueItem = { clientId: number; clientName: string; amount: number; product: string; dueDate: Date; installmentNumber: number; contractType: 'emprestimo' | 'financiamento' };
+    const dueItems: DueItem[] = [];
+    const paidKeys = new Set(allPaymentRows.filter((payment) => payment.status === 'pago').map((payment) =>
+      payment.loanId
+        ? `loan:${payment.loanId}:${payment.installmentNumber}`
+        : `financing:${payment.vehicleFinancingId}:${payment.installmentNumber}`
+    ));
+    for (const loan of loanRows.filter((item) => ['ativo', 'atrasado'].includes(item.status))) {
+      for (let installmentNumber = 1; installmentNumber <= loan.installments; installmentNumber += 1) {
+        if (paidKeys.has(`loan:${loan.id}:${installmentNumber}`)) continue;
+        dueItems.push({
+          clientId: loan.clientId,
+          clientName: clientNames.get(loan.clientId) ?? `Cliente #${loan.clientId}`,
+          amount: Number(loan.installmentAmount),
+          product: loan.description?.trim() || `Empréstimo #${loan.id}`,
+          dueDate: addPeriods(new Date(loan.startDate), installmentNumber, loan.ratePeriod as 'day' | 'week' | 'month' | 'year'),
+          installmentNumber,
+          contractType: 'emprestimo',
+        });
+      }
+    }
+    for (const financing of financingRows.filter((item) => ['ativo', 'atrasado'].includes(item.status))) {
+      for (let installmentNumber = 1; installmentNumber <= financing.installments; installmentNumber += 1) {
+        if (paidKeys.has(`financing:${financing.id}:${installmentNumber}`)) continue;
+        dueItems.push({
+          clientId: financing.clientId,
+          clientName: clientNames.get(financing.clientId) ?? `Cliente #${financing.clientId}`,
+          amount: Number(financing.installmentAmount),
+          product: vehicleNames.get(financing.vehicleId) ?? `Financiamento #${financing.id}`,
+          dueDate: addPeriods(new Date(financing.startDate), installmentNumber, 'month'),
+          installmentNumber,
+          contractType: 'financiamento',
+        });
+      }
+    }
+    const serializeDue = (item: DueItem) => ({ ...item, dueDate: item.dueDate.toISOString() });
+    const dueTodayItems = dueItems.filter((item) => dateKey(item.dueDate) === todayKey).sort((a, b) => a.clientName.localeCompare(b.clientName));
+    const overdueItems = dueItems.filter((item) => dateKey(item.dueDate) < todayKey).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+    const dueToday = dueTodayItems.slice(0, 100).map(serializeDue);
+    const overdue = overdueItems.slice(0, 100).map(serializeDue);
+    const financedVehicleIds = new Set(financingRows.map((financing) => financing.vehicleId));
+    const soldVehicleIds = new Set([...vehicleRows.filter((vehicle) => vehicle.status === 'vendido').map((vehicle) => vehicle.id), ...Array.from(financedVehicleIds)]);
+    const vehiclePayments = allPaymentRows.filter((payment) => payment.vehicleFinancingId !== null);
 
     return {
       activeLoans: { count: Number(activeLoansResult[0]?.count || 0), total: Number(activeLoansResult[0]?.total || 0) },
@@ -1059,12 +1374,20 @@ export async function getDashboardStats(databaseId: number) {
       vehicleProfit: roundMoney(vehicleProfit),
       vehicleExpenses: roundMoney(vehicleExpenses),
       vehicleSalesCount: vehicleSaleRows.length,
+      collections: { dueToday, overdue },
+      vehicleMetrics: {
+        carsSold: soldVehicleIds.size,
+        financings: financingRows.length,
+        installmentsPaid: vehiclePayments.filter((payment) => payment.status === 'pago').length,
+        installmentsOverdue: overdueItems.filter((item) => item.contractType === 'financiamento').length,
+      },
       loanMetrics: {
         totalLent: roundMoney(totalLent),
         totalReceived: roundMoney(totalReceived),
         totalInterestReceived: roundMoney(totalInterestReceived),
         totalPrincipalAmortized: roundMoney(totalPrincipalAmortized),
         totalOpen: roundMoney(totalOpen),
+        totalInterestOpen: roundMoney(totalInterestOpen),
         overdueCount: overdueLoans.length,
         totalOverdue: roundMoney(totalOverdue),
         totalVehiclePurchases: roundMoney(totalVehiclePurchases),
@@ -1085,6 +1408,14 @@ export async function createLocalUser(data: {
   email: string;
   name: string;
   passwordHash: string;
+  role?: 'user' | 'admin';
+  canView?: boolean;
+  canInsert?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canGenerateReports?: boolean;
+  canAccessSettings?: boolean;
+  dashboardOnly?: boolean;
 }): Promise<any> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -1096,13 +1427,14 @@ export async function createLocalUser(data: {
       name: data.name,
       passwordHash: data.passwordHash,
       loginMethod: 'local',
-      role: 'user',
-      canView: true,
-      canInsert: false,
-      canEdit: false,
-      canDelete: false,
-      canGenerateReports: false,
-      canAccessSettings: false,
+      role: data.role ?? 'user',
+      canView: data.canView ?? true,
+      canInsert: data.canInsert ?? false,
+      canEdit: data.canEdit ?? false,
+      canDelete: data.canDelete ?? false,
+      canGenerateReports: data.canGenerateReports ?? false,
+      canAccessSettings: data.canAccessSettings ?? false,
+      dashboardOnly: data.dashboardOnly ?? false,
       isActive: true,
       emailVerified: false,
       lastSignedIn: new Date(),
@@ -1218,7 +1550,7 @@ export async function consumePasswordResetToken(tokenId: number) {
 export async function updateLocalPassword(userId: number, passwordHash: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(users).set({ passwordHash, loginMethod: 'local' }).where(eq(users.id, userId));
+  await db.update(users).set({ passwordHash, loginMethod: 'local', failedLoginAttempts: 0 }).where(eq(users.id, userId));
   await db.delete(localSessions).where(eq(localSessions.userId, userId));
 }
 
@@ -1227,4 +1559,3 @@ export async function deletePasswordResetTokensForUser(userId: number) {
   if (!db) throw new Error("Database not available");
   await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
 }
-

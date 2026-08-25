@@ -11,6 +11,20 @@ export function getSql() {
   return neon(databaseUrl);
 }
 
+let authColumnsPromise: Promise<void> | null = null;
+export function ensureAuthUserColumns() {
+  if (authColumnsPromise) return authColumnsPromise;
+  const sql = getSql();
+  authColumnsPromise = (async () => {
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
+  })().catch((error) => {
+    authColumnsPromise = null;
+    throw error;
+  });
+  return authColumnsPromise;
+}
+
 export function makeSessionToken() {
   return crypto.randomBytes(32).toString("hex");
 }

@@ -1,6 +1,14 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { trpc } from "@/lib/trpc";
+import {
   LayoutDashboard,
   Users,
   CreditCard,
@@ -13,10 +21,10 @@ import {
   Shield,
   Menu,
   X,
-  ClipboardList
+  ClipboardList,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 interface DashboardLayoutProps {
@@ -29,8 +37,41 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     redirectPath: "/login",
   });
 
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const utils = trpc.useUtils();
+  const { data: availableDatabases = [] } = trpc.databases.list.useQuery(
+    undefined,
+    { enabled: Boolean(user) }
+  );
+  const { data: activeDatabase } = trpc.databases.getActive.useQuery(
+    undefined,
+    { enabled: Boolean(user) }
+  );
+  const setActiveDatabase = trpc.databases.setActive.useMutation();
+
+  useEffect(() => {
+    if (user?.dashboardOnly && location !== "/dashboard") {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [location, navigate, user?.dashboardOnly]);
+
+  const handleDatabaseChange = async (value: string) => {
+    try {
+      await setActiveDatabase.mutateAsync({ id: Number(value) });
+      await Promise.all([
+        utils.databases.getActive.invalidate(),
+        utils.invalidate(),
+      ]);
+      toast.success("Banco de dados alterado.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível alterar o banco."
+      );
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -46,25 +87,71 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   };
 
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  const isSuperAdmin = user?.role === "super_admin";
+  const regularAccess = !user?.dashboardOnly;
 
   const navigation = [
-    { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, show: true },
-    { name: "Clientes", href: "/clientes", icon: Users, show: user?.canView },
-    { name: "Empréstimos", href: "/emprestimos", icon: CreditCard, show: user?.canView },
-    { name: "Pagamentos", href: "/pagamentos", icon: Wallet, show: user?.canView },
-    { name: "Caixa", href: "/caixa", icon: Wallet, show: user?.canView },
-    { name: "Agentes", href: "/agentes", icon: Users, show: user?.canView },
-    { name: "Veículos", href: "/veiculos", icon: Car, show: user?.canView },
-    { name: "Vendas de Veículos", href: "/vendas-veiculos", icon: Wallet, show: user?.canView },
-    { name: "Financiamentos", href: "/financiamentos", icon: ClipboardList, show: user?.canView },
-    { name: "Relatórios", href: "/relatorios", icon: FileText, show: user?.canGenerateReports },
+    {
+      name: "Dashboard",
+      href: "/dashboard",
+      icon: LayoutDashboard,
+      show: true,
+    },
+    { name: "Clientes", href: "/clientes", icon: Users, show: user?.canView && regularAccess },
+    {
+      name: "Empréstimos",
+      href: "/emprestimos",
+      icon: CreditCard,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Pagamentos",
+      href: "/pagamentos",
+      icon: Wallet,
+      show: user?.canView && regularAccess,
+    },
+    { name: "Caixa", href: "/caixa", icon: Wallet, show: user?.canView && regularAccess },
+    { name: "Agentes", href: "/agentes", icon: Users, show: user?.canView && regularAccess },
+    { name: "Veículos", href: "/veiculos", icon: Car, show: user?.canView && regularAccess },
+    {
+      name: "Financiamentos",
+      href: "/financiamentos",
+      icon: ClipboardList,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Relatórios",
+      href: "/relatorios",
+      icon: FileText,
+      show: user?.canGenerateReports && regularAccess,
+    },
   ];
 
   const adminNavigation = [
-    { name: "Usuários", href: "/admin/usuarios", icon: Shield, show: isAdmin },
-    { name: "Bancos de Dados", href: "/admin/bancos", icon: Database, show: isAdmin },
-    { name: "Auditoria", href: "/admin/auditoria", icon: FileText, show: isAdmin },
-    { name: "Configurações", href: "/admin/configuracoes", icon: Settings, show: user?.canAccessSettings },
+    {
+      name: "Usuários",
+      href: "/admin/usuarios",
+      icon: Shield,
+      show: isSuperAdmin,
+    },
+    {
+      name: "Bancos de Dados",
+      href: "/admin/bancos",
+      icon: Database,
+      show: isAdmin,
+    },
+    {
+      name: "Auditoria",
+      href: "/admin/auditoria",
+      icon: FileText,
+      show: isAdmin,
+    },
+    {
+      name: "Configurações",
+      href: "/admin/configuracoes",
+      icon: Settings,
+      show: user?.canAccessSettings,
+    },
   ];
 
   if (loading) {
@@ -91,9 +178,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             size="icon"
             onClick={() => setSidebarOpen(!sidebarOpen)}
           >
-            {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            {sidebarOpen ? (
+              <X className="h-5 w-5" />
+            ) : (
+              <Menu className="h-5 w-5" />
+            )}
           </Button>
-          <span className="font-bold text-primary tracking-wider">NOTE NOTE</span>
+          <img
+            src="/note-note-logo.webp"
+            alt="Note Note"
+            className="h-10 w-24 rounded-md object-cover object-center"
+          />
         </div>
       </div>
 
@@ -106,10 +201,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         `}
       >
         <div className="flex flex-col h-full">
-          <div className="px-6 py-5 border-b border-border">
-            <h1 className="text-xl font-bold text-primary tracking-[0.12em]">
-              NOTE NOTE
-            </h1>
+          <div className="px-4 py-4 border-b border-border">
+            <img
+              src="/note-note-logo.webp"
+              alt="Note Note"
+              className="h-auto w-full rounded-xl border border-border object-contain shadow-sm"
+            />
             <p className="text-xs text-muted-foreground mt-1 tracking-wide">
               Sistema de Gestão
             </p>
@@ -131,16 +228,41 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   {user.name || user.username || user.email}
                 </p>
                 <p className="text-xs text-muted-foreground capitalize">
-                  {user.role === "super_admin" ? "Super Administrador" : user.role}
+                  {user.role === "super_admin"
+                    ? "Super Administrador"
+                    : user.role}
                 </p>
               </div>
             </div>
+            {availableDatabases.length > 0 && (
+              <div className="mt-3">
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+                  Banco em operação
+                </p>
+                <Select
+                  value={activeDatabase ? String(activeDatabase.id) : undefined}
+                  onValueChange={handleDatabaseChange}
+                  disabled={setActiveDatabase.isPending}
+                >
+                  <SelectTrigger className="bg-background">
+                    <SelectValue placeholder="Selecionar banco" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableDatabases.map(database => (
+                      <SelectItem key={database.id} value={String(database.id)}>
+                        {database.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
             {navigation
-              .filter((item) => item.show)
-              .map((item) => {
+              .filter(item => item.show)
+              .map(item => {
                 const Icon = item.icon;
                 const active = isActive(item.href);
 
@@ -174,8 +296,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 </div>
 
                 {adminNavigation
-                  .filter((item) => item.show)
-                  .map((item) => {
+                  .filter(item => item.show)
+                  .map(item => {
                     const Icon = item.icon;
                     const active = isActive(item.href);
 
@@ -218,9 +340,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       <div className="lg:pl-64">
         <main className="pt-20 px-4 pb-8 sm:px-6 lg:pt-0 lg:px-8 lg:py-8">
-          <div className="mx-auto w-full max-w-[1600px]">
-            {children}
-          </div>
+          <div className="mx-auto w-full max-w-[1600px]">{children}</div>
         </main>
       </div>
 

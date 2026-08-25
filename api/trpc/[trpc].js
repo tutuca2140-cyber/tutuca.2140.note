@@ -188,9 +188,10 @@ import { TRPCError as TRPCError3 } from "@trpc/server";
 import { z as z2 } from "zod";
 
 // server/db.ts
-import { eq, and, desc, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
+import { eq, and, desc, sql, inArray, or } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import { AsyncLocalStorage } from "node:async_hooks";
+import WebSocket from "ws";
 
 // drizzle/schema.ts
 import { integer, serial, pgTable, text, timestamp, varchar, numeric, boolean, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
@@ -210,6 +211,8 @@ var users = pgTable("users", {
   canDelete: boolean("canDelete").default(false).notNull(),
   canGenerateReports: boolean("canGenerateReports").default(false).notNull(),
   canAccessSettings: boolean("canAccessSettings").default(false).notNull(),
+  dashboardOnly: boolean("dashboardOnly").default(false).notNull(),
+  failedLoginAttempts: integer("failedLoginAttempts").default(0).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   emailVerified: boolean("emailVerified").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -241,6 +244,15 @@ var databases = pgTable("databases", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull()
 });
+var userDatabaseAccess = pgTable("user_database_access", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  databaseId: integer("databaseId").notNull().references(() => databases.id, { onDelete: "cascade" }),
+  isActive: boolean("isActive").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull()
+}, (table) => ({
+  userDatabaseUnique: uniqueIndex("user_database_access_user_database_unique").on(table.userId, table.databaseId)
+}));
 var clients = pgTable("clients", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(),
@@ -510,11 +522,14 @@ function addPeriods(startDate, periods, ratePeriod) {
 
 // server/db.ts
 var _db = null;
+var databaseScope = new AsyncLocalStorage();
+function withUserDatabaseScope(user, operation) {
+  return databaseScope.run(user, operation);
+}
 async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      const sqlClient = neon(process.env.DATABASE_URL);
-      _db = drizzle(sqlClient);
+      _db = drizzle({ connection: process.env.DATABASE_URL, ws: WebSocket });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -595,7 +610,11 @@ async function getUserByOpenId(openId) {
 async function getAllUsers() {
   const db = await getDb();
   if (!db) return [];
-  return await db.select().from(users).orderBy(desc(users.createdAt));
+  const rows = await db.select().from(users).orderBy(desc(users.createdAt));
+  return Promise.all(rows.map(async (user) => ({
+    ...user,
+    databaseIds: (await db.select({ databaseId: userDatabaseAccess.databaseId }).from(userDatabaseAccess).where(eq(userDatabaseAccess.userId, user.id))).map((access) => access.databaseId)
+  })));
 }
 async function getUserById(id) {
   const db = await getDb();
@@ -616,7 +635,25 @@ async function updateUserRole(userId, role) {
 async function toggleUserActive(userId, isActive) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ isActive }).where(eq(users.id, userId));
+  await db.update(users).set(isActive ? { isActive: true, failedLoginAttempts: 0 } : { isActive: false }).where(eq(users.id, userId));
+}
+async function registerFailedLogin(userId) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const [updated] = await db.update(users).set({ failedLoginAttempts: sql`${users.failedLoginAttempts} + 1`, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, userId)).returning({ failedLoginAttempts: users.failedLoginAttempts });
+  const attempts = updated?.failedLoginAttempts ?? 0;
+  if (attempts >= 2) {
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ isActive: false }).where(eq(users.id, userId));
+      await tx.delete(localSessions).where(eq(localSessions.userId, userId));
+    });
+  }
+  return attempts;
+}
+async function resetFailedLogin(userId) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ failedLoginAttempts: 0 }).where(eq(users.id, userId));
 }
 async function updateLocalUser(userId, data) {
   const db = await getDb();
@@ -631,7 +668,10 @@ async function deleteUserSessions(userId) {
 async function deleteUser(userId) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(users).where(eq(users.id, userId));
+  await db.transaction(async (tx) => {
+    await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.userId, userId));
+    await tx.delete(users).where(eq(users.id, userId));
+  });
 }
 async function ensureDracoIntegrity() {
   const db = await getDb();
@@ -672,6 +712,34 @@ async function getAllDatabases() {
   if (!db) return [];
   return await db.select().from(databases).orderBy(desc(databases.createdAt));
 }
+async function getDatabasesForUser(userId, role) {
+  const db = await getDb();
+  if (!db) return [];
+  if (role === "super_admin") return getAllDatabases();
+  const assigned = await db.select({ database: databases }).from(userDatabaseAccess).innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id)).where(eq(userDatabaseAccess.userId, userId));
+  if (assigned.length || role !== "admin") return assigned.map((row) => row.database);
+  return getAllDatabases();
+}
+async function assignUserDatabases(userId, databaseIds) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const uniqueIds = Array.from(new Set(databaseIds));
+  if (uniqueIds.length > 3) throw new Error("Cada usu\xE1rio pode ser vinculado a no m\xE1ximo tr\xEAs bancos.");
+  if (uniqueIds.length) {
+    const existing = await db.select({ id: databases.id }).from(databases).where(inArray(databases.id, uniqueIds));
+    if (existing.length !== uniqueIds.length) throw new Error("Um ou mais bancos selecionados n\xE3o existem.");
+  }
+  await db.transaction(async (tx) => {
+    await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.userId, userId));
+    if (uniqueIds.length) {
+      await tx.insert(userDatabaseAccess).values(uniqueIds.map((databaseId, index) => ({
+        userId,
+        databaseId,
+        isActive: index === 0
+      })));
+    }
+  });
+}
 async function getDatabaseById(id) {
   const db = await getDb();
   if (!db) return void 0;
@@ -681,12 +749,32 @@ async function getDatabaseById(id) {
 async function getActiveDatabase() {
   const db = await getDb();
   if (!db) return void 0;
+  const scope = databaseScope.getStore();
+  if (scope && scope.role !== "super_admin") {
+    const assigned = await db.select({ database: databases }).from(userDatabaseAccess).innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id)).where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.isActive, true))).limit(1);
+    if (assigned[0]) return assigned[0].database;
+    const fallback = await db.select({ database: databases }).from(userDatabaseAccess).innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id)).where(eq(userDatabaseAccess.userId, scope.userId)).limit(1);
+    if (fallback[0]) return fallback[0].database;
+    if (scope.role !== "admin") return void 0;
+  }
   const result = await db.select().from(databases).where(eq(databases.isActive, true)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
 async function setActiveDatabase(id) {
   const db = await getDb();
   if (!db) return;
+  const scope = databaseScope.getStore();
+  if (scope && scope.role !== "super_admin") {
+    const access = await db.select().from(userDatabaseAccess).where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.databaseId, id))).limit(1);
+    if (access[0]) {
+      await db.transaction(async (tx) => {
+        await tx.update(userDatabaseAccess).set({ isActive: false }).where(eq(userDatabaseAccess.userId, scope.userId));
+        await tx.update(userDatabaseAccess).set({ isActive: true }).where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.databaseId, id)));
+      });
+      return;
+    }
+    if (scope.role !== "admin") throw new Error("Voc\xEA n\xE3o tem acesso a este banco de dados.");
+  }
   await db.update(databases).set({ isActive: false });
   await db.update(databases).set({ isActive: true }).where(eq(databases.id, id));
 }
@@ -698,7 +786,20 @@ async function updateDatabase(id, data) {
 async function deleteDatabase(id) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(databases).where(eq(databases.id, id));
+  await db.transaction(async (tx) => {
+    await tx.delete(cashFlow).where(eq(cashFlow.databaseId, id));
+    await tx.delete(payments).where(eq(payments.databaseId, id));
+    await tx.delete(loanInterestHistory).where(eq(loanInterestHistory.databaseId, id));
+    await tx.delete(vehicleFinancings).where(eq(vehicleFinancings.databaseId, id));
+    await tx.delete(vehicleSales).where(eq(vehicleSales.databaseId, id));
+    await tx.delete(loans).where(eq(loans.databaseId, id));
+    await tx.delete(vehicles).where(eq(vehicles.databaseId, id));
+    await tx.delete(clients).where(eq(clients.databaseId, id));
+    await tx.delete(agents).where(eq(agents.databaseId, id));
+    await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.databaseId, id));
+    await tx.delete(auditLogs).where(eq(auditLogs.databaseId, id));
+    await tx.delete(databases).where(eq(databases.id, id));
+  });
 }
 async function createClient(data) {
   const db = await getDb();
@@ -760,6 +861,7 @@ async function getClientProfile(clientId, databaseId) {
     financialHistory: { totalPaid, totalInterest, totalPrincipal, totalCommissions, remainingBalance, paymentCount: paymentsForClient.length }
   };
 }
+var INITIAL_LOAN_INTEREST_PERIOD = "CONTRATO_INICIAL";
 async function createLoanBundle(data, cashEntry) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -767,6 +869,19 @@ async function createLoanBundle(data, cashEntry) {
     const [createdLoan] = await tx.insert(loans).values(data).returning({ id: loans.id });
     const loanId = createdLoan?.id;
     if (!loanId) throw new Error("N\xE3o foi poss\xEDvel identificar o empr\xE9stimo criado.");
+    if (Number(data.accruedInterest || 0) > 0) {
+      await tx.insert(loanInterestHistory).values({
+        databaseId: data.databaseId,
+        loanId,
+        periodReference: INITIAL_LOAN_INTEREST_PERIOD,
+        previousPrincipalBalance: data.amount,
+        interestGenerated: data.accruedInterest,
+        paymentAmount: "0.00",
+        interestPaid: "0.00",
+        principalAmortized: "0.00",
+        updatedPrincipalBalance: data.amount
+      });
+    }
     await tx.insert(cashFlow).values({
       ...cashEntry,
       loanId,
@@ -827,7 +942,7 @@ async function recalculateLoanWithTransaction(tx, loanId, databaseId) {
       netAmount: roundMoney(Number(payment.amount || 0) - Number(payment.amount || 0) * Number(payment.commissionPercentage || 0) / 100).toFixed(2)
     }).where(eq(payments.id, payment.id));
   }
-  const nextStatus = principalBalance + interestPool <= 0 ? "pago" : new Date(loan.endDate) < /* @__PURE__ */ new Date() ? "atrasado" : "ativo";
+  const nextStatus = loan.status === "cancelado" ? "cancelado" : principalBalance + interestPool <= 0 ? "pago" : new Date(loan.endDate) < /* @__PURE__ */ new Date() ? "atrasado" : "ativo";
   await tx.update(loans).set({
     principalBalance: principalBalance.toFixed(2),
     accruedInterest: interestPool.toFixed(2),
@@ -911,10 +1026,55 @@ async function updateLoanBalance(id, databaseId, data) {
   if (!db) return;
   await db.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
 }
-async function updateLoanInDatabase(id, databaseId, data) {
+async function updateLoanInDatabase(id, databaseId, data, initialInterest) {
   const db = await getDb();
   if (!db) return;
-  await db.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
+  return db.transaction(async (tx) => {
+    await tx.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
+    if (initialInterest !== void 0) {
+      const initialRows = await tx.select().from(loanInterestHistory).where(and(
+        eq(loanInterestHistory.loanId, id),
+        eq(loanInterestHistory.databaseId, databaseId),
+        eq(loanInterestHistory.periodReference, INITIAL_LOAN_INTEREST_PERIOD)
+      )).limit(1);
+      const principal = String(data.amount || "0.00");
+      if (initialInterest > 0) {
+        const historyValues = {
+          previousPrincipalBalance: principal,
+          interestGenerated: roundMoney(initialInterest).toFixed(2),
+          paymentAmount: "0.00",
+          interestPaid: "0.00",
+          principalAmortized: "0.00",
+          updatedPrincipalBalance: principal
+        };
+        if (initialRows[0]) {
+          await tx.update(loanInterestHistory).set(historyValues).where(eq(loanInterestHistory.id, initialRows[0].id));
+        } else {
+          await tx.insert(loanInterestHistory).values({
+            databaseId,
+            loanId: id,
+            periodReference: INITIAL_LOAN_INTEREST_PERIOD,
+            ...historyValues
+          });
+        }
+      } else if (initialRows[0]) {
+        await tx.delete(loanInterestHistory).where(eq(loanInterestHistory.id, initialRows[0].id));
+      }
+      await recalculateLoanWithTransaction(tx, id, databaseId);
+    }
+    const cashUpdate = {};
+    if (data.amount !== void 0) cashUpdate.amount = data.amount;
+    if (data.startDate !== void 0) cashUpdate.movementDate = data.startDate;
+    if (data.clientId !== void 0) cashUpdate.clientId = data.clientId;
+    if (data.description !== void 0) cashUpdate.notes = data.description;
+    if (Object.keys(cashUpdate).length > 0) {
+      await tx.update(cashFlow).set(cashUpdate).where(and(
+        eq(cashFlow.loanId, id),
+        eq(cashFlow.databaseId, databaseId),
+        eq(cashFlow.category, "LIBERACAO_EMPRESTIMO")
+      ));
+    }
+  });
 }
 async function getLoansByClient(clientId, databaseId) {
   const db = await getDb();
@@ -944,7 +1104,9 @@ async function createLoanInterestHistory(data) {
 async function createAgent(data) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  return await db.insert(agents).values(data);
+  const [created] = await db.insert(agents).values(data).returning();
+  if (!created) throw new Error("N\xE3o foi poss\xEDvel confirmar o agente criado.");
+  return created;
 }
 async function getAgentsByDatabase(databaseId, includeInactive = true) {
   const db = await getDb();
@@ -1092,6 +1254,31 @@ async function getCashFlowByDatabase(databaseId) {
   if (!db) return [];
   return db.select().from(cashFlow).where(eq(cashFlow.databaseId, databaseId)).orderBy(desc(cashFlow.movementDate));
 }
+var automaticCashCategories = /* @__PURE__ */ new Set([
+  "LIBERACAO_EMPRESTIMO",
+  "JUROS_EMPRESTIMO",
+  "PAGAMENTO_EMPRESTIMO",
+  "QUITACAO_EMPRESTIMO",
+  "PAGAMENTO_FINANCIAMENTO",
+  "COMPRA_VEICULO",
+  "VENDA_VEICULO",
+  "RECEBIMENTO_VENDA_VEICULO"
+]);
+function isManualCashFlowEntry(entry) {
+  return !entry.sourceKey && !entry.paymentId && !entry.loanId && !entry.vehicleId && !entry.vehicleSaleId && !automaticCashCategories.has(entry.category);
+}
+async function deleteManualCashFlowEntry(id, databaseId) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async (tx) => {
+    const rows = await tx.select().from(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId))).limit(1);
+    const entry = rows[0];
+    if (!entry) return { deleted: false, reason: "not_found" };
+    if (!isManualCashFlowEntry(entry)) return { deleted: false, reason: "automatic", entry };
+    await tx.delete(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId)));
+    return { deleted: true, entry };
+  });
+}
 async function getCashFlowByLoan(loanId, databaseId) {
   const db = await getDb();
   if (!db) return [];
@@ -1142,7 +1329,22 @@ async function updateVehicleInDatabase(id, data, databaseId) {
 async function deleteVehicleInDatabase(id, databaseId) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(vehicles).where(and(eq(vehicles.id, id), eq(vehicles.databaseId, databaseId)));
+  await db.transaction(async (tx) => {
+    const financingRows = await tx.select({ id: vehicleFinancings.id }).from(vehicleFinancings).where(and(eq(vehicleFinancings.vehicleId, id), eq(vehicleFinancings.databaseId, databaseId)));
+    const saleRows = await tx.select({ id: vehicleSales.id }).from(vehicleSales).where(and(eq(vehicleSales.vehicleId, id), eq(vehicleSales.databaseId, databaseId)));
+    const financingIds = financingRows.map((row) => row.id);
+    const saleIds = saleRows.map((row) => row.id);
+    const paymentRows = financingIds.length ? await tx.select({ id: payments.id }).from(payments).where(and(eq(payments.databaseId, databaseId), inArray(payments.vehicleFinancingId, financingIds))) : [];
+    const paymentIds = paymentRows.map((row) => row.id);
+    const cashConditions = [eq(cashFlow.vehicleId, id)];
+    if (saleIds.length) cashConditions.push(inArray(cashFlow.vehicleSaleId, saleIds));
+    if (paymentIds.length) cashConditions.push(inArray(cashFlow.paymentId, paymentIds));
+    await tx.delete(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), or(...cashConditions)));
+    if (paymentIds.length) await tx.delete(payments).where(inArray(payments.id, paymentIds));
+    if (financingIds.length) await tx.delete(vehicleFinancings).where(inArray(vehicleFinancings.id, financingIds));
+    if (saleIds.length) await tx.delete(vehicleSales).where(inArray(vehicleSales.id, saleIds));
+    await tx.delete(vehicles).where(and(eq(vehicles.id, id), eq(vehicles.databaseId, databaseId)));
+  });
 }
 async function getVehicleSalesByDatabase(databaseId) {
   const db = await getDb();
@@ -1180,8 +1382,9 @@ async function receiveVehicleSaleBundle(saleId, databaseId, amount, movementDate
 async function createVehicleFinancing(data) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(vehicleFinancings).values(data);
-  return result;
+  const [created] = await db.insert(vehicleFinancings).values(data).returning();
+  if (!created) throw new Error("N\xE3o foi poss\xEDvel confirmar o financiamento criado.");
+  return created;
 }
 async function getVehicleFinancingsByDatabase(databaseId) {
   const db = await getDb();
@@ -1227,18 +1430,21 @@ async function getDashboardStats(databaseId) {
   const db = await getDb();
   if (!db) return null;
   try {
-    const [activeLoansResult, paidLoansResult, pendingPaymentsResult, cashInResult, cashOutResult, clientsResult, loanRows, loanPaymentRows, vehicleRows, vehicleSaleRows, vehiclePurchaseRows] = await Promise.all([
+    const [activeLoansResult, paidLoansResult, pendingPaymentsResult, cashInResult, cashOutResult, clientsResult, loanRows, loanPaymentRows, vehicleRows, vehicleSaleRows, vehiclePurchaseRows, financingRows, allPaymentRows, clientRows] = await Promise.all([
       db.select({ count: sql`count(*)`, total: sql`sum(${loans.totalAmount})` }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, "ativo"))),
       db.select({ count: sql`count(*)`, total: sql`sum(${loans.totalAmount})` }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, "pago"))),
       db.select({ count: sql`count(*)`, total: sql`sum(${payments.amount})` }).from(payments).where(and(eq(payments.databaseId, databaseId), eq(payments.status, "pendente"))),
       db.select({ total: sql`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "ENTRADA"))),
       db.select({ total: sql`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "SAIDA"))),
       db.select({ count: sql`count(*)` }).from(clients).where(eq(clients.databaseId, databaseId)),
-      db.select({ amount: loans.amount, remainingBalance: loans.remainingBalance, status: loans.status, endDate: loans.endDate }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
+      db.select({ id: loans.id, clientId: loans.clientId, amount: loans.amount, remainingBalance: loans.remainingBalance, accruedInterest: loans.accruedInterest, status: loans.status, startDate: loans.startDate, endDate: loans.endDate, installments: loans.installments, installmentAmount: loans.installmentAmount, ratePeriod: loans.ratePeriod, description: loans.description }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
       db.select({ amount: payments.amount, interestAmount: payments.interestAmount, principalAmount: payments.principalAmount, status: payments.status, loanId: payments.loanId }).from(payments).where(and(eq(payments.databaseId, databaseId), sql`${payments.loanId} is not null`)),
-      db.select({ expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
+      db.select({ id: vehicles.id, model: vehicles.model, brand: vehicles.brand, status: vehicles.status, expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
       db.select({ saleAmount: vehicleSales.saleAmount, purchasePrice: vehicles.purchasePrice, expenses: vehicles.expenses }).from(vehicleSales).innerJoin(vehicles, eq(vehicleSales.vehicleId, vehicles.id)).where(and(eq(vehicleSales.databaseId, databaseId), eq(vehicles.databaseId, databaseId))),
-      db.select({ amount: cashFlow.amount }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "SAIDA"), eq(cashFlow.category, "COMPRA_VEICULO")))
+      db.select({ amount: cashFlow.amount }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "SAIDA"), eq(cashFlow.category, "COMPRA_VEICULO"))),
+      db.select().from(vehicleFinancings).where(and(eq(vehicleFinancings.databaseId, databaseId), sql`${vehicleFinancings.status} <> 'cancelado'`)),
+      db.select().from(payments).where(eq(payments.databaseId, databaseId)),
+      db.select({ id: clients.id, name: clients.name }).from(clients).where(eq(clients.databaseId, databaseId))
     ]);
     const totalEntradas = Number(cashInResult[0]?.total || 0);
     const totalSaidas = Number(cashOutResult[0]?.total || 0);
@@ -1251,9 +1457,61 @@ async function getDashboardStats(databaseId) {
     const totalInterestReceived = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0);
     const totalPrincipalAmortized = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.principalAmount || 0), 0);
     const totalOpen = loanRowsNotCancelled.filter((loan) => !["pago", "cancelado"].includes(loan.status)).reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
+    const totalInterestOpen = loanRowsNotCancelled.filter((loan) => !["pago", "cancelado"].includes(loan.status)).reduce((sum, loan) => sum + Number(loan.accruedInterest || 0), 0);
     const overdueLoans = loanRowsNotCancelled.filter((loan) => loan.status === "atrasado" || loan.status === "ativo" && new Date(loan.endDate).getTime() < Date.now());
     const totalOverdue = overdueLoans.reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
     const totalVehiclePurchases = vehiclePurchaseRows.reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+    const clientNames = new Map(clientRows.map((client) => [client.id, client.name]));
+    const vehicleNames = new Map(vehicleRows.map((vehicle) => [vehicle.id, `${vehicle.brand ?? ""} ${vehicle.model}`.trim()]));
+    const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+    const dateKey = (date) => {
+      const parts = Object.fromEntries(dateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+      return `${parts.year}-${parts.month}-${parts.day}`;
+    };
+    const todayKey = dateKey(/* @__PURE__ */ new Date());
+    const dueItems = [];
+    const paidKeys = new Set(allPaymentRows.filter((payment) => payment.status === "pago").map(
+      (payment) => payment.loanId ? `loan:${payment.loanId}:${payment.installmentNumber}` : `financing:${payment.vehicleFinancingId}:${payment.installmentNumber}`
+    ));
+    for (const loan of loanRows.filter((item) => ["ativo", "atrasado"].includes(item.status))) {
+      for (let installmentNumber = 1; installmentNumber <= loan.installments; installmentNumber += 1) {
+        if (paidKeys.has(`loan:${loan.id}:${installmentNumber}`)) continue;
+        dueItems.push({
+          clientId: loan.clientId,
+          clientName: clientNames.get(loan.clientId) ?? `Cliente #${loan.clientId}`,
+          amount: Number(loan.installmentAmount),
+          product: loan.description?.trim() || `Empr\xE9stimo #${loan.id}`,
+          dueDate: addPeriods(new Date(loan.startDate), installmentNumber, loan.ratePeriod),
+          installmentNumber,
+          contractType: "emprestimo"
+        });
+      }
+    }
+    for (const financing of financingRows.filter((item) => ["ativo", "atrasado"].includes(item.status))) {
+      for (let installmentNumber = 1; installmentNumber <= financing.installments; installmentNumber += 1) {
+        if (paidKeys.has(`financing:${financing.id}:${installmentNumber}`)) continue;
+        dueItems.push({
+          clientId: financing.clientId,
+          clientName: clientNames.get(financing.clientId) ?? `Cliente #${financing.clientId}`,
+          amount: Number(financing.installmentAmount),
+          product: vehicleNames.get(financing.vehicleId) ?? `Financiamento #${financing.id}`,
+          dueDate: addPeriods(new Date(financing.startDate), installmentNumber, "month"),
+          installmentNumber,
+          contractType: "financiamento"
+        });
+      }
+    }
+    const serializeDue = (item) => ({ ...item, dueDate: item.dueDate.toISOString() });
+    const dueToday = dueItems.filter((item) => dateKey(item.dueDate) === todayKey).sort((a, b) => a.clientName.localeCompare(b.clientName)).map(serializeDue);
+    const overdue = dueItems.filter((item) => dateKey(item.dueDate) < todayKey).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime()).map(serializeDue);
+    const financedVehicleIds = new Set(financingRows.map((financing) => financing.vehicleId));
+    const soldVehicleIds = /* @__PURE__ */ new Set([...vehicleRows.filter((vehicle) => vehicle.status === "vendido").map((vehicle) => vehicle.id), ...Array.from(financedVehicleIds)]);
+    const vehiclePayments = allPaymentRows.filter((payment) => payment.vehicleFinancingId !== null);
     return {
       activeLoans: { count: Number(activeLoansResult[0]?.count || 0), total: Number(activeLoansResult[0]?.total || 0) },
       paidLoans: { count: Number(paidLoansResult[0]?.count || 0), total: Number(paidLoansResult[0]?.total || 0) },
@@ -1265,12 +1523,20 @@ async function getDashboardStats(databaseId) {
       vehicleProfit: roundMoney(vehicleProfit),
       vehicleExpenses: roundMoney(vehicleExpenses),
       vehicleSalesCount: vehicleSaleRows.length,
+      collections: { dueToday, overdue },
+      vehicleMetrics: {
+        carsSold: soldVehicleIds.size,
+        financings: financingRows.length,
+        installmentsPaid: vehiclePayments.filter((payment) => payment.status === "pago").length,
+        installmentsOverdue: overdue.filter((item) => item.contractType === "financiamento").length
+      },
       loanMetrics: {
         totalLent: roundMoney(totalLent),
         totalReceived: roundMoney(totalReceived),
         totalInterestReceived: roundMoney(totalInterestReceived),
         totalPrincipalAmortized: roundMoney(totalPrincipalAmortized),
         totalOpen: roundMoney(totalOpen),
+        totalInterestOpen: roundMoney(totalInterestOpen),
         overdueCount: overdueLoans.length,
         totalOverdue: roundMoney(totalOverdue),
         totalVehiclePurchases: roundMoney(totalVehiclePurchases),
@@ -1292,13 +1558,14 @@ async function createLocalUser(data) {
       name: data.name,
       passwordHash: data.passwordHash,
       loginMethod: "local",
-      role: "user",
-      canView: true,
-      canInsert: false,
-      canEdit: false,
-      canDelete: false,
-      canGenerateReports: false,
-      canAccessSettings: false,
+      role: data.role ?? "user",
+      canView: data.canView ?? true,
+      canInsert: data.canInsert ?? false,
+      canEdit: data.canEdit ?? false,
+      canDelete: data.canDelete ?? false,
+      canGenerateReports: data.canGenerateReports ?? false,
+      canAccessSettings: data.canAccessSettings ?? false,
+      dashboardOnly: data.dashboardOnly ?? false,
       isActive: true,
       emailVerified: false,
       lastSignedIn: /* @__PURE__ */ new Date()
@@ -1384,21 +1651,71 @@ async function consumePasswordResetToken(tokenId) {
 async function updateLocalPassword(userId, passwordHash) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(users).set({ passwordHash, loginMethod: "local" }).where(eq(users.id, userId));
+  await db.update(users).set({ passwordHash, loginMethod: "local", failedLoginAttempts: 0 }).where(eq(users.id, userId));
   await db.delete(localSessions).where(eq(localSessions.userId, userId));
 }
 
 // server/routers.ts
 import * as bcrypt from "bcrypt";
 import { nanoid } from "nanoid";
+
+// shared/login-captcha.ts
+import crypto from "node:crypto";
+var secret = () => process.env.JWT_SECRET || "note-note-preview-captcha";
+function createLoginCaptcha() {
+  const left = crypto.randomInt(1, 10);
+  const right = crypto.randomInt(1, 10);
+  const payload = Buffer.from(JSON.stringify({
+    answer: left + right,
+    expiresAt: Date.now() + 5 * 60 * 1e3,
+    nonce: crypto.randomBytes(12).toString("hex")
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
+  return { question: `${left} + ${right} = ?`, token: `${payload}.${signature}` };
+}
+function verifyLoginCaptcha(token, answer) {
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return false;
+  const expected = crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) return false;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return parsed.expiresAt >= Date.now() && Number(answer) === parsed.answer;
+  } catch {
+    return false;
+  }
+}
+
+// server/routers.ts
 var optionalText = z2.string().optional();
 var optionalEmail = z2.union([z2.string().email(), z2.literal("")]).optional();
 var optionalAddress = z2.record(z2.string(), z2.string()).optional();
+var positiveDecimal = (label) => z2.string().trim().min(1, `${label} \xE9 obrigat\xF3rio.`).refine(
+  (value) => Number.isFinite(Number(value)) && Number(value) > 0,
+  `${label} deve ser maior que zero.`
+);
+var nonNegativeDecimal = (label) => z2.string().trim().min(1, `${label} \xE9 obrigat\xF3rio.`).refine(
+  (value) => Number.isFinite(Number(value)) && Number(value) >= 0,
+  `${label} n\xE3o pode ser negativo.`
+);
+var validDate = (label) => z2.string().trim().min(1, `${label} \xE9 obrigat\xF3ria.`).refine(
+  (value) => !Number.isNaN(new Date(value).getTime()),
+  `${label} \xE9 inv\xE1lida.`
+);
 var stripLegacyCpf = (client) => {
   const { cpf: _cpf, ...withoutCpf } = client;
   return withoutCpf;
 };
-var adminProcedure2 = protectedProcedure.use(({ ctx, next }) => {
+var protectedProcedure2 = protectedProcedure.use(({ ctx, next, path }) => {
+  const dashboardAllowed = path.startsWith("dashboard.") || ["databases.list", "databases.getActive", "databases.setActive"].includes(path);
+  if (ctx.user.dashboardOnly && !dashboardAllowed) {
+    throw new TRPCError3({ code: "FORBIDDEN", message: "Este usu\xE1rio possui acesso somente ao dashboard." });
+  }
+  return withUserDatabaseScope({ userId: ctx.user.id, role: ctx.user.role }, () => next({ ctx }));
+});
+var adminProcedure2 = protectedProcedure2.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin" && ctx.user.role !== "super_admin") {
     throw new TRPCError3({
       code: "FORBIDDEN",
@@ -1407,9 +1724,9 @@ var adminProcedure2 = protectedProcedure.use(({ ctx, next }) => {
   }
   return next({ ctx });
 });
-var superAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
+var superAdminProcedure = protectedProcedure2.use(({ ctx, next }) => {
   if (ctx.user.role !== "super_admin") {
-    throw new TRPCError3({ code: "FORBIDDEN", message: "Apenas o Super Admin pode gerenciar usu\xE1rios." });
+    throw new TRPCError3({ code: "FORBIDDEN", message: "Apenas o Super Admin pode acessar este recurso." });
   }
   return next({ ctx });
 });
@@ -1417,6 +1734,7 @@ var appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
+    captcha: publicProcedure.query(() => createLoginCaptcha()),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -1435,8 +1753,13 @@ var appRouter = router({
     loginLocal: publicProcedure.input(z2.object({
       username: z2.string().min(1),
       password: z2.string().min(1),
-      rememberMe: z2.boolean().optional().default(false)
+      rememberMe: z2.boolean().optional().default(false),
+      captchaToken: z2.string().min(1),
+      captchaAnswer: z2.string().min(1)
     })).mutation(async ({ input, ctx }) => {
+      if (!verifyLoginCaptcha(input.captchaToken, input.captchaAnswer)) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Confirme corretamente que voc\xEA n\xE3o \xE9 um rob\xF4." });
+      }
       const user = await getUserByUsername(input.username);
       if (!user || !user.passwordHash) {
         throw new TRPCError3({
@@ -1446,9 +1769,13 @@ var appRouter = router({
       }
       const passwordMatch = await bcrypt.compare(input.password, user.passwordHash);
       if (!passwordMatch) {
+        if (user.role === "super_admin" || user.username?.toLowerCase() === "draco") {
+          throw new TRPCError3({ code: "UNAUTHORIZED", message: "Usu\xE1rio ou senha inv\xE1lidos" });
+        }
+        const attempts = await registerFailedLogin(user.id);
         throw new TRPCError3({
-          code: "UNAUTHORIZED",
-          message: "Usu\xE1rio ou senha inv\xE1lidos"
+          code: attempts >= 2 ? "FORBIDDEN" : "UNAUTHORIZED",
+          message: attempts >= 2 ? "Usu\xE1rio desativado ap\xF3s duas tentativas incorretas. Solicite a reativa\xE7\xE3o ao Super Admin." : "Usu\xE1rio ou senha inv\xE1lidos. Mais uma tentativa incorreta desativar\xE1 a conta."
         });
       }
       if (!user.isActive) {
@@ -1457,6 +1784,7 @@ var appRouter = router({
           message: "Usu\xE1rio desativado"
         });
       }
+      await resetFailedLogin(user.id);
       const token = nanoid(32);
       const sessionDuration = input.rememberMe ? 30 * 24 * 60 * 60 * 1e3 : 8 * 60 * 60 * 1e3;
       const expiresAt = new Date(Date.now() + sessionDuration);
@@ -1559,7 +1887,15 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       email: z2.string().trim().email(),
       name: z2.string().trim().min(1).max(200),
       password: z2.string().min(6),
-      role: z2.enum(["user", "admin"]).default("user")
+      role: z2.enum(["user", "admin"]).default("user"),
+      canView: z2.boolean().default(true),
+      canInsert: z2.boolean().default(false),
+      canEdit: z2.boolean().default(false),
+      canDelete: z2.boolean().default(false),
+      canGenerateReports: z2.boolean().default(false),
+      canAccessSettings: z2.boolean().default(false),
+      dashboardOnly: z2.boolean().default(false),
+      databaseIds: z2.array(z2.number().int().positive()).max(3).default([])
     })).mutation(async ({ input, ctx }) => {
       if (await getUserByUsername(input.username)) {
         throw new TRPCError3({ code: "CONFLICT", message: "Nome de usu\xE1rio j\xE1 cadastrado." });
@@ -1568,10 +1904,32 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         throw new TRPCError3({ code: "CONFLICT", message: "E-mail j\xE1 cadastrado." });
       }
       const passwordHash = await bcrypt.hash(input.password, 10);
-      const created = await createLocalUser({ ...input, passwordHash });
+      const { databaseIds, ...userInput } = input;
+      const created = await createLocalUser({ ...userInput, passwordHash });
       const createdUser = await getUserByUsername(input.username);
-      if (createdUser && input.role !== "user") await updateUserRole(createdUser.id, input.role);
-      await createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || "Super Admin", action: "create_user", entity: "users", entityId: createdUser?.id, details: `Usu\xE1rio criado: ${input.username}`, status: "success" });
+      if (!createdUser) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR", message: "N\xE3o foi poss\xEDvel confirmar o usu\xE1rio criado." });
+      await assignUserDatabases(createdUser.id, databaseIds);
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.username || ctx.user.email || "Super Admin",
+        action: "create_user",
+        entity: "users",
+        entityId: createdUser?.id,
+        details: JSON.stringify({
+          username: input.username,
+          role: input.role,
+          permissions: {
+            canView: input.canView,
+            canInsert: input.canInsert,
+            canEdit: input.canEdit,
+            canDelete: input.canDelete,
+            canGenerateReports: input.canGenerateReports,
+            canAccessSettings: input.canAccessSettings
+          },
+          databaseIds
+        }),
+        status: "success"
+      });
       return createdUser ?? created;
     }),
     update: superAdminProcedure.input(z2.object({
@@ -1579,7 +1937,15 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       username: z2.string().trim().min(3).max(100),
       email: z2.string().trim().email(),
       name: z2.string().trim().min(1).max(200),
-      role: z2.enum(["user", "admin"])
+      role: z2.enum(["user", "admin"]),
+      canView: z2.boolean(),
+      canInsert: z2.boolean(),
+      canEdit: z2.boolean(),
+      canDelete: z2.boolean(),
+      canGenerateReports: z2.boolean(),
+      canAccessSettings: z2.boolean(),
+      dashboardOnly: z2.boolean(),
+      databaseIds: z2.array(z2.number().int().positive()).max(3)
     })).mutation(async ({ input, ctx }) => {
       const target = await getUserById(input.userId);
       if (!target) throw new TRPCError3({ code: "NOT_FOUND", message: "Usu\xE1rio n\xE3o encontrado." });
@@ -1588,12 +1954,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (usernameOwner && usernameOwner.id !== input.userId) throw new TRPCError3({ code: "CONFLICT", message: "Nome de usu\xE1rio j\xE1 cadastrado." });
       const emailOwner = await getUserByEmail(input.email);
       if (emailOwner && emailOwner.id !== input.userId) throw new TRPCError3({ code: "CONFLICT", message: "E-mail j\xE1 cadastrado." });
-      const { userId, ...data } = input;
+      const { userId, databaseIds, ...data } = input;
       await updateLocalUser(userId, data);
+      await assignUserDatabases(userId, databaseIds);
       await createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || "Super Admin", action: "update_user", entity: "users", entityId: userId, details: `Usu\xE1rio editado: ${input.username}`, status: "success" });
       return { success: true };
     }),
-    updatePermissions: adminProcedure2.input(z2.object({
+    updatePermissions: superAdminProcedure.input(z2.object({
       userId: z2.number(),
       canView: z2.boolean().optional(),
       canInsert: z2.boolean().optional(),
@@ -1619,7 +1986,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    updateRole: adminProcedure2.input(z2.object({
+    updateRole: superAdminProcedure.input(z2.object({
       userId: z2.number(),
       role: z2.enum(["user", "admin", "super_admin"])
     })).mutation(async ({ input, ctx }) => {
@@ -1685,7 +2052,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    delete: adminProcedure2.input(z2.object({ userId: z2.number() })).mutation(async ({ input, ctx }) => {
+    delete: superAdminProcedure.input(z2.object({ userId: z2.number() })).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (targetUser?.username === "Draco") {
         throw new TRPCError3({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ser exclu\xEDdo." });
@@ -1705,10 +2072,10 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== DATABASES ====================
   databases: router({
-    list: adminProcedure2.query(async () => {
-      return await getAllDatabases();
+    list: protectedProcedure2.query(async ({ ctx }) => {
+      return await getDatabasesForUser(ctx.user.id, ctx.user.role);
     }),
-    getActive: protectedProcedure.query(async () => {
+    getActive: protectedProcedure2.query(async () => {
       return await getActiveDatabase();
     }),
     create: adminProcedure2.input(z2.object({
@@ -1730,7 +2097,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return result;
     }),
-    setActive: adminProcedure2.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
+    setActive: protectedProcedure2.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
       await setActiveDatabase(input.id);
       const dbInfo = await getDatabaseById(input.id);
       await createAuditLog({
@@ -1763,15 +2130,14 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    delete: adminProcedure2.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
+    delete: superAdminProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
       const dbInfo = await getDatabaseById(input.id);
-      if (dbInfo?.isActive) {
-        throw new TRPCError3({
-          code: "BAD_REQUEST",
-          message: "N\xE3o \xE9 poss\xEDvel deletar o banco de dados ativo"
-        });
-      }
+      if (!dbInfo) throw new TRPCError3({ code: "NOT_FOUND", message: "Banco de dados n\xE3o encontrado." });
       await deleteDatabase(input.id);
+      if (dbInfo.isActive) {
+        const remaining = await getAllDatabases();
+        if (remaining[0]) await setActiveDatabase(remaining[0].id);
+      }
       await createAuditLog({
         userId: ctx.user.id,
         username: ctx.user.name || ctx.user.email || "Admin",
@@ -1786,7 +2152,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== AGENTS ====================
   agents: router({
-    list: protectedProcedure.input(z2.object({ includeInactive: z2.boolean().default(true).optional() }).optional()).query(async ({ input, ctx }) => {
+    list: protectedProcedure2.input(z2.object({ includeInactive: z2.boolean().default(true).optional() }).optional()).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) {
         throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar agentes." });
       }
@@ -1794,13 +2160,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (!activeDb) return [];
       return await getAgentsByDatabase(activeDb.id, input?.includeInactive ?? true);
     }),
-    getById: protectedProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
+    getById: protectedProcedure2.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
       const agent = await getAgentById(input.id);
       if (!agent) throw new TRPCError3({ code: "NOT_FOUND", message: "Agente n\xE3o encontrado." });
       return agent;
     }),
-    create: protectedProcedure.input(z2.object({
-      name: z2.string().min(1).max(255),
+    create: protectedProcedure2.input(z2.object({
+      name: z2.string().trim().min(1).max(255),
       defaultCommissionPercentage: z2.coerce.number().min(0).max(100)
     })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canInsert) {
@@ -1810,7 +2176,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const result = await createAgent({
         databaseId: activeDb.id,
-        name: input.name,
+        name: input.name.trim(),
         defaultCommissionPercentage: input.defaultCommissionPercentage.toFixed(2),
         status: "ACTIVE",
         createdBy: ctx.user.id
@@ -1826,7 +2192,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return result;
     }),
-    update: protectedProcedure.input(z2.object({
+    update: protectedProcedure2.input(z2.object({
       id: z2.number(),
       name: z2.string().min(1).max(255).optional(),
       defaultCommissionPercentage: z2.coerce.number().min(0).max(100).optional()
@@ -1855,7 +2221,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    deactivate: protectedProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
+    deactivate: protectedProcedure2.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
         throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para desativar agentes." });
       }
@@ -1876,7 +2242,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    history: protectedProcedure.input(z2.object({
+    history: protectedProcedure2.input(z2.object({
       agentId: z2.number(),
       startDate: z2.string().optional(),
       endDate: z2.string().optional()
@@ -1896,20 +2262,20 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== CLIENTS ====================
   clients: router({
-    list: protectedProcedure.query(async ({ ctx }) => {
+    list: protectedProcedure2.query(async ({ ctx }) => {
       if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar clientes." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       return (await getClientsByDatabase(activeDb.id)).map(stripLegacyCpf);
     }),
-    getById: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input }) => {
+    getById: protectedProcedure2.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) return void 0;
       const client = await getClientById(input.id);
       if (!client || client.databaseId !== activeDb.id) return void 0;
       return stripLegacyCpf(client);
     }),
-    profile: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input, ctx }) => {
+    profile: protectedProcedure2.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar clientes." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return void 0;
@@ -1917,7 +2283,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (!profile) throw new TRPCError3({ code: "NOT_FOUND", message: "Cliente n\xE3o encontrado no banco ativo." });
       return { ...profile, client: stripLegacyCpf(profile.client) };
     }),
-    create: protectedProcedure.input(z2.object({
+    create: protectedProcedure2.input(z2.object({
       name: z2.string().trim().min(1),
       birthDate: z2.string().optional(),
       email: optionalEmail,
@@ -1975,7 +2341,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return result;
     }),
-    update: protectedProcedure.input(z2.object({
+    update: protectedProcedure2.input(z2.object({
       id: z2.number().int().positive(),
       name: z2.string().trim().min(1).optional(),
       birthDate: z2.string().optional(),
@@ -2016,13 +2382,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    delete: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canDelete) {
-        throw new TRPCError3({
-          code: "FORBIDDEN",
-          message: "Voc\xEA n\xE3o tem permiss\xE3o para deletar dados"
-        });
-      }
+    delete: superAdminProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
       const currentClient = await getClientById(input.id);
@@ -2043,20 +2403,20 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== LOANS ====================
   loans: router({
-    list: protectedProcedure.query(async ({ ctx }) => {
+    list: protectedProcedure2.query(async ({ ctx }) => {
       if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       return await getLoansByDatabase(activeDb.id);
     }),
-    getById: protectedProcedure.input(z2.object({ id: z2.number() })).query(async ({ input, ctx }) => {
+    getById: protectedProcedure2.input(z2.object({ id: z2.number() })).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return null;
       const loan = await getLoanById(input.id);
       return loan?.databaseId === activeDb.id ? loan : null;
     }),
-    details: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input, ctx }) => {
+    details: protectedProcedure2.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar detalhes." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return null;
@@ -2070,7 +2430,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       ]);
       return { loan, client: client && client.databaseId === activeDb.id ? client : null, payments: payments2, interestHistory, cashFlow: cashFlow2 };
     }),
-    getByClient: protectedProcedure.input(z2.object({ clientId: z2.number() })).query(async ({ input, ctx }) => {
+    getByClient: protectedProcedure2.input(z2.object({ clientId: z2.number() })).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
@@ -2078,7 +2438,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (!client || client.databaseId !== activeDb.id) return [];
       return await getLoansByClient(input.clientId, activeDb.id);
     }),
-    history: protectedProcedure.input(z2.object({ loanId: z2.number().int().positive() })).query(async ({ input, ctx }) => {
+    history: protectedProcedure2.input(z2.object({ loanId: z2.number().int().positive() })).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o hist\xF3rico." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
@@ -2086,7 +2446,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (!loan || loan.databaseId !== activeDb.id) return [];
       return getLoanInterestHistory(input.loanId, activeDb.id);
     }),
-    generateInterest: protectedProcedure.input(z2.object({ loanId: z2.number().int().positive(), periodReference: z2.string().trim().min(1).max(20) })).mutation(async ({ input, ctx }) => {
+    generateInterest: protectedProcedure2.input(z2.object({ loanId: z2.number().int().positive(), periodReference: z2.string().trim().min(1).max(20) })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para lan\xE7ar juros." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
@@ -2119,17 +2479,17 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "generate_loan_interest", entity: "loans", entityId: loan.id, databaseId: activeDb.id, details: `Juros de ${input.periodReference}: R$ ${interest.toFixed(2)}`, status: "success" });
       return { interest, accruedInterest, principalBalance };
     }),
-    create: protectedProcedure.input(z2.object({
+    create: protectedProcedure2.input(z2.object({
       clientId: z2.number().int().positive(),
-      amount: z2.string(),
+      amount: positiveDecimal("Valor principal"),
       interestType: z2.enum(["simple", "compound"]).default("simple").optional(),
-      interestRate: z2.string(),
+      interestRate: nonNegativeDecimal("Taxa de juros"),
       ratePeriod: z2.enum(["day", "week", "month", "year"]).default("month").optional(),
       installments: z2.coerce.number().int().positive().optional(),
       installmentAmount: z2.string().optional(),
       totalAmount: z2.string().optional(),
-      startDate: z2.string(),
-      endDate: z2.string().optional(),
+      startDate: validDate("Data inicial"),
+      endDate: validDate("Data final").optional(),
       description: z2.string().optional()
     })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
@@ -2160,6 +2520,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (Number.isNaN(startDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data inicial inv\xE1lida." });
       const endDate = input.endDate ? new Date(input.endDate) : addPeriods(startDate, plan.periods, ratePeriod);
       if (Number.isNaN(endDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data final inv\xE1lida." });
+      if (endDate < startDate) throw new TRPCError3({ code: "BAD_REQUEST", message: "A data final deve ser igual ou posterior \xE0 data inicial." });
       const result = await createLoanBundle({
         clientId: input.clientId,
         amount: plan.principal.toFixed(2),
@@ -2169,9 +2530,9 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         installments: plan.periods,
         installmentAmount: plan.installmentAmount.toFixed(2),
         totalAmount: plan.totalAmount.toFixed(2),
-        remainingBalance: plan.principal.toFixed(2),
+        remainingBalance: plan.totalAmount.toFixed(2),
         principalBalance: plan.principal.toFixed(2),
-        accruedInterest: "0.00",
+        accruedInterest: plan.interestAmount.toFixed(2),
         totalPaid: "0.00",
         lastInterestPeriod: null,
         startDate,
@@ -2203,7 +2564,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return result;
     }),
-    update: protectedProcedure.input(z2.object({
+    update: protectedProcedure2.input(z2.object({
       id: z2.number(),
       clientId: z2.number().int().positive().optional(),
       amount: z2.string().optional(),
@@ -2236,8 +2597,14 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       const interestType = input.interestType ?? currentLoan.interestType;
       const ratePeriod = input.ratePeriod ?? currentLoan.ratePeriod;
       const periods = input.installments ?? currentLoan.installments ?? 1;
-      const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
       const { id, status, description, clientId } = input;
+      const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
+      const financialTermsChanged = input.amount !== void 0 || input.interestType !== void 0 || input.interestRate !== void 0 || input.ratePeriod !== void 0 || input.installments !== void 0 || input.installmentAmount !== void 0 || input.totalAmount !== void 0;
+      const hasInitialInterest = Boolean(await getLoanInterestPeriod(
+        id,
+        activeDb.id,
+        INITIAL_LOAN_INTEREST_PERIOD
+      ));
       await updateLoanInDatabase(id, activeDb.id, {
         clientId,
         amount: plan.principal.toFixed(2),
@@ -2245,17 +2612,17 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         interestRate: ratePercent.toFixed(4),
         ratePeriod,
         installments: plan.periods,
-        installmentAmount: input.installmentAmount ?? plan.installmentAmount.toFixed(2),
-        totalAmount: input.totalAmount ?? plan.totalAmount.toFixed(2),
+        installmentAmount: plan.installmentAmount.toFixed(2),
+        totalAmount: plan.totalAmount.toFixed(2),
         startDate,
         endDate,
         ...status !== void 0 ? { status } : {},
         ...description !== void 0 ? { description } : {}
-      });
+      }, financialTermsChanged || hasInitialInterest ? plan.interestAmount : void 0);
       await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "update_loan", entity: "loans", entityId: id, databaseId: activeDb.id, details: JSON.stringify(input), status: "success" });
       return { success: true, message: "Empr\xE9stimo atualizado com sucesso." };
     }),
-    delete: protectedProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
+    delete: protectedProcedure2.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canDelete) {
         throw new TRPCError3({
           code: "FORBIDDEN",
@@ -2287,17 +2654,17 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== PAYMENTS ====================
   payments: router({
-    list: protectedProcedure.query(async () => {
+    list: protectedProcedure2.query(async () => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       return await getPaymentsByDatabase(activeDb.id);
     }),
-    getByLoan: protectedProcedure.input(z2.object({ loanId: z2.number() })).query(async ({ input }) => {
+    getByLoan: protectedProcedure2.input(z2.object({ loanId: z2.number() })).query(async ({ input }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       return await getPaymentsByLoan(input.loanId, activeDb.id);
     }),
-    create: protectedProcedure.input(z2.object({
+    create: protectedProcedure2.input(z2.object({
       loanId: z2.number().int().positive().optional(),
       vehicleFinancingId: z2.number().int().positive().optional(),
       installmentNumber: z2.coerce.number().int().positive(),
@@ -2402,7 +2769,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "create_payment", entity: "payments", databaseId: activeDb.id, details: `Pagamento registrado: R$ ${paymentAmount.toFixed(2)}; comiss\xE3o: R$ ${commissionAmount.toFixed(2)}`, status: "success" });
       return result;
     }),
-    update: protectedProcedure.input(z2.object({
+    update: protectedProcedure2.input(z2.object({
       id: z2.number(),
       amount: z2.string().optional(),
       status: z2.enum(["pago", "pendente", "atrasado"]).optional(),
@@ -2430,7 +2797,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "update_payment", entity: "payments", entityId: input.id, databaseId: activeDb.id, details: JSON.stringify(input), status: "success" });
       return { success: true, message: "Pagamento atualizado e caixa reconciliado.", result };
     }),
-    delete: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
+    delete: protectedProcedure2.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canDelete) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para excluir pagamentos." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
@@ -2443,12 +2810,12 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== CASH FLOW ====================
   cashFlow: router({
-    list: protectedProcedure.query(async ({ ctx }) => {
+    list: protectedProcedure2.query(async ({ ctx }) => {
       if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o fluxo de caixa." });
       const activeDb = await getActiveDatabase();
       return activeDb ? getCashFlowByDatabase(activeDb.id) : [];
     }),
-    create: protectedProcedure.input(z2.object({
+    create: protectedProcedure2.input(z2.object({
       type: z2.enum(["ENTRADA", "SAIDA"]),
       category: z2.string().trim().min(1),
       description: z2.string().trim().min(1),
@@ -2464,21 +2831,41 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (Number.isNaN(movementDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data da movimenta\xE7\xE3o inv\xE1lida." });
       await createCashFlowEntry({ ...input, amount: input.amount.toFixed(2), movementDate, databaseId: activeDb.id, createdBy: ctx.user.id });
       return { success: true };
+    }),
+    delete: superAdminProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
+      const activeDb = await getActiveDatabase();
+      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      const result = await deleteManualCashFlowEntry(input.id, activeDb.id);
+      if (!result.deleted) {
+        if (result.reason === "not_found") throw new TRPCError3({ code: "NOT_FOUND", message: "Lan\xE7amento n\xE3o encontrado no banco ativo." });
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Lan\xE7amentos autom\xE1ticos devem ser corrigidos na opera\xE7\xE3o de origem e n\xE3o podem ser exclu\xEDdos diretamente do caixa." });
+      }
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.name || ctx.user.email || "Super Admin",
+        action: "delete_manual_cash_flow",
+        entity: "cash_flow",
+        entityId: result.entry.id,
+        databaseId: activeDb.id,
+        details: JSON.stringify({ type: result.entry.type, category: result.entry.category, description: result.entry.description, amount: result.entry.amount }),
+        status: "warning"
+      });
+      return { success: true, message: "Lan\xE7amento manual exclu\xEDdo do caixa." };
     })
   }),
   // ==================== VEHICLES ====================
   vehicles: router({
-    list: protectedProcedure.query(async () => {
+    list: protectedProcedure2.query(async () => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       return await getVehiclesByDatabase(activeDb.id);
     }),
-    getById: protectedProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
+    getById: protectedProcedure2.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
       const activeDb = await getActiveDatabase();
       const vehicle = await getVehicleById(input.id);
       return activeDb && vehicle?.databaseId === activeDb.id ? vehicle : null;
     }),
-    create: protectedProcedure.input(z2.object({
+    create: protectedProcedure2.input(z2.object({
       clientId: z2.number().int().positive().optional(),
       vehicleType: z2.enum(["CARRO", "MOTO", "OUTRO"]).optional(),
       brand: z2.string().trim().optional(),
@@ -2548,7 +2935,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return result;
     }),
-    update: protectedProcedure.input(z2.object({
+    update: protectedProcedure2.input(z2.object({
       id: z2.number().int().positive(),
       clientId: z2.number().int().positive().optional().nullable(),
       vehicleType: z2.enum(["CARRO", "MOTO", "OUTRO"]).optional(),
@@ -2601,7 +2988,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    delete: protectedProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
+    delete: protectedProcedure2.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canDelete) {
         throw new TRPCError3({
           code: "FORBIDDEN",
@@ -2628,12 +3015,12 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== VEHICLE SALES ====================
   vehicleSales: router({
-    list: protectedProcedure.query(async ({ ctx }) => {
+    list: protectedProcedure2.query(async ({ ctx }) => {
       if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar vendas." });
       const activeDb = await getActiveDatabase();
       return activeDb ? getVehicleSalesByDatabase(activeDb.id) : [];
     }),
-    create: protectedProcedure.input(z2.object({
+    create: protectedProcedure2.input(z2.object({
       vehicleId: z2.number().int().positive(),
       clientId: z2.number().int().positive().optional(),
       saleAmount: z2.coerce.number().positive(),
@@ -2677,7 +3064,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "create_vehicle_sale", entity: "vehicle_sales", entityId: result.saleId, databaseId: activeDb.id, details: JSON.stringify(input), status: "success" });
       return result;
     }),
-    receive: protectedProcedure.input(z2.object({ saleId: z2.number().int().positive(), amount: z2.coerce.number().positive(), movementDate: z2.string() })).mutation(async ({ input, ctx }) => {
+    receive: protectedProcedure2.input(z2.object({ saleId: z2.number().int().positive(), amount: z2.coerce.number().positive(), movementDate: z2.string() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canInsert) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar recebimentos." });
       const activeDb = await getActiveDatabase();
       if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
@@ -2689,26 +3076,27 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== VEHICLE FINANCINGS ====================
   vehicleFinancings: router({
-    list: protectedProcedure.query(async () => {
+    list: protectedProcedure2.query(async () => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       return await getVehicleFinancingsByDatabase(activeDb.id);
     }),
-    getById: protectedProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
-      return await getVehicleFinancingById(input.id);
+    getById: protectedProcedure2.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
+      const activeDb = await getActiveDatabase();
+      const financing = await getVehicleFinancingById(input.id);
+      if (!activeDb || !financing || financing.databaseId !== activeDb.id) {
+        throw new TRPCError3({ code: "NOT_FOUND", message: "Financiamento n\xE3o encontrado no banco ativo." });
+      }
+      return financing;
     }),
-    create: protectedProcedure.input(z2.object({
-      vehicleId: z2.number(),
-      clientId: z2.number(),
-      vehiclePrice: z2.string(),
-      downPayment: z2.string(),
-      financedAmount: z2.string(),
-      interestRate: z2.string(),
-      installments: z2.number(),
-      installmentAmount: z2.string(),
-      totalAmount: z2.string(),
-      startDate: z2.string(),
-      endDate: z2.string(),
+    create: protectedProcedure2.input(z2.object({
+      vehicleId: z2.number().int().positive(),
+      clientId: z2.number().int().positive(),
+      vehiclePrice: positiveDecimal("Pre\xE7o do ve\xEDculo"),
+      downPayment: nonNegativeDecimal("Entrada"),
+      interestRate: nonNegativeDecimal("Taxa de juros"),
+      installments: z2.number().int().positive(),
+      startDate: validDate("Data inicial"),
       notes: z2.string().optional()
     })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
@@ -2724,10 +3112,40 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados"
         });
       }
+      const [client, vehicle] = await Promise.all([
+        getClientById(input.clientId),
+        getVehicleById(input.vehicleId)
+      ]);
+      if (!client || client.databaseId !== activeDb.id) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+      }
+      if (!vehicle || vehicle.databaseId !== activeDb.id) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Ve\xEDculo inv\xE1lido para o banco ativo." });
+      }
+      const startDate = new Date(input.startDate);
+      const vehiclePrice = Number(input.vehiclePrice);
+      const downPayment = Number(input.downPayment);
+      if (downPayment >= vehiclePrice) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "A entrada n\xE3o pode ser maior que o pre\xE7o do ve\xEDculo." });
+      }
+      const financedAmount = roundMoney(vehiclePrice - downPayment);
+      const plan = calculateLoanPlan({
+        principal: financedAmount,
+        ratePercent: Number(input.interestRate),
+        periods: input.installments,
+        interestType: "simple",
+        ratePeriod: "month"
+      });
+      const endDate = addPeriods(startDate, input.installments, "month");
       const result = await createVehicleFinancing({
         ...input,
-        startDate: new Date(input.startDate),
-        endDate: new Date(input.endDate),
+        vehiclePrice: vehiclePrice.toFixed(2),
+        downPayment: downPayment.toFixed(2),
+        financedAmount: financedAmount.toFixed(2),
+        totalAmount: plan.totalAmount.toFixed(2),
+        installmentAmount: plan.installmentAmount.toFixed(2),
+        startDate,
+        endDate,
         databaseId: activeDb.id,
         createdBy: ctx.user.id
       });
@@ -2737,12 +3155,12 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         action: "create_vehicle_financing",
         entity: "vehicleFinancings",
         databaseId: activeDb.id,
-        details: `Financiamento criado: R$ ${input.financedAmount}`,
+        details: `Financiamento criado: principal R$ ${financedAmount.toFixed(2)}, total R$ ${plan.totalAmount.toFixed(2)}`,
         status: "success"
       });
-      return result;
+      return { ...result, financedAmount, totalAmount: plan.totalAmount, installmentAmount: plan.installmentAmount, endDate };
     }),
-    update: protectedProcedure.input(z2.object({
+    update: protectedProcedure2.input(z2.object({
       id: z2.number(),
       status: z2.enum(["ativo", "pago", "atrasado", "cancelado"]).optional(),
       notes: z2.string().optional()
@@ -2753,9 +3171,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados"
         });
       }
+      const activeDb = await getActiveDatabase();
+      const financing = await getVehicleFinancingById(input.id);
+      if (!activeDb || !financing || financing.databaseId !== activeDb.id) {
+        throw new TRPCError3({ code: "NOT_FOUND", message: "Financiamento n\xE3o encontrado no banco ativo." });
+      }
       const { id, ...data } = input;
       await updateVehicleFinancing(id, data);
-      const activeDb = await getActiveDatabase();
       await createAuditLog({
         userId: ctx.user.id,
         username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
@@ -2783,7 +3205,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== DASHBOARD ====================
   dashboard: router({
-    stats: protectedProcedure.query(async () => {
+    stats: protectedProcedure2.query(async () => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
         return {
@@ -2797,12 +3219,15 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           vehicleProfit: 0,
           vehicleExpenses: 0,
           vehicleSalesCount: 0,
+          collections: { dueToday: [], overdue: [] },
+          vehicleMetrics: { carsSold: 0, financings: 0, installmentsPaid: 0, installmentsOverdue: 0 },
           loanMetrics: {
             totalLent: 0,
             totalReceived: 0,
             totalInterestReceived: 0,
             totalPrincipalAmortized: 0,
             totalOpen: 0,
+            totalInterestOpen: 0,
             overdueCount: 0,
             totalOverdue: 0,
             totalVehiclePurchases: 0,
@@ -2812,7 +3237,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       }
       return await getDashboardStats(activeDb.id);
     }),
-    agentPerformance: protectedProcedure.input(z2.object({ startDate: z2.string().optional(), endDate: z2.string().optional() }).optional()).query(async ({ input, ctx }) => {
+    agentPerformance: protectedProcedure2.input(z2.object({ startDate: z2.string().optional(), endDate: z2.string().optional() }).optional()).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) {
         throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar performance." });
       }
@@ -2942,8 +3367,8 @@ var SDKServer = class {
     return new Map(Object.entries(parsed));
   }
   getSessionSecret() {
-    const secret = ENV.cookieSecret;
-    return new TextEncoder().encode(secret);
+    const secret2 = ENV.cookieSecret;
+    return new TextEncoder().encode(secret2);
   }
   /**
    * Create a session token for a Manus user openId
@@ -2973,7 +3398,6 @@ var SDKServer = class {
   }
   async verifySession(cookieValue) {
     if (!cookieValue) {
-      console.warn("[Auth] Missing session cookie");
       return null;
     }
     try {
@@ -3070,12 +3494,48 @@ var SDKServer = class {
 };
 var sdk = new SDKServer();
 
+// server/bootstrap-schema.ts
+import { neon } from "@neondatabase/serverless";
+var bootstrapPromise = null;
+function ensurePreviewBusinessSchema() {
+  if (process.env.VERCEL_ENV !== "preview" || !process.env.DATABASE_URL) return Promise.resolve();
+  if (bootstrapPromise) return bootstrapPromise;
+  bootstrapPromise = (async () => {
+    const sql2 = neon(process.env.DATABASE_URL);
+    await sql2`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
+    await sql2`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
+    await sql2`CREATE TABLE IF NOT EXISTS "databases" ("id" serial PRIMARY KEY, "name" varchar(255) NOT NULL UNIQUE, "description" text, "type" varchar(64) NOT NULL, "isActive" boolean DEFAULT false NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "user_database_access" ("id" serial PRIMARY KEY, "userId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE, "databaseId" integer NOT NULL REFERENCES "databases"("id") ON DELETE CASCADE, "isActive" boolean DEFAULT false NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE UNIQUE INDEX IF NOT EXISTS "user_database_access_user_database_unique" ON "user_database_access" ("userId", "databaseId")`;
+    await sql2`CREATE TABLE IF NOT EXISTS "agents" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "defaultCommissionPercentage" numeric(5,2) DEFAULT '0.00' NOT NULL, "status" varchar(64) DEFAULT 'ACTIVE' NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "clients" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "cpf" varchar(14), "birthDate" timestamp, "email" varchar(320), "phone" varchar(20), "whatsapp" varchar(20), "profession" varchar(120), "indicatorAgentId" integer, "address" text, "residentialAddress" jsonb, "commercialAddress" jsonb, "city" varchar(100), "state" varchar(2), "zipCode" varchar(10), "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "loans" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "clientId" integer NOT NULL, "amount" numeric(15,2) NOT NULL, "interestType" varchar(64) DEFAULT 'simple' NOT NULL, "interestRate" numeric(8,4) NOT NULL, "ratePeriod" varchar(64) DEFAULT 'month' NOT NULL, "installments" integer NOT NULL, "installmentAmount" numeric(15,2) NOT NULL, "totalAmount" numeric(15,2) NOT NULL, "remainingBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "principalBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "accruedInterest" numeric(15,2) DEFAULT '0.00' NOT NULL, "totalPaid" numeric(15,2) DEFAULT '0.00' NOT NULL, "lastInterestPeriod" varchar(20), "startDate" timestamp NOT NULL, "endDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'ativo' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "vehicles" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "clientId" integer, "vehicleType" varchar(64) DEFAULT 'OUTRO' NOT NULL, "brand" varchar(100), "model" varchar(100) NOT NULL, "year" integer, "color" varchar(50), "plate" varchar(20), "renavam" varchar(30), "chassi" varchar(50), "mileage" integer, "purchasePrice" numeric(15,2) DEFAULT '0.00' NOT NULL, "expenses" numeric(15,2) DEFAULT '0.00' NOT NULL, "salePrice" numeric(15,2), "purchaseDate" timestamp, "stockEntryDate" timestamp DEFAULT now() NOT NULL, "price" numeric(15,2) DEFAULT '0.00' NOT NULL, "status" varchar(64) DEFAULT 'disponivel' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "vehicleFinancings" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "vehicleId" integer NOT NULL, "clientId" integer NOT NULL, "vehiclePrice" numeric(15,2) NOT NULL, "downPayment" numeric(15,2) NOT NULL, "financedAmount" numeric(15,2) NOT NULL, "interestRate" numeric(5,2) NOT NULL, "installments" integer NOT NULL, "installmentAmount" numeric(15,2) NOT NULL, "totalAmount" numeric(15,2) NOT NULL, "startDate" timestamp NOT NULL, "endDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'ativo' NOT NULL, "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "loan_interest_history" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "loanId" integer NOT NULL, "periodReference" varchar(20) NOT NULL, "previousPrincipalBalance" numeric(15,2) NOT NULL, "interestGenerated" numeric(15,2) NOT NULL, "paymentAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "interestPaid" numeric(15,2) DEFAULT '0.00' NOT NULL, "principalAmortized" numeric(15,2) DEFAULT '0.00' NOT NULL, "updatedPrincipalBalance" numeric(15,2) NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE UNIQUE INDEX IF NOT EXISTS "loan_interest_history_loan_period_unique" ON "loan_interest_history" ("loanId", "periodReference")`;
+    await sql2`CREATE TABLE IF NOT EXISTS "payments" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "loanId" integer, "vehicleFinancingId" integer, "installmentNumber" integer NOT NULL, "amount" numeric(15,2) NOT NULL, "paymentDate" timestamp NOT NULL, "dueDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'pendente' NOT NULL, "lateFee" numeric(15,2) DEFAULT '0.00', "interest" numeric(15,2) DEFAULT '0.00', "principalAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "interestAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "remainingBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "notes" text, "agentId" integer, "commissionPercentage" numeric(5,2) DEFAULT '0.00' NOT NULL, "commissionAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "netAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "vehicle_sales" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "vehicleId" integer NOT NULL, "clientId" integer, "saleAmount" numeric(15,2) NOT NULL, "receivedAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "receivableBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "paymentMethod" varchar(30), "saleDate" timestamp NOT NULL, "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "cash_flow" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "type" varchar(64) NOT NULL, "category" varchar(120) NOT NULL, "description" text NOT NULL, "amount" numeric(15,2) NOT NULL, "movementDate" timestamp NOT NULL, "clientId" integer, "loanId" integer, "vehicleId" integer, "vehicleSaleId" integer, "paymentId" integer, "responsible" varchar(255), "notes" text, "sourceKey" varchar(180), "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE UNIQUE INDEX IF NOT EXISTS "cash_flow_source_key_unique" ON "cash_flow" ("sourceKey")`;
+    await sql2`CREATE TABLE IF NOT EXISTS "auditLogs" ("id" serial PRIMARY KEY, "userId" integer, "username" varchar(255), "action" varchar(100) NOT NULL, "entity" varchar(100), "entityId" integer, "databaseId" integer, "details" text, "ipAddress" varchar(45), "userAgent" text, "status" varchar(64) DEFAULT 'success' NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`INSERT INTO "databases" ("name", "description", "type", "isActive", "createdBy") SELECT 'Principal', 'Banco operacional principal', 'novo', true, u."id" FROM "users" u WHERE NOT EXISTS (SELECT 1 FROM "databases") ORDER BY CASE WHEN lower(coalesce(u."role", '')) = 'super_admin' THEN 0 ELSE 1 END, u."id" LIMIT 1`;
+    console.info("[Database] Preview operational schema is ready");
+  })().catch((error) => {
+    bootstrapPromise = null;
+    console.error("[Database] Preview schema bootstrap failed", error);
+    throw error;
+  });
+  return bootstrapPromise;
+}
+
 // server/_core/context.ts
 async function createContext(opts) {
+  await ensurePreviewBusinessSchema();
   let user = null;
   try {
     user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
+  } catch {
     user = null;
   }
   return {
@@ -3093,7 +3553,18 @@ app.use(
   "/api/trpc",
   createExpressMiddleware({
     router: appRouter,
-    createContext
+    createContext,
+    onError({ error, path, type }) {
+      const cause = error.cause;
+      console.error("[tRPC] Request failed", {
+        path,
+        type,
+        code: error.code,
+        message: error.message,
+        cause: cause instanceof Error ? { name: cause.name, message: cause.message, stack: cause.stack } : cause,
+        stack: error.stack
+      });
+    }
   })
 );
 var vercel_trpc_default = app;
