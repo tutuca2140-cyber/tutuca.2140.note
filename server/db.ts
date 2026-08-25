@@ -161,6 +161,23 @@ export async function toggleUserActive(userId: number, isActive: boolean) {
   await db.update(users).set({ isActive }).where(eq(users.id, userId));
 }
 
+export async function updateLocalUser(userId: number, data: {
+  username?: string;
+  email?: string;
+  name?: string;
+  role?: 'user' | 'admin';
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ ...data, updatedAt: new Date() }).where(eq(users.id, userId));
+}
+
+export async function deleteUserSessions(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(localSessions).where(eq(localSessions.userId, userId));
+}
+
 export async function deleteUser(userId: number) {
   const db = await getDb();
   if (!db) return;
@@ -1210,5 +1227,4 @@ export async function deletePasswordResetTokensForUser(userId: number) {
   if (!db) throw new Error("Database not available");
   await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
 }
-
 

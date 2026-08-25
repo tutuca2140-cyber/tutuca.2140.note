@@ -75,9 +75,9 @@ export function allocatePayment(
 
 export function addPeriods(startDate: Date, periods: number, ratePeriod: RatePeriod) {
   const result = new Date(startDate);
-  if (ratePeriod === "day") result.setDate(result.getDate() + periods);
-  if (ratePeriod === "week") result.setDate(result.getDate() + periods * 7);
-  if (ratePeriod === "month") result.setMonth(result.getMonth() + periods);
-  if (ratePeriod === "year") result.setFullYear(result.getFullYear() + periods);
+  if (ratePeriod === "day") result.setUTCDate(result.getUTCDate() + periods);
+  if (ratePeriod === "week") result.setUTCDate(result.getUTCDate() + periods * 7);
+  if (ratePeriod === "month") result.setUTCMonth(result.getUTCMonth() + periods);
+  if (ratePeriod === "year") result.setUTCFullYear(result.getUTCFullYear() + periods);
   return result;
 }
