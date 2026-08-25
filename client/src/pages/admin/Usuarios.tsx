@@ -2,17 +2,41 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { trpc } from "@/lib/trpc";
-import { Pencil, Plus, Shield, UserRoundX } from "lucide-react";
+import { KeyRound, Pencil, Plus, Shield, UserRoundX } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-type Draft = { id?: number; username: string; email: string; name: string; password: string; role: "user" | "admin" };
-const emptyDraft: Draft = { username: "", email: "", name: "", password: "", role: "user" };
+type PermissionKey = "canView" | "canInsert" | "canEdit" | "canDelete" | "canGenerateReports" | "canAccessSettings";
+type Permissions = Record<PermissionKey, boolean>;
+type Draft = Permissions & { id?: number; username: string; email: string; name: string; password: string; role: "user" | "admin" };
+
+const permissionOptions: Array<{ key: PermissionKey; label: string; description: string }> = [
+  { key: "canView", label: "Visualizar dados", description: "Consultar clientes, contratos, caixa e demais cadastros." },
+  { key: "canInsert", label: "Criar lançamentos", description: "Cadastrar clientes, empréstimos, pagamentos e registros." },
+  { key: "canEdit", label: "Editar registros", description: "Alterar informações já cadastradas no sistema." },
+  { key: "canDelete", label: "Excluir registros", description: "Remover cadastros permitidos pelas regras do sistema." },
+  { key: "canGenerateReports", label: "Gerar relatórios", description: "Acessar relatórios e exportações gerenciais." },
+  { key: "canAccessSettings", label: "Acessar configurações", description: "Consultar e alterar configurações administrativas." },
+];
+
+const permissionsForRole = (role: Draft["role"]): Permissions => role === "admin"
+  ? { canView: true, canInsert: true, canEdit: true, canDelete: true, canGenerateReports: true, canAccessSettings: true }
+  : { canView: true, canInsert: false, canEdit: false, canDelete: false, canGenerateReports: false, canAccessSettings: false };
+
+const makeEmptyDraft = (): Draft => ({
+  username: "",
+  email: "",
+  name: "",
+  password: "",
+  role: "user",
+  ...permissionsForRole("user"),
+});
 
 export default function AdminUsuarios() {
   const utils = trpc.useUtils();
@@ -21,7 +45,7 @@ export default function AdminUsuarios() {
   const updateUser = trpc.users.update.useMutation();
   const toggleUser = trpc.users.toggleActive.useMutation();
   const resetPassword = trpc.users.adminResetPassword.useMutation();
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [draft, setDraft] = useState<Draft>(makeEmptyDraft);
   const [open, setOpen] = useState(false);
   const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>({});
   const refresh = async () => utils.users.list.invalidate();
@@ -37,12 +61,25 @@ export default function AdminUsuarios() {
         await createUser.mutateAsync(draft);
         toast.success("Usuário criado.");
       }
-      setOpen(false); setDraft(emptyDraft); await refresh();
+      setOpen(false); setDraft(makeEmptyDraft()); await refresh();
     } catch (error) { fail(error); }
   };
 
   const edit = (user: (typeof users)[number]) => {
-    setDraft({ id: user.id, username: user.username ?? "", email: user.email ?? "", name: user.name ?? "", password: "", role: user.role === "admin" ? "admin" : "user" });
+    setDraft({
+      id: user.id,
+      username: user.username ?? "",
+      email: user.email ?? "",
+      name: user.name ?? "",
+      password: "",
+      role: user.role === "admin" ? "admin" : "user",
+      canView: user.canView,
+      canInsert: user.canInsert,
+      canEdit: user.canEdit,
+      canDelete: user.canDelete,
+      canGenerateReports: user.canGenerateReports,
+      canAccessSettings: user.canAccessSettings,
+    });
     setOpen(true);
   };
 
@@ -60,18 +97,23 @@ export default function AdminUsuarios() {
 
   const busy = createUser.isPending || updateUser.isPending;
   return <DashboardLayout><div className="space-y-6">
-    <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center"><div><h1 className="text-3xl font-bold tracking-tight">Gerenciamento de Usuários</h1><p className="mt-2 text-muted-foreground">Crie, edite, desative e redefina senhas.</p></div>
-      <Dialog open={open} onOpenChange={value => { setOpen(value); if (!value) setDraft(emptyDraft); }}><DialogTrigger asChild><Button className="w-full sm:w-auto"><Plus className="mr-2 h-4 w-4" />Novo usuário</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>{draft.id ? "Editar usuário" : "Criar usuário"}</DialogTitle></DialogHeader><div className="grid gap-4">
-        <div><Label htmlFor="user-name">Nome</Label><Input id="user-name" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} /></div>
-        <div><Label htmlFor="user-username">Usuário</Label><Input id="user-username" value={draft.username} onChange={e => setDraft({ ...draft, username: e.target.value })} /></div>
-        <div><Label htmlFor="user-email">E-mail</Label><Input id="user-email" type="email" value={draft.email} onChange={e => setDraft({ ...draft, email: e.target.value })} /></div>
-        {!draft.id && <div><Label htmlFor="user-password">Senha inicial</Label><Input id="user-password" type="password" value={draft.password} onChange={e => setDraft({ ...draft, password: e.target.value })} /></div>}
-        <div><Label>Perfil</Label><Select value={draft.role} onValueChange={(role: "user" | "admin") => setDraft({ ...draft, role })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="user">Usuário</SelectItem><SelectItem value="admin">Administrador</SelectItem></SelectContent></Select></div>
-        <Button onClick={save} disabled={busy || !draft.name || !draft.username || !draft.email || (!draft.id && draft.password.length < 6)}>{busy ? "Salvando..." : "Salvar"}</Button>
+    <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center"><div><h1 className="text-3xl font-bold tracking-tight">Gerenciamento de Usuários</h1><p className="mt-2 text-muted-foreground">Crie contas e defina exatamente o que cada usuário pode fazer.</p></div>
+      <Dialog open={open} onOpenChange={value => { setOpen(value); if (!value) setDraft(makeEmptyDraft()); }}><DialogTrigger asChild><Button className="w-full sm:w-auto"><Plus className="mr-2 h-4 w-4" />Novo usuário</Button></DialogTrigger><DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto"><DialogHeader><DialogTitle>{draft.id ? "Editar usuário" : "Criar usuário"}</DialogTitle><DialogDescription>Configure os dados de acesso e as ações autorizadas para esta conta.</DialogDescription></DialogHeader><div className="space-y-6">
+        <section className="space-y-4"><div><h3 className="font-semibold">Dados de acesso</h3><p className="text-sm text-muted-foreground">Informe a identificação e o perfil principal da conta.</p></div><div className="grid gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2"><Label htmlFor="user-name">Nome</Label><Input id="user-name" className="mt-2" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} /></div>
+          <div><Label htmlFor="user-username">Usuário</Label><Input id="user-username" className="mt-2" autoCapitalize="none" value={draft.username} onChange={e => setDraft({ ...draft, username: e.target.value })} /></div>
+          <div><Label htmlFor="user-email">E-mail</Label><Input id="user-email" className="mt-2" type="email" autoCapitalize="none" value={draft.email} onChange={e => setDraft({ ...draft, email: e.target.value })} /></div>
+          {!draft.id && <div><Label htmlFor="user-password">Senha inicial</Label><Input id="user-password" className="mt-2" type="password" minLength={6} value={draft.password} onChange={e => setDraft({ ...draft, password: e.target.value })} /><p className="mt-1 text-xs text-muted-foreground">Mínimo de 6 caracteres.</p></div>}
+          <div className={draft.id ? "sm:col-span-2" : undefined}><Label>Perfil</Label><Select value={draft.role} onValueChange={(role: Draft["role"]) => setDraft({ ...draft, role, ...permissionsForRole(role) })}><SelectTrigger className="mt-2"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="user">Usuário</SelectItem><SelectItem value="admin">Administrador</SelectItem></SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">Ao trocar o perfil, aplicamos as permissões recomendadas; você pode ajustá-las abaixo.</p></div>
+        </div></section>
+        <section className="space-y-4 border-t pt-5"><div className="flex items-start gap-3"><div className="rounded-lg bg-primary/10 p-2 text-primary"><KeyRound className="h-5 w-5" /></div><div><h3 className="font-semibold">Permissões concedidas</h3><p className="text-sm text-muted-foreground">Ative somente os recursos necessários para este usuário.</p></div></div><div className="grid gap-3 sm:grid-cols-2">
+          {permissionOptions.map(permission => <div key={permission.key} className="flex min-w-0 items-start justify-between gap-4 rounded-xl border bg-card p-4"><Label htmlFor={`permission-${permission.key}`} className="min-w-0 cursor-pointer leading-normal"><span className="block font-medium">{permission.label}</span><span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">{permission.description}</span></Label><Switch id={`permission-${permission.key}`} checked={draft[permission.key]} onCheckedChange={checked => setDraft(current => ({ ...current, [permission.key]: checked }))} aria-label={permission.label} /></div>)}
+        </div></section>
+        <div className="flex flex-col-reverse gap-2 border-t pt-5 sm:flex-row sm:justify-end"><Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={save} disabled={busy || !draft.name.trim() || !draft.username.trim() || !draft.email.trim() || (!draft.id && draft.password.length < 6)}>{busy ? "Salvando..." : draft.id ? "Salvar alterações" : "Criar usuário"}</Button></div>
       </div></DialogContent></Dialog>
     </div>
     {isLoading ? <p className="py-12 text-center text-muted-foreground">Carregando usuários...</p> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{users.map(user => { const protectedUser = user.username?.toLowerCase() === "draco"; return <Card key={user.id}><CardHeader><CardTitle className="flex items-center justify-between gap-2"><span className="truncate">{user.name || user.username || user.email}</span><Shield className="h-5 w-5 text-primary" /></CardTitle></CardHeader><CardContent className="space-y-4">
-      <div><Badge>{user.role}</Badge><Badge variant="outline" className={`ml-2 ${user.isActive ? "text-green-700" : "text-red-700"}`}>{user.isActive ? "Ativo" : "Inativo"}</Badge></div><p className="text-sm text-muted-foreground">@{user.username}<br />{user.email}</p>
+      <div><Badge>{user.role}</Badge><Badge variant="outline" className={`ml-2 ${user.isActive ? "text-green-700" : "text-red-700"}`}>{user.isActive ? "Ativo" : "Inativo"}</Badge></div><p className="text-sm text-muted-foreground">@{user.username}<br />{user.email}</p><div className="flex flex-wrap gap-1.5">{permissionOptions.filter(permission => user[permission.key]).map(permission => <Badge key={permission.key} variant="secondary" className="font-normal">{permission.label}</Badge>)}</div>
       {protectedUser ? <p className="rounded-md bg-primary/5 p-3 text-xs text-primary">Super administrador protegido.</p> : <><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => edit(user)}><Pencil className="mr-2 h-4 w-4" />Editar</Button><Button variant="outline" size="sm" onClick={() => toggle(user.id, !user.isActive)}><UserRoundX className="mr-2 h-4 w-4" />{user.isActive ? "Desativar" : "Ativar"}</Button></div><div className="flex flex-col gap-2 sm:flex-row"><Input type="password" placeholder="Nova senha" value={passwordDrafts[user.id] ?? ""} onChange={e => setPasswordDrafts(current => ({ ...current, [user.id]: e.target.value }))} /><Button className="w-full sm:w-auto" variant="outline" onClick={() => reset(user.id)}>Redefinir</Button></div></>}
     </CardContent></Card>; })}</div>}
   </div></DashboardLayout>;

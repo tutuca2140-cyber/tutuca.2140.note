@@ -1380,13 +1380,13 @@ async function createLocalUser(data) {
       name: data.name,
       passwordHash: data.passwordHash,
       loginMethod: "local",
-      role: "user",
-      canView: true,
-      canInsert: false,
-      canEdit: false,
-      canDelete: false,
-      canGenerateReports: false,
-      canAccessSettings: false,
+      role: data.role ?? "user",
+      canView: data.canView ?? true,
+      canInsert: data.canInsert ?? false,
+      canEdit: data.canEdit ?? false,
+      canDelete: data.canDelete ?? false,
+      canGenerateReports: data.canGenerateReports ?? false,
+      canAccessSettings: data.canAccessSettings ?? false,
       isActive: true,
       emailVerified: false,
       lastSignedIn: /* @__PURE__ */ new Date()
@@ -1659,7 +1659,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       email: z2.string().trim().email(),
       name: z2.string().trim().min(1).max(200),
       password: z2.string().min(6),
-      role: z2.enum(["user", "admin"]).default("user")
+      role: z2.enum(["user", "admin"]).default("user"),
+      canView: z2.boolean().default(true),
+      canInsert: z2.boolean().default(false),
+      canEdit: z2.boolean().default(false),
+      canDelete: z2.boolean().default(false),
+      canGenerateReports: z2.boolean().default(false),
+      canAccessSettings: z2.boolean().default(false)
     })).mutation(async ({ input, ctx }) => {
       if (await getUserByUsername(input.username)) {
         throw new TRPCError3({ code: "CONFLICT", message: "Nome de usu\xE1rio j\xE1 cadastrado." });
@@ -1670,8 +1676,26 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       const passwordHash = await bcrypt.hash(input.password, 10);
       const created = await createLocalUser({ ...input, passwordHash });
       const createdUser = await getUserByUsername(input.username);
-      if (createdUser && input.role !== "user") await updateUserRole(createdUser.id, input.role);
-      await createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || "Super Admin", action: "create_user", entity: "users", entityId: createdUser?.id, details: `Usu\xE1rio criado: ${input.username}`, status: "success" });
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.username || ctx.user.email || "Super Admin",
+        action: "create_user",
+        entity: "users",
+        entityId: createdUser?.id,
+        details: JSON.stringify({
+          username: input.username,
+          role: input.role,
+          permissions: {
+            canView: input.canView,
+            canInsert: input.canInsert,
+            canEdit: input.canEdit,
+            canDelete: input.canDelete,
+            canGenerateReports: input.canGenerateReports,
+            canAccessSettings: input.canAccessSettings
+          }
+        }),
+        status: "success"
+      });
       return createdUser ?? created;
     }),
     update: superAdminProcedure.input(z2.object({
@@ -1679,7 +1703,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       username: z2.string().trim().min(3).max(100),
       email: z2.string().trim().email(),
       name: z2.string().trim().min(1).max(200),
-      role: z2.enum(["user", "admin"])
+      role: z2.enum(["user", "admin"]),
+      canView: z2.boolean(),
+      canInsert: z2.boolean(),
+      canEdit: z2.boolean(),
+      canDelete: z2.boolean(),
+      canGenerateReports: z2.boolean(),
+      canAccessSettings: z2.boolean()
     })).mutation(async ({ input, ctx }) => {
       const target = await getUserById(input.userId);
       if (!target) throw new TRPCError3({ code: "NOT_FOUND", message: "Usu\xE1rio n\xE3o encontrado." });
@@ -1693,7 +1723,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       await createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || "Super Admin", action: "update_user", entity: "users", entityId: userId, details: `Usu\xE1rio editado: ${input.username}`, status: "success" });
       return { success: true };
     }),
-    updatePermissions: adminProcedure2.input(z2.object({
+    updatePermissions: superAdminProcedure.input(z2.object({
       userId: z2.number(),
       canView: z2.boolean().optional(),
       canInsert: z2.boolean().optional(),
@@ -1719,7 +1749,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    updateRole: adminProcedure2.input(z2.object({
+    updateRole: superAdminProcedure.input(z2.object({
       userId: z2.number(),
       role: z2.enum(["user", "admin", "super_admin"])
     })).mutation(async ({ input, ctx }) => {
@@ -1785,7 +1815,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    delete: adminProcedure2.input(z2.object({ userId: z2.number() })).mutation(async ({ input, ctx }) => {
+    delete: superAdminProcedure.input(z2.object({ userId: z2.number() })).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (targetUser?.username === "Draco") {
         throw new TRPCError3({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ser exclu\xEDdo." });

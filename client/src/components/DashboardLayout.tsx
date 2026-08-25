@@ -46,6 +46,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   };
 
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  const isSuperAdmin = user?.role === "super_admin";
 
   const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, show: true },
@@ -61,7 +62,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   ];
 
   const adminNavigation = [
-    { name: "Usuários", href: "/admin/usuarios", icon: Shield, show: isAdmin },
+    { name: "Usuários", href: "/admin/usuarios", icon: Shield, show: isSuperAdmin },
     { name: "Bancos de Dados", href: "/admin/bancos", icon: Database, show: isAdmin },
     { name: "Auditoria", href: "/admin/auditoria", icon: FileText, show: isAdmin },
     { name: "Configurações", href: "/admin/configuracoes", icon: Settings, show: user?.canAccessSettings },

@@ -9,6 +9,9 @@ const dbMock = vi.hoisted(() => ({
   createVehicleFinancing: vi.fn(),
   createLoanBundle: vi.fn(),
   deleteManualCashFlowEntry: vi.fn(),
+  getUserByUsername: vi.fn(),
+  getUserByEmail: vi.fn(),
+  createLocalUser: vi.fn(),
   createAuditLog: vi.fn(),
 }));
 
@@ -174,5 +177,65 @@ describe("fluxos de gravação", () => {
     const adminContext = { ...context, user: { ...context.user!, role: "admin" as const } } as TrpcContext;
     await expect(appRouter.createCaller(adminContext).cashFlow.delete({ id: 31 })).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(dbMock.deleteManualCashFlowEntry).not.toHaveBeenCalled();
+  });
+
+  it("cria usuário com o perfil e todas as permissões selecionadas", async () => {
+    dbMock.getUserByUsername
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ id: 41, username: "operador", role: "user" });
+    dbMock.getUserByEmail.mockResolvedValue(undefined);
+    dbMock.createLocalUser.mockResolvedValue({ id: 41 });
+
+    await appRouter.createCaller(context).users.create({
+      username: "operador",
+      email: "operador@example.com",
+      name: "Operador",
+      password: "senha-segura",
+      role: "user",
+      canView: true,
+      canInsert: true,
+      canEdit: false,
+      canDelete: false,
+      canGenerateReports: true,
+      canAccessSettings: false,
+    });
+
+    expect(dbMock.createLocalUser).toHaveBeenCalledWith(expect.objectContaining({
+      username: "operador",
+      role: "user",
+      canView: true,
+      canInsert: true,
+      canEdit: false,
+      canDelete: false,
+      canGenerateReports: true,
+      canAccessSettings: false,
+      passwordHash: expect.any(String),
+    }));
+    expect(dbMock.createAuditLog).toHaveBeenCalledWith(expect.objectContaining({
+      action: "create_user",
+      entityId: 41,
+    }));
+  });
+
+  it("impede administrador comum de criar usuários ou alterar permissões", async () => {
+    const adminContext = { ...context, user: { ...context.user!, role: "admin" as const } } as TrpcContext;
+    const caller = appRouter.createCaller(adminContext);
+
+    await expect(caller.users.create({
+      username: "indevido",
+      email: "indevido@example.com",
+      name: "Indevido",
+      password: "senha-segura",
+      role: "user",
+      canView: true,
+      canInsert: false,
+      canEdit: false,
+      canDelete: false,
+      canGenerateReports: false,
+      canAccessSettings: false,
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.users.updatePermissions({ userId: 41, canDelete: true }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(dbMock.createLocalUser).not.toHaveBeenCalled();
   });
 });

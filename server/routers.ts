@@ -241,6 +241,12 @@ export const appRouter = router({
         name: z.string().trim().min(1).max(200),
         password: z.string().min(6),
         role: z.enum(['user', 'admin']).default('user'),
+        canView: z.boolean().default(true),
+        canInsert: z.boolean().default(false),
+        canEdit: z.boolean().default(false),
+        canDelete: z.boolean().default(false),
+        canGenerateReports: z.boolean().default(false),
+        canAccessSettings: z.boolean().default(false),
       }))
       .mutation(async ({ input, ctx }) => {
         if (await db.getUserByUsername(input.username)) {
@@ -252,8 +258,26 @@ export const appRouter = router({
         const passwordHash = await bcrypt.hash(input.password, 10);
         const created = await db.createLocalUser({ ...input, passwordHash });
         const createdUser = await db.getUserByUsername(input.username);
-        if (createdUser && input.role !== 'user') await db.updateUserRole(createdUser.id, input.role);
-        await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || 'Super Admin', action: 'create_user', entity: 'users', entityId: createdUser?.id, details: `Usuário criado: ${input.username}`, status: 'success' });
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.username || ctx.user.email || 'Super Admin',
+          action: 'create_user',
+          entity: 'users',
+          entityId: createdUser?.id,
+          details: JSON.stringify({
+            username: input.username,
+            role: input.role,
+            permissions: {
+              canView: input.canView,
+              canInsert: input.canInsert,
+              canEdit: input.canEdit,
+              canDelete: input.canDelete,
+              canGenerateReports: input.canGenerateReports,
+              canAccessSettings: input.canAccessSettings,
+            },
+          }),
+          status: 'success',
+        });
         return createdUser ?? created;
       }),
 
@@ -264,6 +288,12 @@ export const appRouter = router({
         email: z.string().trim().email(),
         name: z.string().trim().min(1).max(200),
         role: z.enum(['user', 'admin']),
+        canView: z.boolean(),
+        canInsert: z.boolean(),
+        canEdit: z.boolean(),
+        canDelete: z.boolean(),
+        canGenerateReports: z.boolean(),
+        canAccessSettings: z.boolean(),
       }))
       .mutation(async ({ input, ctx }) => {
         const target = await db.getUserById(input.userId);
@@ -279,7 +309,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    updatePermissions: adminProcedure
+    updatePermissions: superAdminProcedure
       .input(z.object({
         userId: z.number(),
         canView: z.boolean().optional(),
@@ -312,7 +342,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    updateRole: adminProcedure
+    updateRole: superAdminProcedure
       .input(z.object({
         userId: z.number(),
         role: z.enum(['user', 'admin', 'super_admin'])
@@ -395,7 +425,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: adminProcedure
+    delete: superAdminProcedure
       .input(z.object({ userId: z.number() }))
       .mutation(async ({ input, ctx }) => {
         const targetUser = await db.getUserById(input.userId);

@@ -167,6 +167,12 @@ export async function updateLocalUser(userId: number, data: {
   email?: string;
   name?: string;
   role?: 'user' | 'admin';
+  canView?: boolean;
+  canInsert?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canGenerateReports?: boolean;
+  canAccessSettings?: boolean;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -1192,6 +1198,13 @@ export async function createLocalUser(data: {
   email: string;
   name: string;
   passwordHash: string;
+  role?: 'user' | 'admin';
+  canView?: boolean;
+  canInsert?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canGenerateReports?: boolean;
+  canAccessSettings?: boolean;
 }): Promise<any> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -1203,13 +1216,13 @@ export async function createLocalUser(data: {
       name: data.name,
       passwordHash: data.passwordHash,
       loginMethod: 'local',
-      role: 'user',
-      canView: true,
-      canInsert: false,
-      canEdit: false,
-      canDelete: false,
-      canGenerateReports: false,
-      canAccessSettings: false,
+      role: data.role ?? 'user',
+      canView: data.canView ?? true,
+      canInsert: data.canInsert ?? false,
+      canEdit: data.canEdit ?? false,
+      canDelete: data.canDelete ?? false,
+      canGenerateReports: data.canGenerateReports ?? false,
+      canAccessSettings: data.canAccessSettings ?? false,
       isActive: true,
       emailVerified: false,
       lastSignedIn: new Date(),
