@@ -1,6 +1,6 @@
 import { eq, and, desc, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import WebSocket from "ws";
 import { 
   InsertUser, users, 
   databases, InsertDatabase,
@@ -25,8 +25,9 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      const sqlClient = neon(process.env.DATABASE_URL);
-      _db = drizzle(sqlClient);
+      // Os fluxos financeiros usam transações interativas. O driver neon-http
+      // não oferece esse recurso; WebSocket mantém empréstimo + caixa atômicos.
+      _db = drizzle({ connection: process.env.DATABASE_URL, ws: WebSocket });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -603,7 +604,9 @@ export async function createLoanInterestHistory(data: InsertLoanInterestHistory)
 export async function createAgent(data: InsertAgent) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  return await db.insert(agents).values(data);
+  const [created] = await db.insert(agents).values(data).returning();
+  if (!created) throw new Error("Não foi possível confirmar o agente criado.");
+  return created;
 }
 
 export async function getAgentsByDatabase(databaseId: number, includeInactive = true) {
@@ -945,8 +948,9 @@ export async function receiveVehicleSaleBundle(saleId: number, databaseId: numbe
 export async function createVehicleFinancing(data: InsertVehicleFinancing) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(vehicleFinancings).values(data);
-  return result;
+  const [created] = await db.insert(vehicleFinancings).values(data).returning();
+  if (!created) throw new Error("Não foi possível confirmar o financiamento criado.");
+  return created;
 }
 
 export async function getVehicleFinancingsByDatabase(databaseId: number) {

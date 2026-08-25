@@ -189,8 +189,8 @@ import { z as z2 } from "zod";
 
 // server/db.ts
 import { eq, and, desc, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import WebSocket from "ws";
 
 // drizzle/schema.ts
 import { integer, serial, pgTable, text, timestamp, varchar, numeric, boolean, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
@@ -513,8 +513,7 @@ var _db = null;
 async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      const sqlClient = neon(process.env.DATABASE_URL);
-      _db = drizzle(sqlClient);
+      _db = drizzle({ connection: process.env.DATABASE_URL, ws: WebSocket });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -944,7 +943,9 @@ async function createLoanInterestHistory(data) {
 async function createAgent(data) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  return await db.insert(agents).values(data);
+  const [created] = await db.insert(agents).values(data).returning();
+  if (!created) throw new Error("N\xE3o foi poss\xEDvel confirmar o agente criado.");
+  return created;
 }
 async function getAgentsByDatabase(databaseId, includeInactive = true) {
   const db = await getDb();
@@ -1180,8 +1181,9 @@ async function receiveVehicleSaleBundle(saleId, databaseId, amount, movementDate
 async function createVehicleFinancing(data) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(vehicleFinancings).values(data);
-  return result;
+  const [created] = await db.insert(vehicleFinancings).values(data).returning();
+  if (!created) throw new Error("N\xE3o foi poss\xEDvel confirmar o financiamento criado.");
+  return created;
 }
 async function getVehicleFinancingsByDatabase(databaseId) {
   const db = await getDb();
@@ -1394,6 +1396,18 @@ import { nanoid } from "nanoid";
 var optionalText = z2.string().optional();
 var optionalEmail = z2.union([z2.string().email(), z2.literal("")]).optional();
 var optionalAddress = z2.record(z2.string(), z2.string()).optional();
+var positiveDecimal = (label) => z2.string().trim().min(1, `${label} \xE9 obrigat\xF3rio.`).refine(
+  (value) => Number.isFinite(Number(value)) && Number(value) > 0,
+  `${label} deve ser maior que zero.`
+);
+var nonNegativeDecimal = (label) => z2.string().trim().min(1, `${label} \xE9 obrigat\xF3rio.`).refine(
+  (value) => Number.isFinite(Number(value)) && Number(value) >= 0,
+  `${label} n\xE3o pode ser negativo.`
+);
+var validDate = (label) => z2.string().trim().min(1, `${label} \xE9 obrigat\xF3ria.`).refine(
+  (value) => !Number.isNaN(new Date(value).getTime()),
+  `${label} \xE9 inv\xE1lida.`
+);
 var stripLegacyCpf = (client) => {
   const { cpf: _cpf, ...withoutCpf } = client;
   return withoutCpf;
@@ -1800,7 +1814,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return agent;
     }),
     create: protectedProcedure.input(z2.object({
-      name: z2.string().min(1).max(255),
+      name: z2.string().trim().min(1).max(255),
       defaultCommissionPercentage: z2.coerce.number().min(0).max(100)
     })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canInsert) {
@@ -1810,7 +1824,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
       const result = await createAgent({
         databaseId: activeDb.id,
-        name: input.name,
+        name: input.name.trim(),
         defaultCommissionPercentage: input.defaultCommissionPercentage.toFixed(2),
         status: "ACTIVE",
         createdBy: ctx.user.id
@@ -2121,15 +2135,15 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     create: protectedProcedure.input(z2.object({
       clientId: z2.number().int().positive(),
-      amount: z2.string(),
+      amount: positiveDecimal("Valor principal"),
       interestType: z2.enum(["simple", "compound"]).default("simple").optional(),
-      interestRate: z2.string(),
+      interestRate: nonNegativeDecimal("Taxa de juros"),
       ratePeriod: z2.enum(["day", "week", "month", "year"]).default("month").optional(),
       installments: z2.coerce.number().int().positive().optional(),
       installmentAmount: z2.string().optional(),
       totalAmount: z2.string().optional(),
-      startDate: z2.string(),
-      endDate: z2.string().optional(),
+      startDate: validDate("Data inicial"),
+      endDate: validDate("Data final").optional(),
       description: z2.string().optional()
     })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
@@ -2160,6 +2174,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (Number.isNaN(startDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data inicial inv\xE1lida." });
       const endDate = input.endDate ? new Date(input.endDate) : addPeriods(startDate, plan.periods, ratePeriod);
       if (Number.isNaN(endDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data final inv\xE1lida." });
+      if (endDate < startDate) throw new TRPCError3({ code: "BAD_REQUEST", message: "A data final deve ser igual ou posterior \xE0 data inicial." });
       const result = await createLoanBundle({
         clientId: input.clientId,
         amount: plan.principal.toFixed(2),
@@ -2698,17 +2713,17 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return await getVehicleFinancingById(input.id);
     }),
     create: protectedProcedure.input(z2.object({
-      vehicleId: z2.number(),
-      clientId: z2.number(),
-      vehiclePrice: z2.string(),
-      downPayment: z2.string(),
-      financedAmount: z2.string(),
-      interestRate: z2.string(),
-      installments: z2.number(),
-      installmentAmount: z2.string(),
-      totalAmount: z2.string(),
-      startDate: z2.string(),
-      endDate: z2.string(),
+      vehicleId: z2.number().int().positive(),
+      clientId: z2.number().int().positive(),
+      vehiclePrice: positiveDecimal("Pre\xE7o do ve\xEDculo"),
+      downPayment: nonNegativeDecimal("Entrada"),
+      financedAmount: positiveDecimal("Valor financiado"),
+      interestRate: nonNegativeDecimal("Taxa de juros"),
+      installments: z2.number().int().positive(),
+      installmentAmount: positiveDecimal("Valor da parcela"),
+      totalAmount: positiveDecimal("Valor total"),
+      startDate: validDate("Data inicial"),
+      endDate: validDate("Data final"),
       notes: z2.string().optional()
     })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
@@ -2724,10 +2739,31 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados"
         });
       }
+      const [client, vehicle] = await Promise.all([
+        getClientById(input.clientId),
+        getVehicleById(input.vehicleId)
+      ]);
+      if (!client || client.databaseId !== activeDb.id) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+      }
+      if (!vehicle || vehicle.databaseId !== activeDb.id) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Ve\xEDculo inv\xE1lido para o banco ativo." });
+      }
+      const startDate = new Date(input.startDate);
+      const endDate = new Date(input.endDate);
+      if (endDate < startDate) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "A data final deve ser igual ou posterior \xE0 data inicial." });
+      }
+      if (Number(input.downPayment) > Number(input.vehiclePrice)) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "A entrada n\xE3o pode ser maior que o pre\xE7o do ve\xEDculo." });
+      }
+      if (Number(input.totalAmount) < Number(input.financedAmount)) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "O valor total n\xE3o pode ser menor que o valor financiado." });
+      }
       const result = await createVehicleFinancing({
         ...input,
-        startDate: new Date(input.startDate),
-        endDate: new Date(input.endDate),
+        startDate,
+        endDate,
         databaseId: activeDb.id,
         createdBy: ctx.user.id
       });
@@ -3070,13 +3106,13 @@ var SDKServer = class {
 var sdk = new SDKServer();
 
 // server/bootstrap-schema.ts
-import { neon as neon2 } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 var bootstrapPromise = null;
 function ensurePreviewBusinessSchema() {
   if (process.env.VERCEL_ENV !== "preview" || !process.env.DATABASE_URL) return Promise.resolve();
   if (bootstrapPromise) return bootstrapPromise;
   bootstrapPromise = (async () => {
-    const sql2 = neon2(process.env.DATABASE_URL);
+    const sql2 = neon(process.env.DATABASE_URL);
     await sql2`CREATE TABLE IF NOT EXISTS "databases" ("id" serial PRIMARY KEY, "name" varchar(255) NOT NULL UNIQUE, "description" text, "type" varchar(64) NOT NULL, "isActive" boolean DEFAULT false NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`CREATE TABLE IF NOT EXISTS "agents" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "defaultCommissionPercentage" numeric(5,2) DEFAULT '0.00' NOT NULL, "status" varchar(64) DEFAULT 'ACTIVE' NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`CREATE TABLE IF NOT EXISTS "clients" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "cpf" varchar(14), "birthDate" timestamp, "email" varchar(320), "phone" varchar(20), "whatsapp" varchar(20), "profession" varchar(120), "indicatorAgentId" integer, "address" text, "residentialAddress" jsonb, "commercialAddress" jsonb, "city" varchar(100), "state" varchar(2), "zipCode" varchar(10), "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;

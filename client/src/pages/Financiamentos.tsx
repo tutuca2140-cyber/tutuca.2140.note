@@ -6,32 +6,28 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Plus, ClipboardList, Edit, Trash2, DollarSign } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+const emptyFinancingForm = () => ({
+  clientId: "", vehicleId: "", vehiclePrice: "", downPayment: "", financedAmount: "",
+  totalAmount: "", interestRate: "", installments: "", installmentAmount: "",
+  status: "ativo" as const, startDate: "", endDate: "", notes: "",
+});
+
+const dateAtNoon = (date: string) => new Date(`${date}T12:00:00`).toISOString();
+
 export default function Financiamentos() {
+  const { user } = useAuth();
   const [openCreate, setOpenCreate] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
   const [selectedFinancing, setSelectedFinancing] = useState<any>(null);
-  const [formData, setFormData] = useState({
-    clientId: "",
-    vehicleId: "",
-    vehiclePrice: "",
-    downPayment: "",
-    financedAmount: "",
-    totalAmount: "",
-    interestRate: "",
-    installments: "",
-    installmentAmount: "",
-    status: "ativo" as const,
-    startDate: "",
-    endDate: "",
-    notes: ""
-  });
+  const [formData, setFormData] = useState(emptyFinancingForm);
 
-  const { data: financings, isLoading, refetch } = trpc.vehicleFinancings.list.useQuery();
+  const { data: financings, isLoading } = trpc.vehicleFinancings.list.useQuery();
   const { data: clients } = trpc.clients.list.useQuery();
   const { data: vehicles } = trpc.vehicles.list.useQuery();
   const createMutation = trpc.vehicleFinancings.create.useMutation();
@@ -53,39 +49,51 @@ export default function Financiamentos() {
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const clientId = Number(formData.clientId);
+    const vehicleId = Number(formData.vehicleId);
+    const installments = Number(formData.installments);
+    const amounts = {
+      vehiclePrice: Number(formData.vehiclePrice),
+      downPayment: Number(formData.downPayment),
+      financedAmount: Number(formData.financedAmount),
+      totalAmount: Number(formData.totalAmount),
+      interestRate: Number(formData.interestRate),
+      installmentAmount: Number(formData.installmentAmount),
+    };
+    if (!Number.isInteger(clientId) || clientId <= 0) { toast.error("Selecione um cliente."); return; }
+    if (!Number.isInteger(vehicleId) || vehicleId <= 0) { toast.error("Selecione um veículo."); return; }
+    if (!Number.isInteger(installments) || installments <= 0) { toast.error("Informe um número válido de parcelas."); return; }
+    if (!Number.isFinite(amounts.vehiclePrice) || amounts.vehiclePrice <= 0 ||
+        !Number.isFinite(amounts.financedAmount) || amounts.financedAmount <= 0 ||
+        !Number.isFinite(amounts.totalAmount) || amounts.totalAmount <= 0 ||
+        !Number.isFinite(amounts.installmentAmount) || amounts.installmentAmount <= 0 ||
+        !Number.isFinite(amounts.downPayment) || amounts.downPayment < 0 ||
+        !Number.isFinite(amounts.interestRate) || amounts.interestRate < 0) {
+      toast.error("Preencha os valores financeiros com números válidos."); return;
+    }
+    if (amounts.downPayment > amounts.vehiclePrice) { toast.error("A entrada não pode ser maior que o preço do veículo."); return; }
+    if (amounts.totalAmount < amounts.financedAmount) { toast.error("O total não pode ser menor que o valor financiado."); return; }
+    if (!formData.startDate || !formData.endDate) { toast.error("Informe as datas inicial e final."); return; }
+    if (new Date(formData.endDate) < new Date(formData.startDate)) { toast.error("A data final deve ser posterior à data inicial."); return; }
     try {
       await createMutation.mutateAsync({
-        clientId: parseInt(formData.clientId),
-        vehicleId: parseInt(formData.vehicleId),
-        vehiclePrice: formData.vehiclePrice,
-        downPayment: formData.downPayment,
-        financedAmount: formData.financedAmount,
-        totalAmount: formData.totalAmount,
-        interestRate: formData.interestRate,
-        installments: parseInt(formData.installments),
-        installmentAmount: formData.installmentAmount,
-        startDate: formData.startDate,
-        endDate: formData.endDate,
-        notes: formData.notes
+        clientId,
+        vehicleId,
+        vehiclePrice: amounts.vehiclePrice.toFixed(2),
+        downPayment: amounts.downPayment.toFixed(2),
+        financedAmount: amounts.financedAmount.toFixed(2),
+        totalAmount: amounts.totalAmount.toFixed(2),
+        interestRate: amounts.interestRate.toFixed(2),
+        installments,
+        installmentAmount: amounts.installmentAmount.toFixed(2),
+        startDate: dateAtNoon(formData.startDate),
+        endDate: dateAtNoon(formData.endDate),
+        notes: formData.notes.trim() || undefined,
       });
       toast.success("Financiamento criado com sucesso!");
       setOpenCreate(false);
-      setFormData({
-        clientId: "",
-        vehicleId: "",
-        vehiclePrice: "",
-        downPayment: "",
-        financedAmount: "",
-        totalAmount: "",
-        interestRate: "",
-        installments: "",
-        installmentAmount: "",
-        status: "ativo",
-        startDate: "",
-        endDate: "",
-        notes: ""
-      });
-      utils.vehicleFinancings.list.invalidate();
+      setFormData(emptyFinancingForm());
+      await utils.vehicleFinancings.list.invalidate();
     } catch (error: any) {
       toast.error(error.message || "Erro ao criar financiamento");
     }
@@ -153,7 +161,7 @@ export default function Financiamentos() {
               Gerencie financiamentos de veículos com cálculos automáticos
             </p>
           </div>
-          <Dialog open={openCreate} onOpenChange={setOpenCreate}>
+          {user?.canInsert ? <Dialog open={openCreate} onOpenChange={setOpenCreate}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />
@@ -169,7 +177,7 @@ export default function Financiamentos() {
                   <div>
                     <Label htmlFor="clientId">Cliente *</Label>
                     <Select value={formData.clientId} onValueChange={(value) => setFormData({ ...formData, clientId: value })}>
-                      <SelectTrigger>
+                      <SelectTrigger id="clientId">
                         <SelectValue placeholder="Selecionar cliente" />
                       </SelectTrigger>
                       <SelectContent>
@@ -184,7 +192,7 @@ export default function Financiamentos() {
                   <div>
                     <Label htmlFor="vehicleId">Veículo *</Label>
                     <Select value={formData.vehicleId} onValueChange={(value) => setFormData({ ...formData, vehicleId: value })}>
-                      <SelectTrigger>
+                      <SelectTrigger id="vehicleId">
                         <SelectValue placeholder="Selecionar veículo" />
                       </SelectTrigger>
                       <SelectContent>
@@ -201,6 +209,7 @@ export default function Financiamentos() {
                     <Input
                       id="vehiclePrice"
                       type="number"
+                      min="0.01"
                       step="0.01"
                       value={formData.vehiclePrice}
                       onChange={(e) => setFormData({ ...formData, vehiclePrice: e.target.value })}
@@ -212,6 +221,7 @@ export default function Financiamentos() {
                     <Input
                       id="downPayment"
                       type="number"
+                      min="0"
                       step="0.01"
                       value={formData.downPayment}
                       onChange={(e) => setFormData({ ...formData, downPayment: e.target.value })}
@@ -223,6 +233,7 @@ export default function Financiamentos() {
                     <Input
                       id="financedAmount"
                       type="number"
+                      min="0.01"
                       step="0.01"
                       value={formData.financedAmount}
                       onChange={(e) => setFormData({ ...formData, financedAmount: e.target.value })}
@@ -234,6 +245,7 @@ export default function Financiamentos() {
                     <Input
                       id="totalAmount"
                       type="number"
+                      min="0.01"
                       step="0.01"
                       value={formData.totalAmount}
                       onChange={(e) => setFormData({ ...formData, totalAmount: e.target.value })}
@@ -245,6 +257,7 @@ export default function Financiamentos() {
                     <Input
                       id="interestRate"
                       type="number"
+                      min="0"
                       step="0.01"
                       value={formData.interestRate}
                       onChange={(e) => setFormData({ ...formData, interestRate: e.target.value })}
@@ -256,6 +269,7 @@ export default function Financiamentos() {
                     <Input
                       id="installments"
                       type="number"
+                      min="1"
                       value={formData.installments}
                       onChange={(e) => setFormData({ ...formData, installments: e.target.value })}
                       required
@@ -266,6 +280,7 @@ export default function Financiamentos() {
                     <Input
                       id="installmentAmount"
                       type="number"
+                      min="0.01"
                       step="0.01"
                       value={formData.installmentAmount}
                       onChange={(e) => setFormData({ ...formData, installmentAmount: e.target.value })}
@@ -326,7 +341,7 @@ export default function Financiamentos() {
                 </div>
               </form>
             </DialogContent>
-          </Dialog>
+          </Dialog> : null}
         </div>
 
         {isLoading ? (
@@ -409,10 +424,10 @@ export default function Financiamentos() {
             <CardContent className="flex flex-col items-center justify-center py-12">
               <ClipboardList className="h-12 w-12 text-muted-foreground mb-4" />
               <p className="text-muted-foreground">Nenhum financiamento cadastrado</p>
-              <Button className="mt-4" onClick={() => setOpenCreate(true)}>
+              {user?.canInsert ? <Button className="mt-4" onClick={() => setOpenCreate(true)}>
                 <Plus className="h-4 w-4 mr-2" />
                 Cadastrar Primeiro Financiamento
-              </Button>
+              </Button> : null}
             </CardContent>
           </Card>
         )}

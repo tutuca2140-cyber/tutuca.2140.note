@@ -13,6 +13,18 @@ import { addPeriods, allocatePayment, allocateBalancePayment, calculateInterestO
 const optionalText = z.string().optional();
 const optionalEmail = z.union([z.string().email(), z.literal('')]).optional();
 const optionalAddress = z.record(z.string(), z.string()).optional();
+const positiveDecimal = (label: string) => z.string().trim().min(1, `${label} é obrigatório.`).refine(
+  (value) => Number.isFinite(Number(value)) && Number(value) > 0,
+  `${label} deve ser maior que zero.`,
+);
+const nonNegativeDecimal = (label: string) => z.string().trim().min(1, `${label} é obrigatório.`).refine(
+  (value) => Number.isFinite(Number(value)) && Number(value) >= 0,
+  `${label} não pode ser negativo.`,
+);
+const validDate = (label: string) => z.string().trim().min(1, `${label} é obrigatória.`).refine(
+  (value) => !Number.isNaN(new Date(value).getTime()),
+  `${label} é inválida.`,
+);
 const stripLegacyCpf = <T extends { cpf?: unknown }>(client: T): Omit<T, 'cpf'> => {
   const { cpf: _cpf, ...withoutCpf } = client;
   return withoutCpf;
@@ -535,7 +547,7 @@ export const appRouter = router({
 
     create: protectedProcedure
       .input(z.object({
-        name: z.string().min(1).max(255),
+        name: z.string().trim().min(1).max(255),
         defaultCommissionPercentage: z.coerce.number().min(0).max(100),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -546,7 +558,7 @@ export const appRouter = router({
         if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo.' });
         const result = await db.createAgent({
           databaseId: activeDb.id,
-          name: input.name,
+          name: input.name.trim(),
           defaultCommissionPercentage: input.defaultCommissionPercentage.toFixed(2),
           status: 'ACTIVE',
           createdBy: ctx.user.id,
@@ -914,15 +926,15 @@ export const appRouter = router({
     create: protectedProcedure
       .input(z.object({
         clientId: z.number().int().positive(),
-        amount: z.string(),
+        amount: positiveDecimal('Valor principal'),
         interestType: z.enum(['simple', 'compound']).default('simple').optional(),
-        interestRate: z.string(),
+        interestRate: nonNegativeDecimal('Taxa de juros'),
         ratePeriod: z.enum(['day', 'week', 'month', 'year']).default('month').optional(),
         installments: z.coerce.number().int().positive().optional(),
         installmentAmount: z.string().optional(),
         totalAmount: z.string().optional(),
-        startDate: z.string(),
-        endDate: z.string().optional(),
+        startDate: validDate('Data inicial'),
+        endDate: validDate('Data final').optional(),
         description: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -955,6 +967,7 @@ export const appRouter = router({
         if (Number.isNaN(startDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Data inicial inválida.' });
         const endDate = input.endDate ? new Date(input.endDate) : addPeriods(startDate, plan.periods, ratePeriod);
         if (Number.isNaN(endDate.getTime())) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Data final inválida.' });
+        if (endDate < startDate) throw new TRPCError({ code: 'BAD_REQUEST', message: 'A data final deve ser igual ou posterior à data inicial.' });
 
         const result = await db.createLoanBundle({
           clientId: input.clientId,
@@ -1562,17 +1575,17 @@ export const appRouter = router({
 
     create: protectedProcedure
       .input(z.object({
-        vehicleId: z.number(),
-        clientId: z.number(),
-        vehiclePrice: z.string(),
-        downPayment: z.string(),
-        financedAmount: z.string(),
-        interestRate: z.string(),
-        installments: z.number(),
-        installmentAmount: z.string(),
-        totalAmount: z.string(),
-        startDate: z.string(),
-        endDate: z.string(),
+        vehicleId: z.number().int().positive(),
+        clientId: z.number().int().positive(),
+        vehiclePrice: positiveDecimal('Preço do veículo'),
+        downPayment: nonNegativeDecimal('Entrada'),
+        financedAmount: positiveDecimal('Valor financiado'),
+        interestRate: nonNegativeDecimal('Taxa de juros'),
+        installments: z.number().int().positive(),
+        installmentAmount: positiveDecimal('Valor da parcela'),
+        totalAmount: positiveDecimal('Valor total'),
+        startDate: validDate('Data inicial'),
+        endDate: validDate('Data final'),
         notes: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -1591,10 +1604,32 @@ export const appRouter = router({
           });
         }
 
+        const [client, vehicle] = await Promise.all([
+          db.getClientById(input.clientId),
+          db.getVehicleById(input.vehicleId),
+        ]);
+        if (!client || client.databaseId !== activeDb.id) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cliente inválido para o banco ativo.' });
+        }
+        if (!vehicle || vehicle.databaseId !== activeDb.id) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Veículo inválido para o banco ativo.' });
+        }
+        const startDate = new Date(input.startDate);
+        const endDate = new Date(input.endDate);
+        if (endDate < startDate) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'A data final deve ser igual ou posterior à data inicial.' });
+        }
+        if (Number(input.downPayment) > Number(input.vehiclePrice)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'A entrada não pode ser maior que o preço do veículo.' });
+        }
+        if (Number(input.totalAmount) < Number(input.financedAmount)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'O valor total não pode ser menor que o valor financiado.' });
+        }
+
         const result = await db.createVehicleFinancing({
           ...input,
-          startDate: new Date(input.startDate),
-          endDate: new Date(input.endDate),
+          startDate,
+          endDate,
           databaseId: activeDb.id,
           createdBy: ctx.user.id
         });
