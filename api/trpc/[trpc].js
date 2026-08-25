@@ -2973,7 +2973,6 @@ var SDKServer = class {
   }
   async verifySession(cookieValue) {
     if (!cookieValue) {
-      console.warn("[Auth] Missing session cookie");
       return null;
     }
     try {
