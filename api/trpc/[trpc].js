@@ -510,6 +510,45 @@ function addPeriods(startDate, periods, ratePeriod) {
 
 // server/db.ts
 var _db = null;
+var _schemaDiagnostic = null;
+function diagnoseCriticalSchema() {
+  if (_schemaDiagnostic) return _schemaDiagnostic;
+  _schemaDiagnostic = (async () => {
+    if (!process.env.DATABASE_URL) return;
+    const sqlClient = neon(process.env.DATABASE_URL);
+    const rows = await sqlClient`
+      select table_name, column_name
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name in ('users', 'localSessions', 'databases', 'clients', 'loans', 'cash_flow', 'payments', 'agents', 'auditLogs')
+      order by table_name, ordinal_position
+    `;
+    const actual = /* @__PURE__ */ new Map();
+    for (const row of rows) {
+      const table = String(row.table_name);
+      if (!actual.has(table)) actual.set(table, /* @__PURE__ */ new Set());
+      actual.get(table).add(String(row.column_name));
+    }
+    const expected = {
+      users: ["id", "username", "role", "isActive", "canView", "canInsert", "canEdit", "canDelete"],
+      localSessions: ["token", "userId", "expiresAt"],
+      databases: ["id", "name", "type", "isActive", "createdBy"],
+      clients: ["id", "databaseId", "name", "birthDate", "email", "phone", "whatsapp", "profession", "indicatorAgentId", "residentialAddress", "commercialAddress", "createdBy"],
+      loans: ["id", "databaseId", "clientId", "amount", "interestType", "interestRate", "ratePeriod", "installments", "installmentAmount", "totalAmount", "remainingBalance", "principalBalance", "accruedInterest", "totalPaid", "startDate", "endDate", "status", "createdBy"],
+      cash_flow: ["id", "databaseId", "type", "category", "description", "amount", "movementDate", "clientId", "loanId", "sourceKey", "createdBy"],
+      payments: ["id", "databaseId", "loanId", "amount", "paymentDate", "dueDate", "status", "principalAmount", "interestAmount", "remainingBalance", "createdBy"],
+      agents: ["id", "databaseId", "name", "defaultCommissionPercentage", "status", "createdBy"],
+      auditLogs: ["id", "userId", "action", "entity", "databaseId", "status", "createdAt"]
+    };
+    const missingTables = Object.keys(expected).filter((table) => !actual.has(table));
+    const missingColumns = Object.fromEntries(Object.entries(expected).flatMap(([table, columns]) => {
+      const missing = columns.filter((column) => !actual.get(table)?.has(column));
+      return missing.length ? [[table, missing]] : [];
+    }));
+    console.info("[Database] Critical schema diagnostic", { missingTables, missingColumns });
+  })().catch((error) => console.error("[Database] Schema diagnostic failed", error));
+  return _schemaDiagnostic;
+}
 async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
@@ -3072,6 +3111,7 @@ var sdk = new SDKServer();
 
 // server/_core/context.ts
 async function createContext(opts) {
+  await diagnoseCriticalSchema();
   let user = null;
   try {
     user = await sdk.authenticateRequest(opts.req);
