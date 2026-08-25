@@ -1,25 +1,27 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/NotFound";
+import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
-import Dashboard from "./pages/Dashboard";
-import Clientes from "./pages/Clientes";
-import Emprestimos from "./pages/Emprestimos";
-import Pagamentos from "./pages/Pagamentos";
-import Caixa from "./pages/Caixa";
-import Agentes from "./pages/Agentes";
-import Veiculos from "./pages/Veiculos";
-import VendasVeiculos from "./pages/VendasVeiculos";
-import Financiamentos from "./pages/Financiamentos";
-import Relatorios from "./pages/Relatorios";
-import AdminUsuarios from "./pages/admin/Usuarios";
-import AdminBancos from "./pages/admin/Bancos";
-import AdminAuditoria from "./pages/admin/Auditoria";
-import AdminConfiguracoes from "./pages/admin/Configuracoes";
-import Login from "./pages/Login";
+
+const Home = lazy(() => import("./pages/Home"));
+const Login = lazy(() => import("./pages/Login"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Clientes = lazy(() => import("./pages/Clientes"));
+const Emprestimos = lazy(() => import("./pages/Emprestimos"));
+const Pagamentos = lazy(() => import("./pages/Pagamentos"));
+const Caixa = lazy(() => import("./pages/Caixa"));
+const Agentes = lazy(() => import("./pages/Agentes"));
+const Veiculos = lazy(() => import("./pages/Veiculos"));
+const VendasVeiculos = lazy(() => import("./pages/VendasVeiculos"));
+const Financiamentos = lazy(() => import("./pages/Financiamentos"));
+const Relatorios = lazy(() => import("./pages/Relatorios"));
+const AdminUsuarios = lazy(() => import("./pages/admin/Usuarios"));
+const AdminBancos = lazy(() => import("./pages/admin/Bancos"));
+const AdminAuditoria = lazy(() => import("./pages/admin/Auditoria"));
+const AdminConfiguracoes = lazy(() => import("./pages/admin/Configuracoes"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 function Router() {
   return (
@@ -52,7 +54,9 @@ function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Carregando...</div>}>
+            <Router />
+          </Suspense>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

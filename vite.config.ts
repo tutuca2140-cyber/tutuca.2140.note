@@ -177,7 +177,7 @@ function vitePluginManusDebugCollector(): Plugin {
 const plugins = [
   react(),
   tailwindcss(),
-  vitePluginManusRuntime(),
+  ...(process.env.NODE_ENV === "production" ? [] : [vitePluginManusRuntime()]),
   vitePluginManusDebugCollector(),
 ];
 
