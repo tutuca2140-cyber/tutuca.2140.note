@@ -1,7 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
+import { publicProcedure, router, protectedProcedure as baseProtectedProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "./db";
@@ -29,6 +29,10 @@ const stripLegacyCpf = <T extends { cpf?: unknown }>(client: T): Omit<T, 'cpf'> 
   const { cpf: _cpf, ...withoutCpf } = client;
   return withoutCpf;
 };
+
+const protectedProcedure = baseProtectedProcedure.use(({ ctx, next }) =>
+  db.withUserDatabaseScope({ userId: ctx.user.id, role: ctx.user.role }, () => next({ ctx })),
+);
 
 // Admin procedure - requer role admin ou super_admin
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -247,6 +251,7 @@ export const appRouter = router({
         canDelete: z.boolean().default(false),
         canGenerateReports: z.boolean().default(false),
         canAccessSettings: z.boolean().default(false),
+        databaseIds: z.array(z.number().int().positive()).max(3).default([]),
       }))
       .mutation(async ({ input, ctx }) => {
         if (await db.getUserByUsername(input.username)) {
@@ -256,8 +261,11 @@ export const appRouter = router({
           throw new TRPCError({ code: 'CONFLICT', message: 'E-mail já cadastrado.' });
         }
         const passwordHash = await bcrypt.hash(input.password, 10);
-        const created = await db.createLocalUser({ ...input, passwordHash });
+        const { databaseIds, ...userInput } = input;
+        const created = await db.createLocalUser({ ...userInput, passwordHash });
         const createdUser = await db.getUserByUsername(input.username);
+        if (!createdUser) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Não foi possível confirmar o usuário criado.' });
+        await db.assignUserDatabases(createdUser.id, databaseIds);
         await db.createAuditLog({
           userId: ctx.user.id,
           username: ctx.user.username || ctx.user.email || 'Super Admin',
@@ -275,6 +283,7 @@ export const appRouter = router({
               canGenerateReports: input.canGenerateReports,
               canAccessSettings: input.canAccessSettings,
             },
+            databaseIds,
           }),
           status: 'success',
         });
@@ -294,6 +303,7 @@ export const appRouter = router({
         canDelete: z.boolean(),
         canGenerateReports: z.boolean(),
         canAccessSettings: z.boolean(),
+        databaseIds: z.array(z.number().int().positive()).max(3),
       }))
       .mutation(async ({ input, ctx }) => {
         const target = await db.getUserById(input.userId);
@@ -303,8 +313,9 @@ export const appRouter = router({
         if (usernameOwner && usernameOwner.id !== input.userId) throw new TRPCError({ code: 'CONFLICT', message: 'Nome de usuário já cadastrado.' });
         const emailOwner = await db.getUserByEmail(input.email);
         if (emailOwner && emailOwner.id !== input.userId) throw new TRPCError({ code: 'CONFLICT', message: 'E-mail já cadastrado.' });
-        const { userId, ...data } = input;
+        const { userId, databaseIds, ...data } = input;
         await db.updateLocalUser(userId, data);
+        await db.assignUserDatabases(userId, databaseIds);
         await db.createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || 'Super Admin', action: 'update_user', entity: 'users', entityId: userId, details: `Usuário editado: ${input.username}`, status: 'success' });
         return { success: true };
       }),
@@ -450,8 +461,8 @@ export const appRouter = router({
 
   // ==================== DATABASES ====================
   databases: router({
-    list: adminProcedure.query(async () => {
-      return await db.getAllDatabases();
+    list: protectedProcedure.query(async ({ ctx }) => {
+      return await db.getDatabasesForUser(ctx.user.id, ctx.user.role);
     }),
 
     getActive: protectedProcedure.query(async () => {
@@ -482,7 +493,7 @@ export const appRouter = router({
         return result;
       }),
 
-    setActive: adminProcedure
+    setActive: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
         await db.setActiveDatabase(input.id);
@@ -525,20 +536,17 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: adminProcedure
+    delete: superAdminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
         const dbInfo = await db.getDatabaseById(input.id);
         
-        // Não permitir deletar banco ativo
-        if (dbInfo?.isActive) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Não é possível deletar o banco de dados ativo'
-          });
-        }
-        
+        if (!dbInfo) throw new TRPCError({ code: 'NOT_FOUND', message: 'Banco de dados não encontrado.' });
         await db.deleteDatabase(input.id);
+        if (dbInfo.isActive) {
+          const remaining = await db.getAllDatabases();
+          if (remaining[0]) await db.setActiveDatabase(remaining[0].id);
+        }
         
         await db.createAuditLog({
           userId: ctx.user.id,
@@ -826,16 +834,9 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: protectedProcedure
+    delete: superAdminProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ input, ctx }) => {
-        if (!ctx.user.canDelete) {
-          throw new TRPCError({
-            code: 'FORBIDDEN',
-            message: 'Você não tem permissão para deletar dados'
-          });
-        }
-
         const activeDb = await db.getActiveDatabase();
         if (!activeDb) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Nenhum banco de dados ativo' });
         const currentClient = await db.getClientById(input.id);
@@ -1634,7 +1635,12 @@ export const appRouter = router({
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
-        return await db.getVehicleFinancingById(input.id);
+        const activeDb = await db.getActiveDatabase();
+        const financing = await db.getVehicleFinancingById(input.id);
+        if (!activeDb || !financing || financing.databaseId !== activeDb.id) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Financiamento não encontrado no banco ativo.' });
+        }
+        return financing;
       }),
 
     create: protectedProcedure
@@ -1643,13 +1649,9 @@ export const appRouter = router({
         clientId: z.number().int().positive(),
         vehiclePrice: positiveDecimal('Preço do veículo'),
         downPayment: nonNegativeDecimal('Entrada'),
-        financedAmount: positiveDecimal('Valor financiado'),
         interestRate: nonNegativeDecimal('Taxa de juros'),
         installments: z.number().int().positive(),
-        installmentAmount: positiveDecimal('Valor da parcela'),
-        totalAmount: positiveDecimal('Valor total'),
         startDate: validDate('Data inicial'),
-        endDate: validDate('Data final'),
         notes: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -1679,19 +1681,28 @@ export const appRouter = router({
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'Veículo inválido para o banco ativo.' });
         }
         const startDate = new Date(input.startDate);
-        const endDate = new Date(input.endDate);
-        if (endDate < startDate) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'A data final deve ser igual ou posterior à data inicial.' });
-        }
-        if (Number(input.downPayment) > Number(input.vehiclePrice)) {
+        const vehiclePrice = Number(input.vehiclePrice);
+        const downPayment = Number(input.downPayment);
+        if (downPayment >= vehiclePrice) {
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'A entrada não pode ser maior que o preço do veículo.' });
         }
-        if (Number(input.totalAmount) < Number(input.financedAmount)) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'O valor total não pode ser menor que o valor financiado.' });
-        }
+        const financedAmount = roundMoney(vehiclePrice - downPayment);
+        const plan = calculateLoanPlan({
+          principal: financedAmount,
+          ratePercent: Number(input.interestRate),
+          periods: input.installments,
+          interestType: 'simple',
+          ratePeriod: 'month',
+        });
+        const endDate = addPeriods(startDate, input.installments, 'month');
 
         const result = await db.createVehicleFinancing({
           ...input,
+          vehiclePrice: vehiclePrice.toFixed(2),
+          downPayment: downPayment.toFixed(2),
+          financedAmount: financedAmount.toFixed(2),
+          totalAmount: plan.totalAmount.toFixed(2),
+          installmentAmount: plan.installmentAmount.toFixed(2),
           startDate,
           endDate,
           databaseId: activeDb.id,
@@ -1704,11 +1715,11 @@ export const appRouter = router({
           action: 'create_vehicle_financing',
           entity: 'vehicleFinancings',
           databaseId: activeDb.id,
-          details: `Financiamento criado: R$ ${input.financedAmount}`,
+          details: `Financiamento criado: principal R$ ${financedAmount.toFixed(2)}, total R$ ${plan.totalAmount.toFixed(2)}`,
           status: 'success'
         });
 
-        return result;
+        return { ...result, financedAmount, totalAmount: plan.totalAmount, installmentAmount: plan.installmentAmount, endDate };
       }),
 
     update: protectedProcedure
@@ -1725,10 +1736,14 @@ export const appRouter = router({
           });
         }
 
+        const activeDb = await db.getActiveDatabase();
+        const financing = await db.getVehicleFinancingById(input.id);
+        if (!activeDb || !financing || financing.databaseId !== activeDb.id) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Financiamento não encontrado no banco ativo.' });
+        }
         const { id, ...data } = input;
         await db.updateVehicleFinancing(id, data);
 
-        const activeDb = await db.getActiveDatabase();
         await db.createAuditLog({
           userId: ctx.user.id,
           username: ctx.user.name || ctx.user.email || 'Usuário',

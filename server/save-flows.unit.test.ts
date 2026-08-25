@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
 
 const dbMock = vi.hoisted(() => ({
+  withUserDatabaseScope: vi.fn((_user, operation) => operation()),
   getActiveDatabase: vi.fn(),
   getClientById: vi.fn(),
   getVehicleById: vi.fn(),
@@ -12,6 +13,7 @@ const dbMock = vi.hoisted(() => ({
   getUserByUsername: vi.fn(),
   getUserByEmail: vi.fn(),
   createLocalUser: vi.fn(),
+  assignUserDatabases: vi.fn(),
   createAuditLog: vi.fn(),
 }));
 
@@ -76,19 +78,18 @@ describe("fluxos de gravação", () => {
       vehicleId: 13,
       vehiclePrice: "30000.00",
       downPayment: "5000.00",
-      financedAmount: "25000.00",
       interestRate: "2.00",
       installments: 24,
-      installmentAmount: "1300.00",
-      totalAmount: "31200.00",
       startDate: "2026-08-25T12:00:00.000Z",
-      endDate: "2028-08-25T12:00:00.000Z",
     });
     expect(result).toMatchObject({ id: 19 });
     expect(dbMock.createVehicleFinancing).toHaveBeenCalledWith(expect.objectContaining({
       databaseId: 7,
       clientId: 11,
       vehicleId: 13,
+      financedAmount: "25000.00",
+      totalAmount: "37000.00",
+      installmentAmount: "1541.67",
       createdBy: 1,
     }));
   });
@@ -99,13 +100,9 @@ describe("fluxos de gravação", () => {
       vehicleId: 13,
       vehiclePrice: "10000.00",
       downPayment: "12000.00",
-      financedAmount: "1000.00",
       interestRate: "1.00",
       installments: 12,
-      installmentAmount: "100.00",
-      totalAmount: "1200.00",
       startDate: "2026-08-25T12:00:00.000Z",
-      endDate: "2027-08-25T12:00:00.000Z",
     })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(dbMock.createVehicleFinancing).not.toHaveBeenCalled();
   });

@@ -1,5 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { trpc } from "@/lib/trpc";
 import {
   LayoutDashboard,
   Users,
@@ -31,6 +33,20 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   const [location] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const utils = trpc.useUtils();
+  const { data: availableDatabases = [] } = trpc.databases.list.useQuery(undefined, { enabled: Boolean(user) });
+  const { data: activeDatabase } = trpc.databases.getActive.useQuery(undefined, { enabled: Boolean(user) });
+  const setActiveDatabase = trpc.databases.setActive.useMutation();
+
+  const handleDatabaseChange = async (value: string) => {
+    try {
+      await setActiveDatabase.mutateAsync({ id: Number(value) });
+      await Promise.all([utils.databases.getActive.invalidate(), utils.invalidate()]);
+      toast.success("Banco de dados alterado.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível alterar o banco.");
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -56,7 +72,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     { name: "Caixa", href: "/caixa", icon: Wallet, show: user?.canView },
     { name: "Agentes", href: "/agentes", icon: Users, show: user?.canView },
     { name: "Veículos", href: "/veiculos", icon: Car, show: user?.canView },
-    { name: "Vendas de Veículos", href: "/vendas-veiculos", icon: Wallet, show: user?.canView },
     { name: "Financiamentos", href: "/financiamentos", icon: ClipboardList, show: user?.canView },
     { name: "Relatórios", href: "/relatorios", icon: FileText, show: user?.canGenerateReports },
   ];
@@ -136,6 +151,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 </p>
               </div>
             </div>
+            {availableDatabases.length > 0 && <div className="mt-3"><p className="mb-1.5 text-xs font-medium text-muted-foreground">Banco em operação</p><Select value={activeDatabase ? String(activeDatabase.id) : undefined} onValueChange={handleDatabaseChange} disabled={setActiveDatabase.isPending}><SelectTrigger className="bg-background"><SelectValue placeholder="Selecionar banco" /></SelectTrigger><SelectContent>{availableDatabases.map(database => <SelectItem key={database.id} value={String(database.id)}>{database.name}</SelectItem>)}</SelectContent></Select></div>}
           </div>
 
           <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">

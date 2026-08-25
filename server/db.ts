@@ -1,5 +1,6 @@
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-serverless";
+import { AsyncLocalStorage } from "node:async_hooks";
 import WebSocket from "ws";
 import { 
   InsertUser, users, 
@@ -15,12 +16,19 @@ import {
   auditLogs, InsertAuditLog,
   agents, InsertAgent,
   localSessions, InsertLocalSession,
-  passwordResetTokens, InsertPasswordResetToken
+  passwordResetTokens, InsertPasswordResetToken,
+  userDatabaseAccess
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { allocatePayment, allocateBalancePayment, roundMoney } from "../shared/finance";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+type DatabaseScope = { userId: number; role: string };
+const databaseScope = new AsyncLocalStorage<DatabaseScope>();
+
+export function withUserDatabaseScope<T>(user: DatabaseScope, operation: () => T): T {
+  return databaseScope.run(user, operation);
+}
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
@@ -127,7 +135,14 @@ export async function getUserByOpenId(openId: string) {
 export async function getAllUsers() {
   const db = await getDb();
   if (!db) return [];
-  return await db.select().from(users).orderBy(desc(users.createdAt));
+  const rows = await db.select().from(users).orderBy(desc(users.createdAt));
+  return Promise.all(rows.map(async (user) => ({
+    ...user,
+    databaseIds: (await db.select({ databaseId: userDatabaseAccess.databaseId })
+      .from(userDatabaseAccess)
+      .where(eq(userDatabaseAccess.userId, user.id)))
+      .map((access) => access.databaseId),
+  })));
 }
 
 export async function getUserById(id: number) {
@@ -188,7 +203,10 @@ export async function deleteUserSessions(userId: number) {
 export async function deleteUser(userId: number) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(users).where(eq(users.id, userId));
+  await db.transaction(async (tx) => {
+    await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.userId, userId));
+    await tx.delete(users).where(eq(users.id, userId));
+  });
 }
 
 /**
@@ -242,6 +260,49 @@ export async function getAllDatabases() {
   return await db.select().from(databases).orderBy(desc(databases.createdAt));
 }
 
+export async function getDatabasesForUser(userId: number, role: string) {
+  const db = await getDb();
+  if (!db) return [];
+  if (role === 'super_admin') return getAllDatabases();
+  const assigned = await db.select({ database: databases })
+    .from(userDatabaseAccess)
+    .innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id))
+    .where(eq(userDatabaseAccess.userId, userId));
+  if (assigned.length || role !== 'admin') return assigned.map((row) => row.database);
+  // Compatibilidade para administradores antigos ainda não vinculados.
+  return getAllDatabases();
+}
+
+export async function getUserDatabaseIds(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ databaseId: userDatabaseAccess.databaseId })
+    .from(userDatabaseAccess)
+    .where(eq(userDatabaseAccess.userId, userId));
+  return rows.map((row) => row.databaseId);
+}
+
+export async function assignUserDatabases(userId: number, databaseIds: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const uniqueIds = Array.from(new Set(databaseIds));
+  if (uniqueIds.length > 3) throw new Error('Cada usuário pode ser vinculado a no máximo três bancos.');
+  if (uniqueIds.length) {
+    const existing = await db.select({ id: databases.id }).from(databases).where(inArray(databases.id, uniqueIds));
+    if (existing.length !== uniqueIds.length) throw new Error('Um ou mais bancos selecionados não existem.');
+  }
+  await db.transaction(async (tx) => {
+    await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.userId, userId));
+    if (uniqueIds.length) {
+      await tx.insert(userDatabaseAccess).values(uniqueIds.map((databaseId, index) => ({
+        userId,
+        databaseId,
+        isActive: index === 0,
+      })));
+    }
+  });
+}
+
 export async function getDatabaseById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
@@ -252,6 +313,22 @@ export async function getDatabaseById(id: number) {
 export async function getActiveDatabase() {
   const db = await getDb();
   if (!db) return undefined;
+  const scope = databaseScope.getStore();
+  if (scope && scope.role !== 'super_admin') {
+    const assigned = await db.select({ database: databases })
+      .from(userDatabaseAccess)
+      .innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id))
+      .where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.isActive, true)))
+      .limit(1);
+    if (assigned[0]) return assigned[0].database;
+    const fallback = await db.select({ database: databases })
+      .from(userDatabaseAccess)
+      .innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id))
+      .where(eq(userDatabaseAccess.userId, scope.userId))
+      .limit(1);
+    if (fallback[0]) return fallback[0].database;
+    if (scope.role !== 'admin') return undefined;
+  }
   const result = await db.select().from(databases).where(eq(databases.isActive, true)).limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
@@ -259,6 +336,20 @@ export async function getActiveDatabase() {
 export async function setActiveDatabase(id: number) {
   const db = await getDb();
   if (!db) return;
+  const scope = databaseScope.getStore();
+  if (scope && scope.role !== 'super_admin') {
+    const access = await db.select().from(userDatabaseAccess)
+      .where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.databaseId, id)))
+      .limit(1);
+    if (access[0]) {
+      await db.transaction(async (tx) => {
+        await tx.update(userDatabaseAccess).set({ isActive: false }).where(eq(userDatabaseAccess.userId, scope.userId));
+        await tx.update(userDatabaseAccess).set({ isActive: true }).where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.databaseId, id)));
+      });
+      return;
+    }
+    if (scope.role !== 'admin') throw new Error('Você não tem acesso a este banco de dados.');
+  }
   // Desativar todos
   await db.update(databases).set({ isActive: false });
   // Ativar o selecionado
@@ -274,7 +365,20 @@ export async function updateDatabase(id: number, data: Partial<InsertDatabase>) 
 export async function deleteDatabase(id: number) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(databases).where(eq(databases.id, id));
+  await db.transaction(async (tx) => {
+    await tx.delete(cashFlow).where(eq(cashFlow.databaseId, id));
+    await tx.delete(payments).where(eq(payments.databaseId, id));
+    await tx.delete(loanInterestHistory).where(eq(loanInterestHistory.databaseId, id));
+    await tx.delete(vehicleFinancings).where(eq(vehicleFinancings.databaseId, id));
+    await tx.delete(vehicleSales).where(eq(vehicleSales.databaseId, id));
+    await tx.delete(loans).where(eq(loans.databaseId, id));
+    await tx.delete(vehicles).where(eq(vehicles.databaseId, id));
+    await tx.delete(clients).where(eq(clients.databaseId, id));
+    await tx.delete(agents).where(eq(agents.databaseId, id));
+    await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.databaseId, id));
+    await tx.delete(auditLogs).where(eq(auditLogs.databaseId, id));
+    await tx.delete(databases).where(eq(databases.id, id));
+  });
 }
 
 // ==================== CLIENTS ====================
@@ -1004,7 +1108,26 @@ export async function deleteVehicle(id: number) {
 export async function deleteVehicleInDatabase(id: number, databaseId: number) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(vehicles).where(and(eq(vehicles.id, id), eq(vehicles.databaseId, databaseId)));
+  await db.transaction(async (tx) => {
+    const financingRows = await tx.select({ id: vehicleFinancings.id }).from(vehicleFinancings)
+      .where(and(eq(vehicleFinancings.vehicleId, id), eq(vehicleFinancings.databaseId, databaseId)));
+    const saleRows = await tx.select({ id: vehicleSales.id }).from(vehicleSales)
+      .where(and(eq(vehicleSales.vehicleId, id), eq(vehicleSales.databaseId, databaseId)));
+    const financingIds = financingRows.map((row) => row.id);
+    const saleIds = saleRows.map((row) => row.id);
+    const paymentRows = financingIds.length
+      ? await tx.select({ id: payments.id }).from(payments).where(and(eq(payments.databaseId, databaseId), inArray(payments.vehicleFinancingId, financingIds)))
+      : [];
+    const paymentIds = paymentRows.map((row) => row.id);
+    const cashConditions = [eq(cashFlow.vehicleId, id)];
+    if (saleIds.length) cashConditions.push(inArray(cashFlow.vehicleSaleId, saleIds));
+    if (paymentIds.length) cashConditions.push(inArray(cashFlow.paymentId, paymentIds));
+    await tx.delete(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), or(...cashConditions)!));
+    if (paymentIds.length) await tx.delete(payments).where(inArray(payments.id, paymentIds));
+    if (financingIds.length) await tx.delete(vehicleFinancings).where(inArray(vehicleFinancings.id, financingIds));
+    if (saleIds.length) await tx.delete(vehicleSales).where(inArray(vehicleSales.id, saleIds));
+    await tx.delete(vehicles).where(and(eq(vehicles.id, id), eq(vehicles.databaseId, databaseId)));
+  });
 }
 
 export async function getVehicleSalesByDatabase(databaseId: number) {
