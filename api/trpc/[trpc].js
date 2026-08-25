@@ -3076,6 +3076,7 @@ async function createContext(opts) {
   try {
     user = await sdk.authenticateRequest(opts.req);
   } catch (error) {
+    console.error("[tRPC] Authentication context failed", error);
     user = null;
   }
   return {
@@ -3093,7 +3094,18 @@ app.use(
   "/api/trpc",
   createExpressMiddleware({
     router: appRouter,
-    createContext
+    createContext,
+    onError({ error, path, type }) {
+      const cause = error.cause;
+      console.error("[tRPC] Request failed", {
+        path,
+        type,
+        code: error.code,
+        message: error.message,
+        cause: cause instanceof Error ? { name: cause.name, message: cause.message, stack: cause.stack } : cause,
+        stack: error.stack
+      });
+    }
   })
 );
 var vercel_trpc_default = app;
