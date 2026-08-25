@@ -14,6 +14,7 @@ const formatAddress = (value: unknown) => value && typeof value === "object" ? O
 
 export default function Clientes() {
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [profileId, setProfileId] = useState<number | null>(null);
   const [formData, setFormData] = useState({
@@ -36,35 +37,68 @@ export default function Clientes() {
   const { data: agents } = trpc.agents.list.useQuery({ includeInactive: false });
   const { data: profile, isLoading: profileLoading } = trpc.clients.profile.useQuery({ id: profileId ?? 0 }, { enabled: profileId !== null });
   const createMutation = trpc.clients.create.useMutation();
+  const updateMutation = trpc.clients.update.useMutation();
   const deleteMutation = trpc.clients.delete.useMutation();
   const utils = trpc.useUtils();
+
+  const emptyForm = {
+    name: "", birthDate: "", email: "", phone: "", whatsapp: "",
+    profession: "", indicatorAgentId: "", address: "",
+    commercialAddress: "", city: "", state: "", zipCode: "", notes: ""
+  };
+
+  const resetForm = () => setFormData(emptyForm);
+
+  const openNewClient = () => {
+    setEditingId(null);
+    resetForm();
+    setOpen(true);
+  };
+
+  const openEditClient = (client: NonNullable<typeof clients>[number]) => {
+    const residential = client.residentialAddress && typeof client.residentialAddress === "object"
+      ? client.residentialAddress as Record<string, string>
+      : {};
+    const commercial = client.commercialAddress && typeof client.commercialAddress === "object"
+      ? client.commercialAddress as Record<string, string>
+      : {};
+    setEditingId(client.id);
+    setFormData({
+      name: client.name ?? "",
+      birthDate: client.birthDate ? new Date(client.birthDate).toISOString().slice(0, 10) : "",
+      email: client.email ?? "",
+      phone: client.phone ?? "",
+      whatsapp: client.whatsapp ?? "",
+      profession: client.profession ?? "",
+      indicatorAgentId: client.indicatorAgentId ? String(client.indicatorAgentId) : "",
+      address: residential.logradouro ?? client.address ?? "",
+      commercialAddress: commercial.logradouro ?? "",
+      city: residential.cidade ?? client.city ?? "",
+      state: residential.estado ?? client.state ?? "",
+      zipCode: residential.cep ?? client.zipCode ?? "",
+      notes: client.notes ?? "",
+    });
+    setOpen(true);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await createMutation.mutateAsync({
+      const payload = {
         ...formData,
         indicatorAgentId: formData.indicatorAgentId ? Number(formData.indicatorAgentId) : undefined,
         residentialAddress: { logradouro: formData.address, cidade: formData.city, estado: formData.state, cep: formData.zipCode },
         commercialAddress: formData.commercialAddress ? { logradouro: formData.commercialAddress } : undefined,
-      });
-      toast.success("Cliente criado com sucesso!");
+      };
+      if (editingId) {
+        await updateMutation.mutateAsync({ id: editingId, ...payload });
+      } else {
+        await createMutation.mutateAsync(payload);
+      }
+      toast.success(editingId ? "Cliente atualizado com sucesso!" : "Cliente criado com sucesso!");
       setOpen(false);
-      setFormData({
-        name: "",
-        birthDate: "",
-        email: "",
-        phone: "",
-        whatsapp: "",
-        profession: "",
-        indicatorAgentId: "",
-        address: "",
-        commercialAddress: "",
-        city: "",
-        state: "",
-        zipCode: "",
-        notes: ""
-      });
+      setEditingId(null);
+      resetForm();
       utils.clients.list.invalidate();
     } catch (error: any) {
       toast.error(error.message || "Erro ao criar cliente");
@@ -100,14 +134,14 @@ export default function Clientes() {
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button>
+              <Button onClick={openNewClient}>
                 <Plus className="h-4 w-4 mr-2" />
                 Novo Cliente
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Novo Cliente</DialogTitle>
+                <DialogTitle>{editingId ? "Editar Cliente" : "Novo Cliente"}</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -226,11 +260,11 @@ export default function Clientes() {
                   </div>
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                  <Button type="button" variant="outline" onClick={() => { setOpen(false); setEditingId(null); resetForm(); }}>
                     Cancelar
                   </Button>
-                  <Button type="submit" disabled={createMutation.isPending}>
-                    {createMutation.isPending ? "Salvando..." : "Salvar Cliente"}
+                  <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
+                    {createMutation.isPending || updateMutation.isPending ? "Salvando..." : editingId ? "Atualizar Cliente" : "Salvar Cliente"}
                   </Button>
                 </div>
               </form>
@@ -265,6 +299,9 @@ export default function Clientes() {
                     <div className="flex gap-1">
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setProfileId(client.id)} aria-label={`Abrir perfil de ${client.name}`}>
                         <Eye className="h-4 w-4 text-primary" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditClient(client)} aria-label={`Editar ${client.name}`}>
+                        <Edit className="h-4 w-4" />
                       </Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(client.id)} aria-label={`Excluir ${client.name}`}>
                         <Trash2 className="h-4 w-4 text-destructive" />
