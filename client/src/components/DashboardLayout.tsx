@@ -28,6 +28,7 @@ import {
 import { Link, useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import ThemeToggle from "@/components/ThemeToggle";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -268,6 +269,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 </p>
               </div>
             </div>
+            <ThemeToggle />
             {availableDatabases.length > 0 && (
               <div className="mt-3">
                 <p className="mb-1.5 text-xs font-medium text-muted-foreground">
