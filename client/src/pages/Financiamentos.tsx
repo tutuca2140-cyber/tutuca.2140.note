@@ -202,11 +202,10 @@ export default function Financiamentos() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">
-              Financiamentos de veículos
+              Financiamentos de veículos e produtos
             </h1>
             <p className="mt-2 text-muted-foreground">
-              O valor financiado, os juros e as parcelas são calculados
-              automaticamente.
+              Venda, juros, parcelas e pagamentos no mesmo fluxo financeiro.
             </p>
           </div>
           {user?.canInsert && (
