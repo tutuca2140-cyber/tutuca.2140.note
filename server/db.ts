@@ -1643,10 +1643,7 @@ export function isManualCashFlowEntry(
   );
 }
 
-export async function deleteCashFlowEntry(
-  id: number,
-  databaseId: number
-) {
+export async function deleteCashFlowEntry(id: number, databaseId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.transaction(async tx => {
@@ -2198,6 +2195,7 @@ export async function getDashboardStats(databaseId: number) {
           id: vehicles.id,
           model: vehicles.model,
           brand: vehicles.brand,
+          plate: vehicles.plate,
           status: vehicles.status,
           expenses: vehicles.expenses,
         })
@@ -2303,7 +2301,7 @@ export async function getDashboardStats(databaseId: number) {
     const vehicleNames = new Map(
       vehicleRows.map(vehicle => [
         vehicle.id,
-        `${vehicle.brand ?? ""} ${vehicle.model}`.trim(),
+        `${vehicle.brand ?? ""} ${vehicle.model}${vehicle.plate ? ` · ${vehicle.plate}` : ""}`.trim(),
       ])
     );
     const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
@@ -2319,6 +2317,9 @@ export async function getDashboardStats(databaseId: number) {
       return `${parts.year}-${parts.month}-${parts.day}`;
     };
     const todayKey = dateKey(new Date());
+    const upcomingLimit = new Date();
+    upcomingLimit.setDate(upcomingLimit.getDate() + 2);
+    const upcomingLimitKey = dateKey(upcomingLimit);
     type DueItem = {
       clientId: number;
       clientName: string;
@@ -2403,6 +2404,18 @@ export async function getDashboardStats(databaseId: number) {
       .filter(item => dateKey(item.dueDate) < todayKey)
       .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
     const dueToday = dueTodayItems.slice(0, 100).map(serializeDue);
+    const upcoming = dueItems
+      .filter(item => {
+        const itemKey = dateKey(item.dueDate);
+        return itemKey >= todayKey && itemKey <= upcomingLimitKey;
+      })
+      .sort(
+        (a, b) =>
+          a.dueDate.getTime() - b.dueDate.getTime() ||
+          a.clientName.localeCompare(b.clientName)
+      )
+      .slice(0, 200)
+      .map(serializeDue);
     const overdue = overdueItems.slice(0, 100).map(serializeDue);
     const financedVehicleIds = new Set(
       financingRows.map(financing => financing.vehicleId)
@@ -2448,7 +2461,7 @@ export async function getDashboardStats(databaseId: number) {
       vehicleProfit: roundMoney(vehicleProfit),
       vehicleExpenses: roundMoney(vehicleExpenses),
       vehicleSalesCount: vehicleSaleRows.length,
-      collections: { dueToday, overdue },
+      collections: { dueToday, upcoming, overdue },
       vehicleMetrics: {
         carsSold: soldVehicleIds.size,
         financings: financingRows.length,
@@ -2460,6 +2473,9 @@ export async function getDashboardStats(databaseId: number) {
         ).length,
         totalContracts: roundMoney(totalFinancingContracts),
         totalPaid: roundMoney(totalFinancingPaid),
+        remainingBalance: roundMoney(
+          Math.max(0, totalFinancingContracts - totalFinancingPaid)
+        ),
       },
       loanMetrics: {
         totalLent: roundMoney(totalLent),

@@ -22,6 +22,7 @@ import {
   Menu,
   X,
   ClipboardList,
+  CalendarDays,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useEffect, useState } from "react";
@@ -97,7 +98,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       icon: LayoutDashboard,
       show: true,
     },
-    { name: "Clientes", href: "/clientes", icon: Users, show: user?.canView && regularAccess },
+    {
+      name: "Clientes",
+      href: "/clientes",
+      icon: Users,
+      show: user?.canView && regularAccess,
+    },
     {
       name: "Empréstimos",
       href: "/emprestimos",
@@ -110,13 +116,34 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       icon: Wallet,
       show: user?.canView && regularAccess,
     },
-    { name: "Caixa", href: "/caixa", icon: Wallet, show: user?.canView && regularAccess },
-    { name: "Agentes", href: "/agentes", icon: Users, show: user?.canView && regularAccess },
-    { name: "Veículos", href: "/veiculos", icon: Car, show: user?.canView && regularAccess },
+    {
+      name: "Caixa",
+      href: "/caixa",
+      icon: Wallet,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Agentes",
+      href: "/agentes",
+      icon: Users,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Veículos",
+      href: "/veiculos",
+      icon: Car,
+      show: user?.canView && regularAccess,
+    },
     {
       name: "Financiamentos",
       href: "/financiamentos",
       icon: ClipboardList,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Contas a receber",
+      href: "/contas-a-receber",
+      icon: CalendarDays,
       show: user?.canView && regularAccess,
     },
     {

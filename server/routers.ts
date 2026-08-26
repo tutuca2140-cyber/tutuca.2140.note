@@ -2828,7 +2828,9 @@ export const appRouter = router({
           interestType: "simple",
           ratePeriod: "month",
         });
-        const data: Partial<import("../drizzle/schema").InsertVehicleFinancing> = {
+        const data: Partial<
+          import("../drizzle/schema").InsertVehicleFinancing
+        > = {
           vehiclePrice: vehiclePrice.toFixed(2),
           downPayment: downPayment.toFixed(2),
           financedAmount: financedAmount.toFixed(2),
@@ -2895,7 +2897,7 @@ export const appRouter = router({
           vehicleProfit: 0,
           vehicleExpenses: 0,
           vehicleSalesCount: 0,
-          collections: { dueToday: [], overdue: [] },
+          collections: { dueToday: [], upcoming: [], overdue: [] },
           vehicleMetrics: {
             carsSold: 0,
             financings: 0,
@@ -2903,6 +2905,7 @@ export const appRouter = router({
             installmentsOverdue: 0,
             totalContracts: 0,
             totalPaid: 0,
+            remainingBalance: 0,
           },
           loanMetrics: {
             totalLent: 0,

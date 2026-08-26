@@ -70,7 +70,7 @@ export default function Financiamentos() {
       new Map(
         vehicles.map(item => [
           item.id,
-          `${item.brand ?? ""} ${item.model}`.trim(),
+          `${item.brand ?? ""} ${item.model}${item.plate ? ` · ${item.plate}` : ""}`.trim(),
         ])
       ),
     [vehicles]

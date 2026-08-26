@@ -15,7 +15,8 @@ import {
   CalendarDays,
   AlertTriangle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 const formatCurrency = (value: number | string) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
@@ -59,6 +60,25 @@ export default function Dashboard() {
   );
   const { data: performance, isLoading: performanceLoading } =
     trpc.dashboard.agentPerformance.useQuery(range);
+
+  const dueTodayCount = stats?.collections?.dueToday?.length ?? 0;
+  useEffect(() => {
+    if (!dueTodayCount) return;
+    const today = new Date().toLocaleDateString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+    });
+    const alertKey = `note-note-receivables-alert:${today}`;
+    if (sessionStorage.getItem(alertKey)) return;
+    const message = `Você tem ${dueTodayCount} recebimento${dueTodayCount === 1 ? "" : "s"} hoje. Acesse Contas a receber.`;
+    toast.info(message, { duration: 10000 });
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("Note Note", {
+        body: message,
+        icon: "/brand/note-note-icon.png",
+      });
+    }
+    sessionStorage.setItem(alertKey, "1");
+  }, [dueTodayCount]);
 
   if (isLoading) {
     return (
@@ -338,15 +358,15 @@ export default function Dashboard() {
           <Card className="border-primary/20">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium">
-                Total dos financiamentos
+                Saldo dos financiamentos
               </CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-2xl font-bold text-primary">
-                {formatCurrency(stats?.vehicleMetrics?.totalContracts ?? 0)}
+                {formatCurrency(stats?.vehicleMetrics?.remainingBalance ?? 0)}
               </p>
               <p className="text-xs text-muted-foreground">
-                Valor total de todos os contratos
+                Total contratado menos valores pagos
               </p>
             </CardContent>
           </Card>
@@ -493,6 +513,50 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </div>
+
+        <Card className="border-primary/20">
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle className="flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-primary" />
+              Contas a receber — próximos 2 dias
+            </CardTitle>
+            <a
+              href="/contas-a-receber"
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Ver área completa
+            </a>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {(stats?.collections?.upcoming ?? []).slice(0, 8).map(item => (
+              <div
+                key={`upcoming-${item.contractType}-${item.clientId}-${item.installmentNumber}`}
+                className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[110px_1fr_auto] sm:items-center"
+              >
+                <p className="text-sm font-medium">
+                  {new Date(item.dueDate).toLocaleDateString("pt-BR", {
+                    timeZone: "America/Sao_Paulo",
+                  })}
+                </p>
+                <div>
+                  <p className="font-medium">{item.clientName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {item.product} · Parcela {item.installmentNumber}
+                  </p>
+                </div>
+                <p className="font-semibold text-primary">
+                  {formatCurrency(item.amount)}
+                </p>
+              </div>
+            ))}
+            {!stats?.collections?.upcoming?.length ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Nenhum recebimento previsto para hoje ou para os próximos dois
+                dias.
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
 
         <Card className="border-primary/20">
           <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

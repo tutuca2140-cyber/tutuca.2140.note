@@ -15,6 +15,7 @@ const Caixa = lazy(() => import("./pages/Caixa"));
 const Agentes = lazy(() => import("./pages/Agentes"));
 const Veiculos = lazy(() => import("./pages/Veiculos"));
 const Financiamentos = lazy(() => import("./pages/Financiamentos"));
+const ContasAReceber = lazy(() => import("./pages/ContasAReceber"));
 const Relatorios = lazy(() => import("./pages/Relatorios"));
 const AdminUsuarios = lazy(() => import("./pages/admin/Usuarios"));
 const AdminBancos = lazy(() => import("./pages/admin/Bancos"));
@@ -35,6 +36,7 @@ function Router() {
       <Route path={"/agentes"} component={Agentes} />
       <Route path={"/veiculos"} component={Veiculos} />
       <Route path={"/financiamentos"} component={Financiamentos} />
+      <Route path={"/contas-a-receber"} component={ContasAReceber} />
       <Route path={"/relatorios"} component={Relatorios} />
       <Route path={"/admin/usuarios"} component={AdminUsuarios} />
       <Route path={"/admin/bancos"} component={AdminBancos} />
@@ -52,7 +54,13 @@ function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-          <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Carregando...</div>}>
+          <Suspense
+            fallback={
+              <div className="min-h-screen grid place-items-center text-muted-foreground">
+                Carregando...
+              </div>
+            }
+          >
             <Router />
           </Suspense>
         </TooltipProvider>
