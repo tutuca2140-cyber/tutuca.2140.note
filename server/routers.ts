@@ -2491,6 +2491,92 @@ export const appRouter = router({
       }),
   }),
 
+  // ==================== PRODUCTS ====================
+  products: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      if (!ctx.user.canView)
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Sem permissão para visualizar produtos.",
+        });
+      const activeDb = await db.getActiveDatabase();
+      return activeDb ? db.getProductsByDatabase(activeDb.id) : [];
+    }),
+    create: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().trim().min(1, "Informe o nome do produto."),
+          category: z.string().trim().optional(),
+          sku: z.string().trim().optional(),
+          purchasePrice: z.coerce.number().nonnegative().default(0),
+          salePrice: z.coerce.number().positive(),
+          description: z.string().trim().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user.canInsert)
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Sem permissão para cadastrar produtos.",
+          });
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Nenhum banco ativo.",
+          });
+        const created = await db.createProduct({
+          databaseId: activeDb.id,
+          name: input.name,
+          category: input.category || null,
+          sku: input.sku?.toUpperCase() || null,
+          purchasePrice: input.purchasePrice.toFixed(2),
+          salePrice: input.salePrice.toFixed(2),
+          description: input.description || null,
+          createdBy: ctx.user.id,
+        });
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.email || "Usuário",
+          action: "create_product",
+          entity: "products",
+          entityId: created.id,
+          databaseId: activeDb.id,
+          details: `Produto criado: ${created.name}`,
+          status: "success",
+        });
+        return created;
+      }),
+    delete: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        if (ctx.user.role !== "super_admin")
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Somente o Super Admin pode excluir produtos.",
+          });
+        const activeDb = await db.getActiveDatabase();
+        const product = await db.getProductById(input.id);
+        if (!activeDb || !product || product.databaseId !== activeDb.id)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Produto não encontrado.",
+          });
+        await db.deleteProductInDatabase(input.id, activeDb.id);
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.email || "Usuário",
+          action: "delete_product",
+          entity: "products",
+          entityId: input.id,
+          databaseId: activeDb.id,
+          details: `Produto excluído: ${product.name}`,
+          status: "success",
+        });
+        return { success: true };
+      }),
+  }),
+
   // ==================== VEHICLE SALES ====================
   vehicleSales: router({
     list: protectedProcedure.query(async ({ ctx }) => {
@@ -2658,9 +2744,14 @@ export const appRouter = router({
             code: "NOT_FOUND",
             message: "Financiamento não encontrado no banco ativo.",
           });
-        const [client, vehicle, payments] = await Promise.all([
+        const [client, vehicle, product, payments] = await Promise.all([
           db.getClientById(financing.clientId),
-          db.getVehicleById(financing.vehicleId),
+          financing.vehicleId
+            ? db.getVehicleById(financing.vehicleId)
+            : Promise.resolve(undefined),
+          financing.productId
+            ? db.getProductById(financing.productId)
+            : Promise.resolve(undefined),
           db.getPaymentsByFinancing(financing.id, activeDb.id),
         ]);
         const paid = payments.filter(payment => payment.status === "pago");
@@ -2671,6 +2762,7 @@ export const appRouter = router({
           financing,
           client,
           vehicle,
+          product,
           payments,
           totalPaid,
           remainingBalance: roundMoney(
@@ -2682,7 +2774,9 @@ export const appRouter = router({
     create: protectedProcedure
       .input(
         z.object({
-          vehicleId: z.number().int().positive(),
+          assetType: z.enum(["vehicle", "product"]).default("vehicle"),
+          vehicleId: z.number().int().positive().optional(),
+          productId: z.number().int().positive().optional(),
           clientId: z.number().int().positive(),
           vehiclePrice: positiveDecimal("Preço do veículo"),
           downPayment: nonNegativeDecimal("Entrada"),
@@ -2708,9 +2802,24 @@ export const appRouter = router({
           });
         }
 
-        const [client, vehicle] = await Promise.all([
+        if (
+          (input.assetType === "vehicle" &&
+            (!input.vehicleId || input.productId)) ||
+          (input.assetType === "product" &&
+            (!input.productId || input.vehicleId))
+        )
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Selecione exatamente um veículo ou produto.",
+          });
+        const [client, vehicle, product] = await Promise.all([
           db.getClientById(input.clientId),
-          db.getVehicleById(input.vehicleId),
+          input.vehicleId
+            ? db.getVehicleById(input.vehicleId)
+            : Promise.resolve(undefined),
+          input.productId
+            ? db.getProductById(input.productId)
+            : Promise.resolve(undefined),
         ]);
         if (!client || client.databaseId !== activeDb.id) {
           throw new TRPCError({
@@ -2718,12 +2827,23 @@ export const appRouter = router({
             message: "Cliente inválido para o banco ativo.",
           });
         }
-        if (!vehicle || vehicle.databaseId !== activeDb.id) {
+        if (
+          input.assetType === "vehicle" &&
+          (!vehicle || vehicle.databaseId !== activeDb.id)
+        ) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Veículo inválido para o banco ativo.",
           });
         }
+        if (
+          input.assetType === "product" &&
+          (!product || product.databaseId !== activeDb.id)
+        )
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Produto inválido para o banco ativo.",
+          });
         const startDate = new Date(input.startDate);
         const vehiclePrice = Number(input.vehiclePrice);
         const downPayment = Number(input.downPayment);
@@ -2755,11 +2875,16 @@ export const appRouter = router({
           databaseId: activeDb.id,
           createdBy: ctx.user.id,
         });
-        await db.updateVehicleInDatabase(
-          input.vehicleId,
-          { status: "vendido", clientId: input.clientId },
-          activeDb.id
-        );
+        if (input.vehicleId)
+          await db.updateVehicleInDatabase(
+            input.vehicleId,
+            { status: "vendido", clientId: input.clientId },
+            activeDb.id
+          );
+        if (input.productId)
+          await db.updateProductInDatabase(input.productId, activeDb.id, {
+            status: "vendido",
+          });
 
         await db.createAuditLog({
           userId: ctx.user.id,

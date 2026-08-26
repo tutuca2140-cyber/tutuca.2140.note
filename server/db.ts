@@ -33,6 +33,8 @@ import {
   passwordResetTokens,
   InsertPasswordResetToken,
   userDatabaseAccess,
+  products,
+  InsertProduct,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import {
@@ -525,6 +527,7 @@ export async function deleteDatabase(id: number) {
     await tx.delete(vehicleSales).where(eq(vehicleSales.databaseId, id));
     await tx.delete(loans).where(eq(loans.databaseId, id));
     await tx.delete(vehicles).where(eq(vehicles.databaseId, id));
+    await tx.delete(products).where(eq(products.databaseId, id));
     await tx.delete(clients).where(eq(clients.databaseId, id));
     await tx.delete(agents).where(eq(agents.databaseId, id));
     await tx
@@ -1779,6 +1782,86 @@ export async function getVehicleById(id: number) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+// ==================== PRODUCTS ====================
+export async function getProductsByDatabase(databaseId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(products)
+    .where(eq(products.databaseId, databaseId))
+    .orderBy(desc(products.createdAt));
+}
+
+export async function getProductById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db
+    .select()
+    .from(products)
+    .where(eq(products.id, id))
+    .limit(1);
+  return rows[0];
+}
+
+export async function createProduct(data: InsertProduct) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const [created] = await db.insert(products).values(data).returning();
+  if (!created) throw new Error("Não foi possível confirmar o produto criado.");
+  return created;
+}
+
+export async function updateProductInDatabase(
+  id: number,
+  databaseId: number,
+  data: Partial<InsertProduct>
+) {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(products)
+    .set(data)
+    .where(and(eq(products.id, id), eq(products.databaseId, databaseId)));
+}
+
+export async function deleteProductInDatabase(id: number, databaseId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.transaction(async tx => {
+    const contracts = await tx
+      .select({ id: vehicleFinancings.id })
+      .from(vehicleFinancings)
+      .where(
+        and(
+          eq(vehicleFinancings.productId, id),
+          eq(vehicleFinancings.databaseId, databaseId)
+        )
+      );
+    const contractIds = contracts.map(item => item.id);
+    if (contractIds.length) {
+      const paymentRows = await tx
+        .select({ id: payments.id })
+        .from(payments)
+        .where(inArray(payments.vehicleFinancingId, contractIds));
+      const paymentIds = paymentRows.map(item => item.id);
+      if (paymentIds.length)
+        await tx
+          .delete(cashFlow)
+          .where(inArray(cashFlow.paymentId, paymentIds));
+      await tx
+        .delete(payments)
+        .where(inArray(payments.vehicleFinancingId, contractIds));
+      await tx
+        .delete(vehicleFinancings)
+        .where(inArray(vehicleFinancings.id, contractIds));
+    }
+    await tx
+      .delete(products)
+      .where(and(eq(products.id, id), eq(products.databaseId, databaseId)));
+  });
+}
+
 export async function updateVehicle(id: number, data: Partial<InsertVehicle>) {
   const db = await getDb();
   if (!db) return;
@@ -2103,6 +2186,7 @@ export async function getDashboardStats(databaseId: number) {
       loanRows,
       loanPaymentRows,
       vehicleRows,
+      productRows,
       vehicleSaleRows,
       vehiclePurchaseRows,
       financingRows,
@@ -2202,6 +2286,10 @@ export async function getDashboardStats(databaseId: number) {
         })
         .from(vehicles)
         .where(eq(vehicles.databaseId, databaseId)),
+      db
+        .select({ id: products.id, name: products.name, sku: products.sku })
+        .from(products)
+        .where(eq(products.databaseId, databaseId)),
       db
         .select({
           saleAmount: vehicleSales.saleAmount,
@@ -2305,6 +2393,12 @@ export async function getDashboardStats(databaseId: number) {
         `${vehicle.brand ?? ""} ${vehicle.model}${vehicle.plate ? ` · ${vehicle.plate}` : ""}`.trim(),
       ])
     );
+    const productNames = new Map(
+      productRows.map(product => [
+        product.id,
+        `${product.name}${product.sku ? ` · ${product.sku}` : ""}`,
+      ])
+    );
     const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
       timeZone: "America/Sao_Paulo",
       year: "numeric",
@@ -2382,8 +2476,11 @@ export async function getDashboardStats(databaseId: number) {
             `Cliente #${financing.clientId}`,
           amount: Number(financing.installmentAmount),
           product:
-            vehicleNames.get(financing.vehicleId) ??
-            `Financiamento #${financing.id}`,
+            financing.assetType === "product"
+              ? (productNames.get(financing.productId ?? 0) ??
+                `Produto #${financing.productId}`)
+              : (vehicleNames.get(financing.vehicleId ?? 0) ??
+                `Veículo #${financing.vehicleId}`),
           dueDate: addPeriods(
             new Date(financing.startDate),
             installmentNumber,
@@ -2419,7 +2516,9 @@ export async function getDashboardStats(databaseId: number) {
       .map(serializeDue);
     const overdue = overdueItems.slice(0, 100).map(serializeDue);
     const financedVehicleIds = new Set(
-      financingRows.map(financing => financing.vehicleId)
+      financingRows.flatMap(financing =>
+        financing.vehicleId ? [financing.vehicleId] : []
+      )
     );
     const soldVehicleIds = new Set([
       ...vehicleRows

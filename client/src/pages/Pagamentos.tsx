@@ -267,7 +267,7 @@ export default function Pagamentos() {
                       <SelectContent>
                         <SelectItem value="emprestimo">Empréstimo</SelectItem>
                         <SelectItem value="financiamento">
-                          Financiamento de veículo
+                          Financiamento de veículo ou produto
                         </SelectItem>
                       </SelectContent>
                     </Select>
@@ -403,8 +403,24 @@ export default function Pagamentos() {
                   </div>
                   {selectedFinancingData ? (
                     <div className="grid gap-3 rounded-lg border bg-muted/30 p-3 text-sm sm:grid-cols-2">
-                      <div><p className="text-muted-foreground">Valor da parcela</p><p className="font-semibold">{formatCurrency(selectedFinancingData.installmentAmount)}</p></div>
-                      <div><p className="text-muted-foreground">Amortização extra</p><p className="font-semibold text-primary">{formatCurrency(financingExtra)}</p></div>
+                      <div>
+                        <p className="text-muted-foreground">
+                          Valor da parcela
+                        </p>
+                        <p className="font-semibold">
+                          {formatCurrency(
+                            selectedFinancingData.installmentAmount
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">
+                          Amortização extra
+                        </p>
+                        <p className="font-semibold text-primary">
+                          {formatCurrency(financingExtra)}
+                        </p>
+                      </div>
                     </div>
                   ) : null}
                   <Card className="border-primary/20 bg-primary/[0.03]">

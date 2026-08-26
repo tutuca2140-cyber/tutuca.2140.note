@@ -422,6 +422,31 @@ export const vehicles = pgTable("vehicles", {
 export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertVehicle = typeof vehicles.$inferInsert;
 
+/** Produtos disponíveis para venda direta ou financiada. */
+export const products = pgTable("products", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 120 }),
+  sku: varchar("sku", { length: 80 }),
+  purchasePrice: numeric("purchasePrice", { precision: 15, scale: 2 })
+    .default("0.00")
+    .notNull(),
+  salePrice: numeric("salePrice", { precision: 15, scale: 2 }).notNull(),
+  status: varchar("status", {
+    length: 64,
+    enum: ["disponivel", "vendido", "indisponivel"],
+  })
+    .default("disponivel")
+    .notNull(),
+  description: text("description"),
+  createdBy: integer("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type Product = typeof products.$inferSelect;
+export type InsertProduct = typeof products.$inferInsert;
+
 /** Vendas de veículos sempre apontam para um veículo já existente no estoque. */
 export const vehicleSales = pgTable("vehicle_sales", {
   id: serial("id").primaryKey(),
@@ -456,7 +481,11 @@ export type InsertVehicleSale = typeof vehicleSales.$inferInsert;
 export const vehicleFinancings = pgTable("vehicleFinancings", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(), // Isolamento por banco
-  vehicleId: integer("vehicleId").notNull(),
+  assetType: varchar("assetType", { length: 20, enum: ["vehicle", "product"] })
+    .default("vehicle")
+    .notNull(),
+  vehicleId: integer("vehicleId"),
+  productId: integer("productId").references(() => products.id),
   clientId: integer("clientId").notNull(),
   vehiclePrice: numeric("vehiclePrice", { precision: 15, scale: 2 }).notNull(),
   downPayment: numeric("downPayment", { precision: 15, scale: 2 }).notNull(), // Entrada

@@ -6,6 +6,7 @@ const dbMock = vi.hoisted(() => ({
   getActiveDatabase: vi.fn(),
   getClientById: vi.fn(),
   getVehicleById: vi.fn(),
+  getProductById: vi.fn(),
   getVehicleFinancingById: vi.fn(),
   getPaymentsByFinancing: vi.fn(),
   paymentAlreadyRegistered: vi.fn(),
@@ -13,6 +14,8 @@ const dbMock = vi.hoisted(() => ({
   createAgent: vi.fn(),
   createVehicleFinancing: vi.fn(),
   updateVehicleInDatabase: vi.fn(),
+  updateProductInDatabase: vi.fn(),
+  createProduct: vi.fn(),
   createLoanBundle: vi.fn(),
   getLoanById: vi.fn(),
   deleteLoanSafely: vi.fn(),
@@ -67,6 +70,12 @@ describe("fluxos de gravação", () => {
       id: 13,
       databaseId: 7,
       model: "Veículo",
+    });
+    dbMock.getProductById.mockResolvedValue({
+      id: 14,
+      databaseId: 7,
+      name: "Produto",
+      salePrice: "900.00",
     });
     dbMock.getVehicleFinancingById.mockResolvedValue({
       id: 19,
@@ -161,6 +170,33 @@ describe("fluxos de gravação", () => {
       })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(dbMock.createVehicleFinancing).not.toHaveBeenCalled();
+  });
+
+  it("salva financiamento de produto no mesmo fluxo de parcelas", async () => {
+    dbMock.createVehicleFinancing.mockResolvedValue({ id: 20 });
+    const result = await appRouter
+      .createCaller(context)
+      .vehicleFinancings.create({
+        assetType: "product",
+        productId: 14,
+        clientId: 11,
+        vehiclePrice: "900.00",
+        downPayment: "100.00",
+        interestRate: "2.00",
+        installments: 4,
+        startDate: "2026-08-25T12:00:00.000Z",
+      });
+    expect(result).toMatchObject({ id: 20 });
+    expect(dbMock.createVehicleFinancing).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetType: "product",
+        productId: 14,
+        financedAmount: "800.00",
+      })
+    );
+    expect(dbMock.updateProductInDatabase).toHaveBeenCalledWith(14, 7, {
+      status: "vendido",
+    });
   });
 
   it("registra a cota escolhida e separa o excedente como amortização", async () => {

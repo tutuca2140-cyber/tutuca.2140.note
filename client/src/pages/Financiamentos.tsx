@@ -54,6 +54,7 @@ export default function Financiamentos() {
     trpc.vehicleFinancings.list.useQuery();
   const { data: clients = [] } = trpc.clients.list.useQuery();
   const { data: vehicles = [] } = trpc.vehicles.list.useQuery();
+  const { data: products = [] } = trpc.products.list.useQuery();
   const { data: details, isLoading: detailsLoading } =
     trpc.vehicleFinancings.details.useQuery(
       { id: detailId ?? 0 },
@@ -75,6 +76,16 @@ export default function Financiamentos() {
         ])
       ),
     [vehicles]
+  );
+  const productMap = useMemo(
+    () =>
+      new Map(
+        products.map(item => [
+          item.id,
+          `${item.name}${item.sku ? ` · ${item.sku}` : ""}`,
+        ])
+      ),
+    [products]
   );
   const assetLabel = form.assetType === "produto" ? "produto" : "veículo";
   const calculation = useMemo(() => {
@@ -105,14 +116,14 @@ export default function Financiamentos() {
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
     const clientId = Number(form.clientId),
-      vehicleId = Number(form.vehicleId),
+      assetId = Number(form.vehicleId),
       vehiclePrice = Number(form.vehiclePrice);
     const downPayment = Number(form.downPayment),
       interestRate = Number(form.interestRate),
       installments = Number(form.installments);
     if (!Number.isInteger(clientId) || clientId <= 0)
       return toast.error("Selecione um cliente.");
-    if (!Number.isInteger(vehicleId) || vehicleId <= 0)
+    if (!Number.isInteger(assetId) || assetId <= 0)
       return toast.error(`Selecione um ${assetLabel}.`);
     if (!Number.isFinite(vehiclePrice) || vehiclePrice <= 0)
       return toast.error("Informe o preço do veículo.");
@@ -129,8 +140,11 @@ export default function Financiamentos() {
     if (!form.startDate) return toast.error("Informe a data inicial.");
     try {
       await createFinancing.mutateAsync({
+        assetType: form.assetType === "produto" ? "product" : "vehicle",
         clientId,
-        vehicleId,
+        ...(form.assetType === "produto"
+          ? { productId: assetId }
+          : { vehicleId: assetId }),
         vehiclePrice: vehiclePrice.toFixed(2),
         downPayment: downPayment.toFixed(2),
         interestRate: interestRate.toFixed(2),
@@ -141,6 +155,7 @@ export default function Financiamentos() {
       await Promise.all([
         utils.vehicleFinancings.list.invalidate(),
         utils.vehicles.list.invalidate(),
+        utils.products.list.invalidate(),
       ]);
       toast.success(
         "Financiamento salvo com os juros calculados automaticamente."
@@ -274,14 +289,21 @@ export default function Financiamentos() {
                       <Select
                         value={form.vehicleId}
                         onValueChange={value => {
-                          const asset = vehicles.find(
-                            item => item.id === Number(value)
-                          );
+                          const asset =
+                            form.assetType === "produto"
+                              ? products.find(item => item.id === Number(value))
+                              : vehicles.find(
+                                  item => item.id === Number(value)
+                                );
                           setForm(current => ({
                             ...current,
                             vehicleId: value,
                             vehiclePrice: String(
-                              asset?.salePrice ?? asset?.price ?? ""
+                              asset?.salePrice ??
+                                ("price" in (asset ?? {})
+                                  ? (asset as { price?: string }).price
+                                  : "") ??
+                                ""
                             ),
                           }));
                         }}
@@ -292,20 +314,16 @@ export default function Financiamentos() {
                           />
                         </SelectTrigger>
                         <SelectContent>
-                          {vehicles
-                            .filter(
-                              vehicle =>
-                                vehicle.status !== "vendido" &&
-                                (form.assetType === "produto"
-                                  ? vehicle.vehicleType === "PRODUTO"
-                                  : vehicle.vehicleType !== "PRODUTO")
-                            )
-                            .map(vehicle => (
+                          {(form.assetType === "produto" ? products : vehicles)
+                            .filter(asset => asset.status !== "vendido")
+                            .map(asset => (
                               <SelectItem
-                                key={vehicle.id}
-                                value={String(vehicle.id)}
+                                key={asset.id}
+                                value={String(asset.id)}
                               >
-                                {vehicleMap.get(vehicle.id)}
+                                {form.assetType === "produto"
+                                  ? productMap.get(asset.id)
+                                  : vehicleMap.get(asset.id)}
                               </SelectItem>
                             ))}
                         </SelectContent>
@@ -461,8 +479,11 @@ export default function Financiamentos() {
                           {clientMap.get(financing.clientId) ??
                             `Cliente #${financing.clientId}`}{" "}
                           ·{" "}
-                          {vehicleMap.get(financing.vehicleId) ??
-                            `Veículo #${financing.vehicleId}`}
+                          {financing.assetType === "product"
+                            ? (productMap.get(financing.productId ?? 0) ??
+                              `Produto #${financing.productId}`)
+                            : (vehicleMap.get(financing.vehicleId ?? 0) ??
+                              `Veículo #${financing.vehicleId}`)}
                         </p>
                       </div>
                     </div>

@@ -36,32 +36,28 @@ export default function Produtos() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(emptyForm);
-  const { data: items = [], isLoading } = trpc.vehicles.list.useQuery();
-  const createProduct = trpc.vehicles.create.useMutation();
-  const deleteProduct = trpc.vehicles.delete.useMutation();
+  const { data: products = [], isLoading } = trpc.products.list.useQuery();
+  const createProduct = trpc.products.create.useMutation();
+  const deleteProduct = trpc.products.delete.useMutation();
   const utils = trpc.useUtils();
-  const products = items.filter(
-    item =>
-      item.vehicleType === "PRODUTO" &&
-      `${item.model} ${item.brand ?? ""} ${item.plate ?? ""}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
+  const filteredProducts = products.filter(item =>
+    `${item.name} ${item.category ?? ""} ${item.sku ?? ""}`
+      .toLowerCase()
+      .includes(search.toLowerCase())
   );
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     try {
       await createProduct.mutateAsync({
-        vehicleType: "PRODUTO",
-        model: form.name.trim(),
-        brand: form.category.trim() || undefined,
-        plate: form.sku.trim().toUpperCase() || undefined,
+        name: form.name.trim(),
+        category: form.category.trim() || undefined,
+        sku: form.sku.trim().toUpperCase() || undefined,
         purchasePrice: form.cost || "0",
         salePrice: form.price,
-        price: form.price,
         description: form.notes.trim() || undefined,
       });
-      await utils.vehicles.list.invalidate();
+      await utils.products.list.invalidate();
       setForm(emptyForm);
       setOpen(false);
       toast.success("Produto disponível para financiamento.");
@@ -84,7 +80,7 @@ export default function Produtos() {
     try {
       await deleteProduct.mutateAsync({ id });
       await Promise.all([
-        utils.vehicles.list.invalidate(),
+        utils.products.list.invalidate(),
         utils.vehicleFinancings.list.invalidate(),
         utils.payments.list.invalidate(),
         utils.cashFlow.list.invalidate(),
@@ -230,17 +226,17 @@ export default function Produtos() {
           </p>
         ) : null}
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {products.map(product => (
+          {filteredProducts.map(product => (
             <Card key={product.id}>
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex gap-3">
                     <Package className="mt-1 h-5 w-5 text-primary" />
                     <div>
-                      <CardTitle className="text-lg">{product.model}</CardTitle>
+                      <CardTitle className="text-lg">{product.name}</CardTitle>
                       <p className="text-sm text-muted-foreground">
-                        {product.brand || "Sem categoria"}
-                        {product.plate ? ` · ${product.plate}` : ""}
+                        {product.category || "Sem categoria"}
+                        {product.sku ? ` · ${product.sku}` : ""}
                       </p>
                     </div>
                   </div>
@@ -248,8 +244,8 @@ export default function Produtos() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label={`Excluir ${product.model}`}
-                      onClick={() => remove(product.id, product.model)}
+                      aria-label={`Excluir ${product.name}`}
+                      onClick={() => remove(product.id, product.name)}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -259,9 +255,7 @@ export default function Produtos() {
               <CardContent className="grid grid-cols-2 gap-3">
                 <div>
                   <p className="text-xs text-muted-foreground">Venda</p>
-                  <p className="font-semibold">
-                    {money(product.salePrice ?? product.price)}
-                  </p>
+                  <p className="font-semibold">{money(product.salePrice)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Status</p>
@@ -271,7 +265,7 @@ export default function Produtos() {
             </Card>
           ))}
         </div>
-        {!isLoading && !products.length ? (
+        {!isLoading && !filteredProducts.length ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">
               Nenhum produto cadastrado.
