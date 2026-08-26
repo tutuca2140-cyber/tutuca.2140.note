@@ -20,6 +20,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
+import { loanContractName } from "@/lib/contract-name";
 import {
   ClipboardList,
   CreditCard,
@@ -84,6 +85,7 @@ export default function Pagamentos() {
   const { data: payments, isLoading: paymentsLoading } =
     trpc.payments.list.useQuery();
   const { data: loans } = trpc.loans.list.useQuery();
+  const { data: clients } = trpc.clients.list.useQuery();
   const { data: financings } = trpc.vehicleFinancings.list.useQuery();
   const { data: agents } = trpc.agents.list.useQuery({
     includeInactive: false,
@@ -287,8 +289,13 @@ export default function Pagamentos() {
                             ?.filter(loan => loan.status === "ativo")
                             .map(loan => (
                               <SelectItem key={loan.id} value={String(loan.id)}>
-                                Contrato #{loan.id} ·{" "}
-                                {formatCurrency(loan.amount)}
+                                {loanContractName(
+                                  clients?.find(
+                                    client => client.id === loan.clientId
+                                  )?.name,
+                                  loan.id
+                                )}{" "}
+                                · {formatCurrency(loan.amount)}
                               </SelectItem>
                             ))}
                         </SelectContent>

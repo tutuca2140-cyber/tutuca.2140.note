@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
+import { loanContractName } from "@/lib/contract-name";
 import {
   calculateLoanPlan,
   type InterestType,
@@ -496,10 +497,9 @@ export default function Emprestimos() {
                 <CardHeader className="flex-row items-start justify-between space-y-0">
                   <div>
                     <CardTitle className="text-lg">
-                      {clientMap.get(loan.clientId) ?? "Cliente não encontrado"}
+                      {loanContractName(clientMap.get(loan.clientId), loan.id)}
                     </CardTitle>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Contrato #{loan.id} ·{" "}
                       {loan.interestType === "compound"
                         ? "Juros compostos"
                         : "Juros simples"}{" "}
@@ -770,11 +770,13 @@ export default function Emprestimos() {
             </DialogHeader>
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                O empréstimo deixará de aparecer nos registros operacionais e
-                no dashboard. A observação ficará salva na auditoria.
+                O empréstimo deixará de aparecer nos registros operacionais e no
+                dashboard. A observação ficará salva na auditoria.
               </p>
               <div>
-                <Label htmlFor="loan-delete-reason">Observação obrigatória</Label>
+                <Label htmlFor="loan-delete-reason">
+                  Observação obrigatória
+                </Label>
                 <Textarea
                   id="loan-delete-reason"
                   value={deleteReason}
@@ -785,14 +787,20 @@ export default function Emprestimos() {
                 />
               </div>
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setDeletingId(null)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDeletingId(null)}
+                >
                   Cancelar
                 </Button>
                 <Button
                   type="button"
                   variant="destructive"
                   onClick={handleDelete}
-                  disabled={deleteLoan.isPending || deleteReason.trim().length < 3}
+                  disabled={
+                    deleteLoan.isPending || deleteReason.trim().length < 3
+                  }
                 >
                   {deleteLoan.isPending ? "Apagando..." : "Confirmar exclusão"}
                 </Button>
