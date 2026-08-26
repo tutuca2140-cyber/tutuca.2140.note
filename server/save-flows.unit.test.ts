@@ -6,6 +6,10 @@ const dbMock = vi.hoisted(() => ({
   getActiveDatabase: vi.fn(),
   getClientById: vi.fn(),
   getVehicleById: vi.fn(),
+  getVehicleFinancingById: vi.fn(),
+  getPaymentsByFinancing: vi.fn(),
+  paymentAlreadyRegistered: vi.fn(),
+  createPaymentBundle: vi.fn(),
   createAgent: vi.fn(),
   createVehicleFinancing: vi.fn(),
   createLoanBundle: vi.fn(),
@@ -53,6 +57,10 @@ describe("fluxos de gravação", () => {
     dbMock.getActiveDatabase.mockResolvedValue({ id: 7, name: "Principal" });
     dbMock.getClientById.mockResolvedValue({ id: 11, databaseId: 7, name: "Cliente" });
     dbMock.getVehicleById.mockResolvedValue({ id: 13, databaseId: 7, model: "Veículo" });
+    dbMock.getVehicleFinancingById.mockResolvedValue({ id: 19, databaseId: 7, clientId: 11, financedAmount: "10000.00", totalAmount: "12400.00", installmentAmount: "1033.33", interestRate: "2.00", installments: 12, startDate: new Date("2026-08-25T12:00:00.000Z"), endDate: new Date("2027-08-25T12:00:00.000Z"), status: "ativo" });
+    dbMock.getPaymentsByFinancing.mockResolvedValue([]);
+    dbMock.paymentAlreadyRegistered.mockResolvedValue(false);
+    dbMock.createPaymentBundle.mockResolvedValue({ id: 29 });
     dbMock.createAuditLog.mockResolvedValue(undefined);
   });
 
@@ -107,6 +115,42 @@ describe("fluxos de gravação", () => {
     expect(dbMock.createVehicleFinancing).not.toHaveBeenCalled();
   });
 
+  it("registra a cota escolhida e separa o excedente como amortização", async () => {
+    await appRouter.createCaller(context).payments.create({
+      vehicleFinancingId: 19,
+      installmentNumber: 3,
+      amount: "1200.00",
+      paymentDate: "2026-11-20T12:00:00.000Z",
+      dueDate: "2026-11-20T12:00:00.000Z",
+      status: "pago",
+    });
+    expect(dbMock.createPaymentBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vehicleFinancingId: 19,
+        installmentNumber: 3,
+        amount: "1200.00",
+        interestAmount: "200.00",
+        principalAmount: "1000.00",
+        remainingBalance: "11200.00",
+        dueDate: new Date("2026-11-25T12:00:00.000Z"),
+      }),
+      expect.objectContaining({ amount: "1200.00", category: "PAGAMENTO_FINANCIAMENTO" }),
+      undefined,
+    );
+  });
+
+  it("impede pagar duas vezes a mesma cota de financiamento", async () => {
+    dbMock.getPaymentsByFinancing.mockResolvedValue([{ installmentNumber: 3, status: "pago", amount: "1033.33" }]);
+    await expect(appRouter.createCaller(context).payments.create({
+      vehicleFinancingId: 19,
+      installmentNumber: 3,
+      amount: "1033.33",
+      paymentDate: "2026-11-20T12:00:00.000Z",
+      dueDate: "2026-11-20T12:00:00.000Z",
+      status: "pago",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("salva empréstimo e saída de caixa no mesmo bundle", async () => {
     dbMock.createLoanBundle.mockResolvedValue({ loanId: 23, result: { id: 23 } });
     const result = await appRouter.createCaller(context).loans.create({
@@ -122,9 +166,9 @@ describe("fluxos de gravação", () => {
         databaseId: 7,
         clientId: 11,
         amount: "1000.00",
-        accruedInterest: "500.00",
-        remainingBalance: "1500.00",
-        totalAmount: "1500.00",
+        accruedInterest: "50.00",
+        remainingBalance: "1050.00",
+        totalAmount: "1050.00",
         createdBy: 1,
       }),
       expect.objectContaining({ databaseId: 7, type: "SAIDA", clientId: 11, amount: "1000.00", createdBy: 1 }),

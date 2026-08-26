@@ -20,7 +20,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { ClipboardList, DollarSign, Edit, Plus } from "lucide-react";
+import { ClipboardList, DollarSign, Edit, Eye, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -47,11 +47,17 @@ export default function Financiamentos() {
   const [openCreate, setOpenCreate] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
   const [selected, setSelected] = useState<any>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
   const { data: financings = [], isLoading } =
     trpc.vehicleFinancings.list.useQuery();
   const { data: clients = [] } = trpc.clients.list.useQuery();
   const { data: vehicles = [] } = trpc.vehicles.list.useQuery();
+  const { data: details, isLoading: detailsLoading } =
+    trpc.vehicleFinancings.details.useQuery(
+      { id: detailId ?? 0 },
+      { enabled: detailId !== null }
+    );
   const createFinancing = trpc.vehicleFinancings.create.useMutation();
   const updateFinancing = trpc.vehicleFinancings.update.useMutation();
   const utils = trpc.useUtils();
@@ -154,6 +160,11 @@ export default function Financiamentos() {
     try {
       await updateFinancing.mutateAsync({
         id: selected.id,
+        vehiclePrice: form.vehiclePrice,
+        downPayment: form.downPayment,
+        interestRate: form.interestRate,
+        installments: Number(form.installments),
+        startDate: new Date(`${form.startDate}T12:00:00`).toISOString(),
         status: form.status,
         notes: form.notes.trim() || undefined,
       });
@@ -173,6 +184,11 @@ export default function Financiamentos() {
     setForm({
       ...emptyForm(),
       status: financing.status,
+      vehiclePrice: String(financing.vehiclePrice),
+      downPayment: String(financing.downPayment),
+      interestRate: String(financing.interestRate),
+      installments: String(financing.installments),
+      startDate: new Date(financing.startDate).toISOString().slice(0, 10),
       notes: financing.notes ?? "",
     });
     setOpenEdit(true);
@@ -422,6 +438,14 @@ export default function Financiamentos() {
                           <Edit className="h-4 w-4" />
                         </Button>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Ver histórico do financiamento"
+                        onClick={() => setDetailId(financing.id)}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
@@ -489,6 +513,76 @@ export default function Financiamentos() {
             <DialogTitle>Editar financiamento #{selected?.id}</DialogTitle>
           </DialogHeader>
           <form onSubmit={update} className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="edit-price">Preço do veículo</Label>
+                <Input
+                  id="edit-price"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={form.vehiclePrice}
+                  onChange={e =>
+                    setForm(c => ({ ...c, vehiclePrice: e.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-entry">Entrada</Label>
+                <Input
+                  id="edit-entry"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.downPayment}
+                  onChange={e =>
+                    setForm(c => ({ ...c, downPayment: e.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-rate">Juros ao mês (%)</Label>
+                <Input
+                  id="edit-rate"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.interestRate}
+                  onChange={e =>
+                    setForm(c => ({ ...c, interestRate: e.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-installments">Parcelas</Label>
+                <Input
+                  id="edit-installments"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={form.installments}
+                  onChange={e =>
+                    setForm(c => ({ ...c, installments: e.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-start">Data inicial</Label>
+                <Input
+                  id="edit-start"
+                  type="date"
+                  value={form.startDate}
+                  onChange={e =>
+                    setForm(c => ({ ...c, startDate: e.target.value }))
+                  }
+                  required
+                />
+              </div>
+            </div>
             <div>
               <Label>Status</Label>
               <Select
@@ -529,6 +623,78 @@ export default function Financiamentos() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={detailId !== null}
+        onOpenChange={value => {
+          if (!value) setDetailId(null);
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Histórico do financiamento #{detailId}</DialogTitle>
+          </DialogHeader>
+          {detailsLoading || !details ? (
+            <p className="py-8 text-center text-muted-foreground">
+              Carregando histórico...
+            </p>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg bg-muted/50 p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Total do contrato
+                  </p>
+                  <p className="font-semibold">
+                    {money(details.financing.totalAmount)}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-muted/50 p-3">
+                  <p className="text-xs text-muted-foreground">Total pago</p>
+                  <p className="font-semibold text-emerald-600">
+                    {money(details.totalPaid)}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-primary/10 p-3">
+                  <p className="text-xs text-muted-foreground">Saldo</p>
+                  <p className="font-semibold text-primary">
+                    {money(details.remainingBalance)}
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {details.payments.length ? (
+                  details.payments.map(payment => {
+                    const extra = Math.max(
+                      0,
+                      Number(payment.amount) -
+                        Number(details.financing.installmentAmount)
+                    );
+                    return (
+                      <div
+                        key={payment.id}
+                        className="grid gap-2 rounded-lg border p-3 text-sm sm:grid-cols-4"
+                      >
+                        <span>Cota {payment.installmentNumber}</span>
+                        <span>
+                          {new Date(payment.paymentDate).toLocaleDateString(
+                            "pt-BR"
+                          )}
+                        </span>
+                        <span>Pago: {money(payment.amount)}</span>
+                        <span>Amortização extra: {money(extra)}</span>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                    Nenhum pagamento registrado.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </DashboardLayout>

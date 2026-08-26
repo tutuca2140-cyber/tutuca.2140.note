@@ -502,15 +502,6 @@ function allocateBalancePayment(paymentAmount, accruedInterest, principalBalance
     remainingBalance: roundMoney(Math.max(0, principalBalance - principalAmount + accruedInterest - interestAmount))
   };
 }
-function allocatePayment(paymentAmount, totalAmount, totalInterest, interestPaid, balanceBefore) {
-  const amount = roundMoney(paymentAmount);
-  const remainingInterest = Math.max(0, roundMoney(totalInterest - interestPaid));
-  const ratio = totalAmount > 0 ? Math.min(1, amount / totalAmount) : 0;
-  const interestAmount = roundMoney(Math.min(remainingInterest, totalInterest === 0 ? 0 : totalInterest * ratio));
-  const principalAmount = roundMoney(Math.max(0, amount - interestAmount));
-  const remainingBalance = roundMoney(Math.max(0, balanceBefore - amount));
-  return { principalAmount, interestAmount, remainingBalance };
-}
 function addPeriods(startDate, periods, ratePeriod) {
   const result = new Date(startDate);
   if (ratePeriod === "day") result.setUTCDate(result.getUTCDate() + periods);
@@ -611,10 +602,12 @@ async function getAllUsers() {
   const db = await getDb();
   if (!db) return [];
   const rows = await db.select().from(users).orderBy(desc(users.createdAt));
-  return Promise.all(rows.map(async (user) => ({
-    ...user,
-    databaseIds: (await db.select({ databaseId: userDatabaseAccess.databaseId }).from(userDatabaseAccess).where(eq(userDatabaseAccess.userId, user.id))).map((access) => access.databaseId)
-  })));
+  return Promise.all(
+    rows.map(async (user) => ({
+      ...user,
+      databaseIds: (await db.select({ databaseId: userDatabaseAccess.databaseId }).from(userDatabaseAccess).where(eq(userDatabaseAccess.userId, user.id))).map((access) => access.databaseId)
+    }))
+  );
 }
 async function getUserById(id) {
   const db = await getDb();
@@ -635,12 +628,17 @@ async function updateUserRole(userId, role) {
 async function toggleUserActive(userId, isActive) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set(isActive ? { isActive: true, failedLoginAttempts: 0 } : { isActive: false }).where(eq(users.id, userId));
+  await db.update(users).set(
+    isActive ? { isActive: true, failedLoginAttempts: 0 } : { isActive: false }
+  ).where(eq(users.id, userId));
 }
 async function registerFailedLogin(userId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const [updated] = await db.update(users).set({ failedLoginAttempts: sql`${users.failedLoginAttempts} + 1`, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, userId)).returning({ failedLoginAttempts: users.failedLoginAttempts });
+  const [updated] = await db.update(users).set({
+    failedLoginAttempts: sql`${users.failedLoginAttempts} + 1`,
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(eq(users.id, userId)).returning({ failedLoginAttempts: users.failedLoginAttempts });
   const attempts = updated?.failedLoginAttempts ?? 0;
   if (attempts >= 2) {
     await db.transaction(async (tx) => {
@@ -717,26 +715,31 @@ async function getDatabasesForUser(userId, role) {
   if (!db) return [];
   if (role === "super_admin") return getAllDatabases();
   const assigned = await db.select({ database: databases }).from(userDatabaseAccess).innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id)).where(eq(userDatabaseAccess.userId, userId));
-  if (assigned.length || role !== "admin") return assigned.map((row) => row.database);
+  if (assigned.length || role !== "admin")
+    return assigned.map((row) => row.database);
   return getAllDatabases();
 }
 async function assignUserDatabases(userId, databaseIds) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   const uniqueIds = Array.from(new Set(databaseIds));
-  if (uniqueIds.length > 3) throw new Error("Cada usu\xE1rio pode ser vinculado a no m\xE1ximo tr\xEAs bancos.");
+  if (uniqueIds.length > 3)
+    throw new Error("Cada usu\xE1rio pode ser vinculado a no m\xE1ximo tr\xEAs bancos.");
   if (uniqueIds.length) {
     const existing = await db.select({ id: databases.id }).from(databases).where(inArray(databases.id, uniqueIds));
-    if (existing.length !== uniqueIds.length) throw new Error("Um ou mais bancos selecionados n\xE3o existem.");
+    if (existing.length !== uniqueIds.length)
+      throw new Error("Um ou mais bancos selecionados n\xE3o existem.");
   }
   await db.transaction(async (tx) => {
     await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.userId, userId));
     if (uniqueIds.length) {
-      await tx.insert(userDatabaseAccess).values(uniqueIds.map((databaseId, index) => ({
-        userId,
-        databaseId,
-        isActive: index === 0
-      })));
+      await tx.insert(userDatabaseAccess).values(
+        uniqueIds.map((databaseId, index) => ({
+          userId,
+          databaseId,
+          isActive: index === 0
+        }))
+      );
     }
   });
 }
@@ -751,7 +754,12 @@ async function getActiveDatabase() {
   if (!db) return void 0;
   const scope = databaseScope.getStore();
   if (scope && scope.role !== "super_admin") {
-    const assigned = await db.select({ database: databases }).from(userDatabaseAccess).innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id)).where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.isActive, true))).limit(1);
+    const assigned = await db.select({ database: databases }).from(userDatabaseAccess).innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id)).where(
+      and(
+        eq(userDatabaseAccess.userId, scope.userId),
+        eq(userDatabaseAccess.isActive, true)
+      )
+    ).limit(1);
     if (assigned[0]) return assigned[0].database;
     const fallback = await db.select({ database: databases }).from(userDatabaseAccess).innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id)).where(eq(userDatabaseAccess.userId, scope.userId)).limit(1);
     if (fallback[0]) return fallback[0].database;
@@ -765,15 +773,26 @@ async function setActiveDatabase(id) {
   if (!db) return;
   const scope = databaseScope.getStore();
   if (scope && scope.role !== "super_admin") {
-    const access = await db.select().from(userDatabaseAccess).where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.databaseId, id))).limit(1);
+    const access = await db.select().from(userDatabaseAccess).where(
+      and(
+        eq(userDatabaseAccess.userId, scope.userId),
+        eq(userDatabaseAccess.databaseId, id)
+      )
+    ).limit(1);
     if (access[0]) {
       await db.transaction(async (tx) => {
         await tx.update(userDatabaseAccess).set({ isActive: false }).where(eq(userDatabaseAccess.userId, scope.userId));
-        await tx.update(userDatabaseAccess).set({ isActive: true }).where(and(eq(userDatabaseAccess.userId, scope.userId), eq(userDatabaseAccess.databaseId, id)));
+        await tx.update(userDatabaseAccess).set({ isActive: true }).where(
+          and(
+            eq(userDatabaseAccess.userId, scope.userId),
+            eq(userDatabaseAccess.databaseId, id)
+          )
+        );
       });
       return;
     }
-    if (scope.role !== "admin") throw new Error("Voc\xEA n\xE3o tem acesso a este banco de dados.");
+    if (scope.role !== "admin")
+      throw new Error("Voc\xEA n\xE3o tem acesso a este banco de dados.");
   }
   await db.update(databases).set({ isActive: false });
   await db.update(databases).set({ isActive: true }).where(eq(databases.id, id));
@@ -835,30 +854,84 @@ async function getClientProfile(clientId, databaseId) {
   const client = clientResult[0];
   if (!client) return void 0;
   const [loanRows, vehicleRows, financingRows] = await Promise.all([
-    db.select().from(loans).where(and(eq(loans.clientId, clientId), eq(loans.databaseId, databaseId))).orderBy(desc(loans.createdAt)),
-    db.select().from(vehicles).where(and(eq(vehicles.clientId, clientId), eq(vehicles.databaseId, databaseId))).orderBy(desc(vehicles.createdAt)),
-    db.select().from(vehicleFinancings).where(and(eq(vehicleFinancings.clientId, clientId), eq(vehicleFinancings.databaseId, databaseId))).orderBy(desc(vehicleFinancings.createdAt))
+    db.select().from(loans).where(
+      and(eq(loans.clientId, clientId), eq(loans.databaseId, databaseId))
+    ).orderBy(desc(loans.createdAt)),
+    db.select().from(vehicles).where(
+      and(
+        eq(vehicles.clientId, clientId),
+        eq(vehicles.databaseId, databaseId)
+      )
+    ).orderBy(desc(vehicles.createdAt)),
+    db.select().from(vehicleFinancings).where(
+      and(
+        eq(vehicleFinancings.clientId, clientId),
+        eq(vehicleFinancings.databaseId, databaseId)
+      )
+    ).orderBy(desc(vehicleFinancings.createdAt))
   ]);
-  const loanPayments = (await Promise.all(loanRows.map((loan) => getPaymentsByLoan(loan.id, databaseId)))).flat();
-  const financingPayments = (await Promise.all(financingRows.map((financing) => getPaymentsByFinancing(financing.id, databaseId)))).flat();
-  const paymentsForClient = [...loanPayments, ...financingPayments].sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
-  const totalPaid = roundMoney(paymentsForClient.filter((payment) => payment.status === "pago").reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
-  const totalInterest = roundMoney(paymentsForClient.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0));
-  const totalPrincipal = roundMoney(paymentsForClient.reduce((sum, payment) => sum + Number(payment.principalAmount || 0), 0));
-  const totalCommissions = roundMoney(paymentsForClient.reduce((sum, payment) => sum + Number(payment.commissionAmount || 0), 0));
-  const remainingLoanBalance = loanRows.reduce((sum, loan) => sum + Number(loan.remainingBalance || loan.totalAmount || 0), 0);
+  const loanPayments = (await Promise.all(
+    loanRows.map((loan) => getPaymentsByLoan(loan.id, databaseId))
+  )).flat();
+  const financingPayments = (await Promise.all(
+    financingRows.map(
+      (financing) => getPaymentsByFinancing(financing.id, databaseId)
+    )
+  )).flat();
+  const paymentsForClient = [...loanPayments, ...financingPayments].sort(
+    (a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime()
+  );
+  const totalPaid = roundMoney(
+    paymentsForClient.filter((payment) => payment.status === "pago").reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+  );
+  const totalInterest = roundMoney(
+    paymentsForClient.reduce(
+      (sum, payment) => sum + Number(payment.interestAmount || 0),
+      0
+    )
+  );
+  const totalPrincipal = roundMoney(
+    paymentsForClient.reduce(
+      (sum, payment) => sum + Number(payment.principalAmount || 0),
+      0
+    )
+  );
+  const totalCommissions = roundMoney(
+    paymentsForClient.reduce(
+      (sum, payment) => sum + Number(payment.commissionAmount || 0),
+      0
+    )
+  );
+  const remainingLoanBalance = loanRows.reduce(
+    (sum, loan) => sum + Number(loan.remainingBalance || loan.totalAmount || 0),
+    0
+  );
   const remainingFinancingBalance = financingRows.reduce((sum, financing) => {
-    const paid = financingPayments.filter((payment) => payment.vehicleFinancingId === financing.id && payment.status === "pago").reduce((paidSum, payment) => paidSum + Number(payment.amount || 0), 0);
-    return sum + Math.max(0, Number(financing.totalAmount || financing.financedAmount || 0) - paid);
+    const paid = financingPayments.filter(
+      (payment) => payment.vehicleFinancingId === financing.id && payment.status === "pago"
+    ).reduce((paidSum, payment) => paidSum + Number(payment.amount || 0), 0);
+    return sum + Math.max(
+      0,
+      Number(financing.totalAmount || financing.financedAmount || 0) - paid
+    );
   }, 0);
-  const remainingBalance = roundMoney(remainingLoanBalance + remainingFinancingBalance);
+  const remainingBalance = roundMoney(
+    remainingLoanBalance + remainingFinancingBalance
+  );
   return {
     client,
     loans: loanRows,
     vehicles: vehicleRows,
     financings: financingRows,
     payments: paymentsForClient,
-    financialHistory: { totalPaid, totalInterest, totalPrincipal, totalCommissions, remainingBalance, paymentCount: paymentsForClient.length }
+    financialHistory: {
+      totalPaid,
+      totalInterest,
+      totalPrincipal,
+      totalCommissions,
+      remainingBalance,
+      paymentCount: paymentsForClient.length
+    }
   };
 }
 var INITIAL_LOAN_INTEREST_PERIOD = "CONTRATO_INICIAL";
@@ -868,7 +941,8 @@ async function createLoanBundle(data, cashEntry) {
   return db.transaction(async (tx) => {
     const [createdLoan] = await tx.insert(loans).values(data).returning({ id: loans.id });
     const loanId = createdLoan?.id;
-    if (!loanId) throw new Error("N\xE3o foi poss\xEDvel identificar o empr\xE9stimo criado.");
+    if (!loanId)
+      throw new Error("N\xE3o foi poss\xEDvel identificar o empr\xE9stimo criado.");
     if (Number(data.accruedInterest || 0) > 0) {
       await tx.insert(loanInterestHistory).values({
         databaseId: data.databaseId,
@@ -896,11 +970,25 @@ async function deleteLoanSafely(id, databaseId) {
   return db.transaction(async (tx) => {
     const loanRows = await tx.select().from(loans).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId))).limit(1);
     const loan = loanRows[0];
-    if (!loan) return { deleted: false, cancelled: false, relations: { payments: 0, interestHistory: 0, cashMovements: 0 } };
+    if (!loan)
+      return {
+        deleted: false,
+        cancelled: false,
+        relations: { payments: 0, interestHistory: 0, cashMovements: 0 }
+      };
     const [paymentRows, interestRows, cashRows] = await Promise.all([
-      tx.select({ count: sql`count(*)` }).from(payments).where(and(eq(payments.loanId, id), eq(payments.databaseId, databaseId))),
-      tx.select({ count: sql`count(*)` }).from(loanInterestHistory).where(and(eq(loanInterestHistory.loanId, id), eq(loanInterestHistory.databaseId, databaseId))),
-      tx.select({ count: sql`count(*)` }).from(cashFlow).where(and(eq(cashFlow.loanId, id), eq(cashFlow.databaseId, databaseId)))
+      tx.select({ count: sql`count(*)` }).from(payments).where(
+        and(eq(payments.loanId, id), eq(payments.databaseId, databaseId))
+      ),
+      tx.select({ count: sql`count(*)` }).from(loanInterestHistory).where(
+        and(
+          eq(loanInterestHistory.loanId, id),
+          eq(loanInterestHistory.databaseId, databaseId)
+        )
+      ),
+      tx.select({ count: sql`count(*)` }).from(cashFlow).where(
+        and(eq(cashFlow.loanId, id), eq(cashFlow.databaseId, databaseId))
+      )
     ]);
     const relations = {
       payments: Number(paymentRows[0]?.count || 0),
@@ -920,26 +1008,56 @@ async function recalculateLoanWithTransaction(tx, loanId, databaseId) {
   const loanRows = await tx.select().from(loans).where(and(eq(loans.id, loanId), eq(loans.databaseId, databaseId))).limit(1);
   const loan = loanRows[0];
   if (!loan) return void 0;
-  const paymentRows = await tx.select().from(payments).where(and(eq(payments.loanId, loanId), eq(payments.databaseId, databaseId))).orderBy(payments.paymentDate, payments.id);
-  const historyRows = await tx.select().from(loanInterestHistory).where(and(eq(loanInterestHistory.loanId, loanId), eq(loanInterestHistory.databaseId, databaseId))).orderBy(loanInterestHistory.createdAt, loanInterestHistory.id);
-  let interestPool = roundMoney(historyRows.reduce((sum, row) => sum + Number(row.interestGenerated || 0), 0));
+  const paymentRows = await tx.select().from(payments).where(
+    and(eq(payments.loanId, loanId), eq(payments.databaseId, databaseId))
+  ).orderBy(payments.paymentDate, payments.id);
+  const historyRows = await tx.select().from(loanInterestHistory).where(
+    and(
+      eq(loanInterestHistory.loanId, loanId),
+      eq(loanInterestHistory.databaseId, databaseId)
+    )
+  ).orderBy(loanInterestHistory.createdAt, loanInterestHistory.id);
+  let interestPool = roundMoney(
+    historyRows.reduce(
+      (sum, row) => sum + Number(row.interestGenerated || 0),
+      0
+    )
+  );
   let principalBalance = roundMoney(Number(loan.amount || 0));
   let totalPaid = 0;
   for (const payment of paymentRows) {
     if (payment.status !== "pago") {
-      await tx.update(payments).set({ principalAmount: "0.00", interestAmount: "0.00", remainingBalance: roundMoney(principalBalance + interestPool).toFixed(2) }).where(eq(payments.id, payment.id));
+      await tx.update(payments).set({
+        principalAmount: "0.00",
+        interestAmount: "0.00",
+        remainingBalance: roundMoney(principalBalance + interestPool).toFixed(
+          2
+        )
+      }).where(eq(payments.id, payment.id));
       continue;
     }
-    const allocation = allocateBalancePayment(Number(payment.amount || 0), interestPool, principalBalance);
-    interestPool = roundMoney(Math.max(0, interestPool - allocation.interestAmount));
-    principalBalance = roundMoney(Math.max(0, principalBalance - allocation.principalAmount));
+    const allocation = allocateBalancePayment(
+      Number(payment.amount || 0),
+      interestPool,
+      principalBalance
+    );
+    interestPool = roundMoney(
+      Math.max(0, interestPool - allocation.interestAmount)
+    );
+    principalBalance = roundMoney(
+      Math.max(0, principalBalance - allocation.principalAmount)
+    );
     totalPaid = roundMoney(totalPaid + Number(payment.amount || 0));
     await tx.update(payments).set({
       principalAmount: allocation.principalAmount.toFixed(2),
       interestAmount: allocation.interestAmount.toFixed(2),
       remainingBalance: allocation.remainingBalance.toFixed(2),
-      commissionAmount: roundMoney(Number(payment.amount || 0) * Number(payment.commissionPercentage || 0) / 100).toFixed(2),
-      netAmount: roundMoney(Number(payment.amount || 0) - Number(payment.amount || 0) * Number(payment.commissionPercentage || 0) / 100).toFixed(2)
+      commissionAmount: roundMoney(
+        Number(payment.amount || 0) * Number(payment.commissionPercentage || 0) / 100
+      ).toFixed(2),
+      netAmount: roundMoney(
+        Number(payment.amount || 0) - Number(payment.amount || 0) * Number(payment.commissionPercentage || 0) / 100
+      ).toFixed(2)
     }).where(eq(payments.id, payment.id));
   }
   const nextStatus = loan.status === "cancelado" ? "cancelado" : principalBalance + interestPool <= 0 ? "pago" : new Date(loan.endDate) < /* @__PURE__ */ new Date() ? "atrasado" : "ativo";
@@ -950,7 +1068,13 @@ async function recalculateLoanWithTransaction(tx, loanId, databaseId) {
     totalPaid: totalPaid.toFixed(2),
     status: nextStatus
   }).where(and(eq(loans.id, loanId), eq(loans.databaseId, databaseId)));
-  return { principalBalance, accruedInterest: interestPool, remainingBalance: roundMoney(principalBalance + interestPool), totalPaid, status: nextStatus };
+  return {
+    principalBalance,
+    accruedInterest: interestPool,
+    remainingBalance: roundMoney(principalBalance + interestPool),
+    totalPaid,
+    status: nextStatus
+  };
 }
 async function updatePaymentBundle(id, databaseId, data) {
   const db = await getDb();
@@ -961,7 +1085,9 @@ async function updatePaymentBundle(id, databaseId, data) {
     if (!current) return void 0;
     const merged = { ...current, ...data };
     const amount = Number(merged.amount || 0);
-    const commissionAmount = roundMoney(amount * Number(merged.commissionPercentage || 0) / 100);
+    const commissionAmount = roundMoney(
+      amount * Number(merged.commissionPercentage || 0) / 100
+    );
     await tx.update(payments).set({
       ...data,
       amount: amount.toFixed(2),
@@ -972,7 +1098,9 @@ async function updatePaymentBundle(id, databaseId, data) {
     const updatedPaymentRows = await tx.select().from(payments).where(eq(payments.id, id)).limit(1);
     const updatedPayment = updatedPaymentRows[0];
     const paymentCategory = current.loanId ? Number(updatedPayment?.interestAmount || 0) > 0 && Number(updatedPayment?.principalAmount || 0) === 0 ? "JUROS_EMPRESTIMO" : loanState?.status === "pago" ? "QUITACAO_EMPRESTIMO" : "PAGAMENTO_EMPRESTIMO" : "PAGAMENTO_FINANCIAMENTO";
-    const paymentCashRows = await tx.select().from(cashFlow).where(and(eq(cashFlow.paymentId, id), eq(cashFlow.databaseId, databaseId))).limit(1);
+    const paymentCashRows = await tx.select().from(cashFlow).where(
+      and(eq(cashFlow.paymentId, id), eq(cashFlow.databaseId, databaseId))
+    ).limit(1);
     if (merged.status === "pago") {
       const cashData = {
         databaseId,
@@ -989,7 +1117,8 @@ async function updatePaymentBundle(id, databaseId, data) {
         notes: merged.notes,
         createdBy: current.createdBy
       };
-      if (paymentCashRows[0]) await tx.update(cashFlow).set(cashData).where(eq(cashFlow.id, paymentCashRows[0].id));
+      if (paymentCashRows[0])
+        await tx.update(cashFlow).set(cashData).where(eq(cashFlow.id, paymentCashRows[0].id));
       else await tx.insert(cashFlow).values(cashData);
     } else if (paymentCashRows[0]) {
       await tx.delete(cashFlow).where(eq(cashFlow.id, paymentCashRows[0].id));
@@ -1004,7 +1133,9 @@ async function deletePaymentBundle(id, databaseId) {
     const rows = await tx.select().from(payments).where(and(eq(payments.id, id), eq(payments.databaseId, databaseId))).limit(1);
     const payment = rows[0];
     if (!payment) return void 0;
-    await tx.delete(cashFlow).where(and(eq(cashFlow.paymentId, id), eq(cashFlow.databaseId, databaseId)));
+    await tx.delete(cashFlow).where(
+      and(eq(cashFlow.paymentId, id), eq(cashFlow.databaseId, databaseId))
+    );
     await tx.delete(payments).where(and(eq(payments.id, id), eq(payments.databaseId, databaseId)));
     const loanState = payment.loanId ? await recalculateLoanWithTransaction(tx, payment.loanId, databaseId) : void 0;
     return { payment, loanState };
@@ -1032,11 +1163,16 @@ async function updateLoanInDatabase(id, databaseId, data, initialInterest) {
   return db.transaction(async (tx) => {
     await tx.update(loans).set(data).where(and(eq(loans.id, id), eq(loans.databaseId, databaseId)));
     if (initialInterest !== void 0) {
-      const initialRows = await tx.select().from(loanInterestHistory).where(and(
-        eq(loanInterestHistory.loanId, id),
-        eq(loanInterestHistory.databaseId, databaseId),
-        eq(loanInterestHistory.periodReference, INITIAL_LOAN_INTEREST_PERIOD)
-      )).limit(1);
+      const initialRows = await tx.select().from(loanInterestHistory).where(
+        and(
+          eq(loanInterestHistory.loanId, id),
+          eq(loanInterestHistory.databaseId, databaseId),
+          eq(
+            loanInterestHistory.periodReference,
+            INITIAL_LOAN_INTEREST_PERIOD
+          )
+        )
+      ).limit(1);
       const principal = String(data.amount || "0.00");
       if (initialInterest > 0) {
         const historyValues = {
@@ -1068,11 +1204,13 @@ async function updateLoanInDatabase(id, databaseId, data, initialInterest) {
     if (data.clientId !== void 0) cashUpdate.clientId = data.clientId;
     if (data.description !== void 0) cashUpdate.notes = data.description;
     if (Object.keys(cashUpdate).length > 0) {
-      await tx.update(cashFlow).set(cashUpdate).where(and(
-        eq(cashFlow.loanId, id),
-        eq(cashFlow.databaseId, databaseId),
-        eq(cashFlow.category, "LIBERACAO_EMPRESTIMO")
-      ));
+      await tx.update(cashFlow).set(cashUpdate).where(
+        and(
+          eq(cashFlow.loanId, id),
+          eq(cashFlow.databaseId, databaseId),
+          eq(cashFlow.category, "LIBERACAO_EMPRESTIMO")
+        )
+      );
     }
   });
 }
@@ -1084,16 +1222,23 @@ async function getLoansByClient(clientId, databaseId) {
 async function getLoanInterestHistory(loanId, databaseId) {
   const db = await getDb();
   if (!db) return [];
-  return await db.select().from(loanInterestHistory).where(and(eq(loanInterestHistory.loanId, loanId), eq(loanInterestHistory.databaseId, databaseId))).orderBy(desc(loanInterestHistory.createdAt));
+  return await db.select().from(loanInterestHistory).where(
+    and(
+      eq(loanInterestHistory.loanId, loanId),
+      eq(loanInterestHistory.databaseId, databaseId)
+    )
+  ).orderBy(desc(loanInterestHistory.createdAt));
 }
 async function getLoanInterestPeriod(loanId, databaseId, periodReference) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(loanInterestHistory).where(and(
-    eq(loanInterestHistory.loanId, loanId),
-    eq(loanInterestHistory.databaseId, databaseId),
-    eq(loanInterestHistory.periodReference, periodReference)
-  )).limit(1);
+  const rows = await db.select().from(loanInterestHistory).where(
+    and(
+      eq(loanInterestHistory.loanId, loanId),
+      eq(loanInterestHistory.databaseId, databaseId),
+      eq(loanInterestHistory.periodReference, periodReference)
+    )
+  ).limit(1);
   return rows[0];
 }
 async function createLoanInterestHistory(data) {
@@ -1132,10 +1277,24 @@ async function deactivateAgent(id, databaseId) {
 }
 async function getAgentPaymentHistory(agentId, databaseId, startDate, endDate) {
   const db = await getDb();
-  if (!db) return { payments: [], totals: { totalPayments: 0, totalPaymentAmount: 0, totalCommission: 0, averageCommission: 0 } };
-  const conditions = [eq(payments.agentId, agentId), eq(payments.databaseId, databaseId)];
-  if (startDate) conditions.push(sql`${payments.paymentDate} >= ${startDate}`);
-  if (endDate) conditions.push(sql`${payments.paymentDate} <= ${endDate}`);
+  if (!db)
+    return {
+      payments: [],
+      totals: {
+        totalPayments: 0,
+        totalPaymentAmount: 0,
+        totalCommission: 0,
+        averageCommission: 0
+      }
+    };
+  const conditions = [
+    eq(payments.agentId, agentId),
+    eq(payments.databaseId, databaseId)
+  ];
+  if (startDate)
+    conditions.push(sql`${payments.paymentDate} >= ${startDate}`);
+  if (endDate)
+    conditions.push(sql`${payments.paymentDate} <= ${endDate}`);
   const rows = await db.select({
     id: payments.id,
     paymentDate: payments.paymentDate,
@@ -1146,8 +1305,14 @@ async function getAgentPaymentHistory(agentId, databaseId, startDate, endDate) {
     netAmount: payments.netAmount,
     clientName: clients.name
   }).from(payments).leftJoin(loans, eq(payments.loanId, loans.id)).leftJoin(clients, eq(loans.clientId, clients.id)).where(and(...conditions)).orderBy(desc(payments.paymentDate));
-  const totalPaymentAmount = rows.reduce((sum, row) => sum + Number(row.paymentAmount || 0), 0);
-  const totalCommission = rows.reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0);
+  const totalPaymentAmount = rows.reduce(
+    (sum, row) => sum + Number(row.paymentAmount || 0),
+    0
+  );
+  const totalCommission = rows.reduce(
+    (sum, row) => sum + Number(row.commissionAmount || 0),
+    0
+  );
   return {
     payments: rows,
     totals: {
@@ -1160,12 +1325,26 @@ async function getAgentPaymentHistory(agentId, databaseId, startDate, endDate) {
 }
 async function getAgentPerformance(databaseId, startDate, endDate) {
   const db = await getDb();
-  if (!db) return { kpis: { totalAgents: 0, activeAgents: 0, totalPayments: 0, totalPaymentVolume: 0, totalCommissions: 0, bestAgent: null }, ranking: [], evolution: [] };
+  if (!db)
+    return {
+      kpis: {
+        totalAgents: 0,
+        activeAgents: 0,
+        totalPayments: 0,
+        totalPaymentVolume: 0,
+        totalCommissions: 0,
+        bestAgent: null
+      },
+      ranking: [],
+      evolution: []
+    };
   const agentConditions = [eq(agents.databaseId, databaseId)];
   const allAgents = await db.select().from(agents).where(and(...agentConditions));
   const paymentConditions = [eq(payments.databaseId, databaseId)];
-  if (startDate) paymentConditions.push(sql`${payments.paymentDate} >= ${startDate}`);
-  if (endDate) paymentConditions.push(sql`${payments.paymentDate} <= ${endDate}`);
+  if (startDate)
+    paymentConditions.push(sql`${payments.paymentDate} >= ${startDate}`);
+  if (endDate)
+    paymentConditions.push(sql`${payments.paymentDate} <= ${endDate}`);
   const rows = await db.select({
     agentId: payments.agentId,
     agentName: agents.name,
@@ -1177,20 +1356,38 @@ async function getAgentPerformance(databaseId, startDate, endDate) {
   const evolutionMap = /* @__PURE__ */ new Map();
   for (const row of rows) {
     if (!row.agentId) continue;
-    const current = rankingMap.get(row.agentId) ?? { agentId: row.agentId, agentName: row.agentName, paymentCount: 0, paymentVolume: 0, commissionAmount: 0 };
+    const current = rankingMap.get(row.agentId) ?? {
+      agentId: row.agentId,
+      agentName: row.agentName,
+      paymentCount: 0,
+      paymentVolume: 0,
+      commissionAmount: 0
+    };
     current.paymentCount += 1;
     current.paymentVolume += Number(row.paymentAmount || 0);
     current.commissionAmount += Number(row.commissionAmount || 0);
     rankingMap.set(row.agentId, current);
     const period = new Date(row.paymentDate).toISOString().slice(0, 10);
-    const evolution = evolutionMap.get(period) ?? { period, paymentVolume: 0, commissionAmount: 0 };
+    const evolution = evolutionMap.get(period) ?? {
+      period,
+      paymentVolume: 0,
+      commissionAmount: 0
+    };
     evolution.paymentVolume += Number(row.paymentAmount || 0);
     evolution.commissionAmount += Number(row.commissionAmount || 0);
     evolutionMap.set(period, evolution);
   }
-  const ranking = Array.from(rankingMap.values()).sort((a, b) => b.paymentVolume - a.paymentVolume || b.commissionAmount - a.commissionAmount || b.paymentCount - a.paymentCount);
-  const totalPaymentVolume = rows.reduce((sum, row) => sum + Number(row.paymentAmount || 0), 0);
-  const totalCommissions = rows.reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0);
+  const ranking = Array.from(rankingMap.values()).sort(
+    (a, b) => b.paymentVolume - a.paymentVolume || b.commissionAmount - a.commissionAmount || b.paymentCount - a.paymentCount
+  );
+  const totalPaymentVolume = rows.reduce(
+    (sum, row) => sum + Number(row.paymentAmount || 0),
+    0
+  );
+  const totalCommissions = rows.reduce(
+    (sum, row) => sum + Number(row.commissionAmount || 0),
+    0
+  );
   return {
     kpis: {
       totalAgents: allAgents.length,
@@ -1201,7 +1398,9 @@ async function getAgentPerformance(databaseId, startDate, endDate) {
       bestAgent: ranking[0] ?? null
     },
     ranking,
-    evolution: Array.from(evolutionMap.values()).sort((a, b) => a.period.localeCompare(b.period))
+    evolution: Array.from(evolutionMap.values()).sort(
+      (a, b) => a.period.localeCompare(b.period)
+    )
   };
 }
 async function paymentAlreadyRegistered(data) {
@@ -1213,11 +1412,13 @@ async function paymentAlreadyRegistered(data) {
     agentId: payments.agentId,
     amount: payments.amount,
     paymentDate: payments.paymentDate
-  }).from(payments).where(and(
-    eq(payments.databaseId, data.databaseId),
-    contractCondition,
-    eq(payments.installmentNumber, data.installmentNumber)
-  ));
+  }).from(payments).where(
+    and(
+      eq(payments.databaseId, data.databaseId),
+      contractCondition,
+      eq(payments.installmentNumber, data.installmentNumber)
+    )
+  );
   const paymentDay = data.paymentDate.toISOString().slice(0, 10);
   return rows.some((row) => {
     const rowDay = new Date(row.paymentDate).toISOString().slice(0, 10);
@@ -1231,10 +1432,19 @@ async function createPaymentBundle(data, cashEntry, loanUpdate) {
     const [createdPayment] = await tx.insert(payments).values(data).returning({ id: payments.id });
     const paymentId = createdPayment?.id;
     if (data.status === "pago") {
-      await tx.insert(cashFlow).values({ ...cashEntry, paymentId, sourceKey: paymentId ? `PAYMENT:${paymentId}` : void 0 });
+      await tx.insert(cashFlow).values({
+        ...cashEntry,
+        paymentId,
+        sourceKey: paymentId ? `PAYMENT:${paymentId}` : void 0
+      });
     }
     if (loanUpdate) {
-      await tx.update(loans).set(loanUpdate.values).where(and(eq(loans.id, loanUpdate.id), eq(loans.databaseId, loanUpdate.databaseId)));
+      await tx.update(loans).set(loanUpdate.values).where(
+        and(
+          eq(loans.id, loanUpdate.id),
+          eq(loans.databaseId, loanUpdate.databaseId)
+        )
+      );
     }
     return createdPayment;
   });
@@ -1273,8 +1483,10 @@ async function deleteManualCashFlowEntry(id, databaseId) {
   return db.transaction(async (tx) => {
     const rows = await tx.select().from(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId))).limit(1);
     const entry = rows[0];
-    if (!entry) return { deleted: false, reason: "not_found" };
-    if (!isManualCashFlowEntry(entry)) return { deleted: false, reason: "automatic", entry };
+    if (!entry)
+      return { deleted: false, reason: "not_found" };
+    if (!isManualCashFlowEntry(entry))
+      return { deleted: false, reason: "automatic", entry };
     await tx.delete(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId)));
     return { deleted: true, entry };
   });
@@ -1282,17 +1494,26 @@ async function deleteManualCashFlowEntry(id, databaseId) {
 async function getCashFlowByLoan(loanId, databaseId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(cashFlow).where(and(eq(cashFlow.loanId, loanId), eq(cashFlow.databaseId, databaseId))).orderBy(desc(cashFlow.movementDate));
+  return db.select().from(cashFlow).where(
+    and(eq(cashFlow.loanId, loanId), eq(cashFlow.databaseId, databaseId))
+  ).orderBy(desc(cashFlow.movementDate));
 }
 async function getPaymentsByLoan(loanId, databaseId) {
   const db = await getDb();
   if (!db) return [];
-  return await db.select().from(payments).where(and(eq(payments.loanId, loanId), eq(payments.databaseId, databaseId))).orderBy(desc(payments.paymentDate));
+  return await db.select().from(payments).where(
+    and(eq(payments.loanId, loanId), eq(payments.databaseId, databaseId))
+  ).orderBy(desc(payments.paymentDate));
 }
 async function getPaymentsByFinancing(vehicleFinancingId, databaseId) {
   const db = await getDb();
   if (!db) return [];
-  return await db.select().from(payments).where(and(eq(payments.vehicleFinancingId, vehicleFinancingId), eq(payments.databaseId, databaseId))).orderBy(desc(payments.paymentDate));
+  return await db.select().from(payments).where(
+    and(
+      eq(payments.vehicleFinancingId, vehicleFinancingId),
+      eq(payments.databaseId, databaseId)
+    )
+  ).orderBy(desc(payments.paymentDate));
 }
 async function getPaymentById(id) {
   const db = await getDb();
@@ -1306,7 +1527,12 @@ async function createVehicleBundle(data, cashEntry) {
   return db.transaction(async (tx) => {
     const [createdVehicle] = await tx.insert(vehicles).values(data).returning({ id: vehicles.id });
     const vehicleId = createdVehicle?.id;
-    if (cashEntry && vehicleId && Number(cashEntry.amount) > 0) await tx.insert(cashFlow).values({ ...cashEntry, vehicleId, sourceKey: `VEHICLE_PURCHASE:${vehicleId}` });
+    if (cashEntry && vehicleId && Number(cashEntry.amount) > 0)
+      await tx.insert(cashFlow).values({
+        ...cashEntry,
+        vehicleId,
+        sourceKey: `VEHICLE_PURCHASE:${vehicleId}`
+      });
     return { vehicleId, result: createdVehicle };
   });
 }
@@ -1330,19 +1556,39 @@ async function deleteVehicleInDatabase(id, databaseId) {
   const db = await getDb();
   if (!db) return;
   await db.transaction(async (tx) => {
-    const financingRows = await tx.select({ id: vehicleFinancings.id }).from(vehicleFinancings).where(and(eq(vehicleFinancings.vehicleId, id), eq(vehicleFinancings.databaseId, databaseId)));
-    const saleRows = await tx.select({ id: vehicleSales.id }).from(vehicleSales).where(and(eq(vehicleSales.vehicleId, id), eq(vehicleSales.databaseId, databaseId)));
+    const financingRows = await tx.select({ id: vehicleFinancings.id }).from(vehicleFinancings).where(
+      and(
+        eq(vehicleFinancings.vehicleId, id),
+        eq(vehicleFinancings.databaseId, databaseId)
+      )
+    );
+    const saleRows = await tx.select({ id: vehicleSales.id }).from(vehicleSales).where(
+      and(
+        eq(vehicleSales.vehicleId, id),
+        eq(vehicleSales.databaseId, databaseId)
+      )
+    );
     const financingIds = financingRows.map((row) => row.id);
     const saleIds = saleRows.map((row) => row.id);
-    const paymentRows = financingIds.length ? await tx.select({ id: payments.id }).from(payments).where(and(eq(payments.databaseId, databaseId), inArray(payments.vehicleFinancingId, financingIds))) : [];
+    const paymentRows = financingIds.length ? await tx.select({ id: payments.id }).from(payments).where(
+      and(
+        eq(payments.databaseId, databaseId),
+        inArray(payments.vehicleFinancingId, financingIds)
+      )
+    ) : [];
     const paymentIds = paymentRows.map((row) => row.id);
     const cashConditions = [eq(cashFlow.vehicleId, id)];
-    if (saleIds.length) cashConditions.push(inArray(cashFlow.vehicleSaleId, saleIds));
-    if (paymentIds.length) cashConditions.push(inArray(cashFlow.paymentId, paymentIds));
+    if (saleIds.length)
+      cashConditions.push(inArray(cashFlow.vehicleSaleId, saleIds));
+    if (paymentIds.length)
+      cashConditions.push(inArray(cashFlow.paymentId, paymentIds));
     await tx.delete(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), or(...cashConditions)));
-    if (paymentIds.length) await tx.delete(payments).where(inArray(payments.id, paymentIds));
-    if (financingIds.length) await tx.delete(vehicleFinancings).where(inArray(vehicleFinancings.id, financingIds));
-    if (saleIds.length) await tx.delete(vehicleSales).where(inArray(vehicleSales.id, saleIds));
+    if (paymentIds.length)
+      await tx.delete(payments).where(inArray(payments.id, paymentIds));
+    if (financingIds.length)
+      await tx.delete(vehicleFinancings).where(inArray(vehicleFinancings.id, financingIds));
+    if (saleIds.length)
+      await tx.delete(vehicleSales).where(inArray(vehicleSales.id, saleIds));
     await tx.delete(vehicles).where(and(eq(vehicles.id, id), eq(vehicles.databaseId, databaseId)));
   });
 }
@@ -1355,12 +1601,27 @@ async function createVehicleSaleBundle(data, vehicleId, databaseId, cashEntry) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.transaction(async (tx) => {
-    const vehicle = (await tx.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.databaseId, databaseId))).limit(1))[0];
-    if (!vehicle || vehicle.status !== "disponivel") throw new Error("Ve\xEDculo n\xE3o dispon\xEDvel no estoque ativo.");
+    const vehicle = (await tx.select().from(vehicles).where(
+      and(eq(vehicles.id, vehicleId), eq(vehicles.databaseId, databaseId))
+    ).limit(1))[0];
+    if (!vehicle || vehicle.status !== "disponivel")
+      throw new Error("Ve\xEDculo n\xE3o dispon\xEDvel no estoque ativo.");
     const [createdSale] = await tx.insert(vehicleSales).values(data).returning({ id: vehicleSales.id });
     const saleId = createdSale?.id;
-    await tx.update(vehicles).set({ status: "vendido", clientId: data.clientId ?? null, salePrice: data.saleAmount }).where(and(eq(vehicles.id, vehicleId), eq(vehicles.databaseId, databaseId)));
-    if (cashEntry && Number(data.receivedAmount) > 0) await tx.insert(cashFlow).values({ ...cashEntry, vehicleId, vehicleSaleId: saleId, sourceKey: saleId ? `VEHICLE_SALE_INITIAL:${saleId}` : void 0 });
+    await tx.update(vehicles).set({
+      status: "vendido",
+      clientId: data.clientId ?? null,
+      salePrice: data.saleAmount
+    }).where(
+      and(eq(vehicles.id, vehicleId), eq(vehicles.databaseId, databaseId))
+    );
+    if (cashEntry && Number(data.receivedAmount) > 0)
+      await tx.insert(cashFlow).values({
+        ...cashEntry,
+        vehicleId,
+        vehicleSaleId: saleId,
+        sourceKey: saleId ? `VEHICLE_SALE_INITIAL:${saleId}` : void 0
+      });
     return { saleId, vehicle };
   });
 }
@@ -1368,14 +1629,41 @@ async function receiveVehicleSaleBundle(saleId, databaseId, amount, movementDate
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.transaction(async (tx) => {
-    const sale = (await tx.select().from(vehicleSales).where(and(eq(vehicleSales.id, saleId), eq(vehicleSales.databaseId, databaseId))).limit(1))[0];
-    if (!sale) throw new Error("Venda de ve\xEDculo n\xE3o encontrada no banco ativo.");
+    const sale = (await tx.select().from(vehicleSales).where(
+      and(
+        eq(vehicleSales.id, saleId),
+        eq(vehicleSales.databaseId, databaseId)
+      )
+    ).limit(1))[0];
+    if (!sale)
+      throw new Error("Venda de ve\xEDculo n\xE3o encontrada no banco ativo.");
     const remaining = Number(sale.receivableBalance);
     if (remaining <= 0) throw new Error("Esta venda j\xE1 est\xE1 totalmente paga.");
     const received = Math.min(Number(amount), remaining);
     const nextBalance = roundMoney(remaining - received);
-    await tx.update(vehicleSales).set({ receivedAmount: roundMoney(Number(sale.receivedAmount) + received).toFixed(2), receivableBalance: nextBalance.toFixed(2) }).where(and(eq(vehicleSales.id, saleId), eq(vehicleSales.databaseId, databaseId)));
-    await tx.insert(cashFlow).values({ databaseId, type: "ENTRADA", category: "RECEBIMENTO_VENDA_VEICULO", description: "Recebimento de venda de ve\xEDculo", amount: received.toFixed(2), movementDate, vehicleId: sale.vehicleId, vehicleSaleId: sale.id, clientId: sale.clientId, createdBy });
+    await tx.update(vehicleSales).set({
+      receivedAmount: roundMoney(
+        Number(sale.receivedAmount) + received
+      ).toFixed(2),
+      receivableBalance: nextBalance.toFixed(2)
+    }).where(
+      and(
+        eq(vehicleSales.id, saleId),
+        eq(vehicleSales.databaseId, databaseId)
+      )
+    );
+    await tx.insert(cashFlow).values({
+      databaseId,
+      type: "ENTRADA",
+      category: "RECEBIMENTO_VENDA_VEICULO",
+      description: "Recebimento de venda de ve\xEDculo",
+      amount: received.toFixed(2),
+      movementDate,
+      vehicleId: sale.vehicleId,
+      vehicleSaleId: sale.id,
+      clientId: sale.clientId,
+      createdBy
+    });
     return { received, nextBalance };
   });
 }
@@ -1383,7 +1671,8 @@ async function createVehicleFinancing(data) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   const [created] = await db.insert(vehicleFinancings).values(data).returning();
-  if (!created) throw new Error("N\xE3o foi poss\xEDvel confirmar o financiamento criado.");
+  if (!created)
+    throw new Error("N\xE3o foi poss\xEDvel confirmar o financiamento criado.");
   return created;
 }
 async function getVehicleFinancingsByDatabase(databaseId) {
@@ -1430,39 +1719,164 @@ async function getDashboardStats(databaseId) {
   const db = await getDb();
   if (!db) return null;
   try {
-    const [activeLoansResult, paidLoansResult, pendingPaymentsResult, cashInResult, cashOutResult, clientsResult, loanRows, loanPaymentRows, vehicleRows, vehicleSaleRows, vehiclePurchaseRows, financingRows, allPaymentRows, clientRows] = await Promise.all([
-      db.select({ count: sql`count(*)`, total: sql`sum(${loans.totalAmount})` }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, "ativo"))),
-      db.select({ count: sql`count(*)`, total: sql`sum(${loans.totalAmount})` }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, "pago"))),
-      db.select({ count: sql`count(*)`, total: sql`sum(${payments.amount})` }).from(payments).where(and(eq(payments.databaseId, databaseId), eq(payments.status, "pendente"))),
-      db.select({ total: sql`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "ENTRADA"))),
-      db.select({ total: sql`sum(${cashFlow.amount})` }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "SAIDA"))),
+    const [
+      activeLoansResult,
+      paidLoansResult,
+      pendingPaymentsResult,
+      cashInResult,
+      cashOutResult,
+      clientsResult,
+      loanRows,
+      loanPaymentRows,
+      vehicleRows,
+      vehicleSaleRows,
+      vehiclePurchaseRows,
+      financingRows,
+      allPaymentRows,
+      clientRows
+    ] = await Promise.all([
+      db.select({
+        count: sql`count(*)`,
+        total: sql`sum(${loans.totalAmount})`
+      }).from(loans).where(
+        and(eq(loans.databaseId, databaseId), eq(loans.status, "ativo"))
+      ),
+      db.select({
+        count: sql`count(*)`,
+        total: sql`sum(${loans.totalAmount})`
+      }).from(loans).where(and(eq(loans.databaseId, databaseId), eq(loans.status, "pago"))),
+      db.select({
+        count: sql`count(*)`,
+        total: sql`sum(${payments.amount})`
+      }).from(payments).where(
+        and(
+          eq(payments.databaseId, databaseId),
+          eq(payments.status, "pendente")
+        )
+      ),
+      db.select({ total: sql`sum(${cashFlow.amount})` }).from(cashFlow).where(
+        and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "ENTRADA"))
+      ),
+      db.select({ total: sql`sum(${cashFlow.amount})` }).from(cashFlow).where(
+        and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "SAIDA"))
+      ),
       db.select({ count: sql`count(*)` }).from(clients).where(eq(clients.databaseId, databaseId)),
-      db.select({ id: loans.id, clientId: loans.clientId, amount: loans.amount, remainingBalance: loans.remainingBalance, accruedInterest: loans.accruedInterest, status: loans.status, startDate: loans.startDate, endDate: loans.endDate, installments: loans.installments, installmentAmount: loans.installmentAmount, ratePeriod: loans.ratePeriod, description: loans.description }).from(loans).where(and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)),
-      db.select({ amount: payments.amount, interestAmount: payments.interestAmount, principalAmount: payments.principalAmount, status: payments.status, loanId: payments.loanId }).from(payments).where(and(eq(payments.databaseId, databaseId), sql`${payments.loanId} is not null`)),
-      db.select({ id: vehicles.id, model: vehicles.model, brand: vehicles.brand, status: vehicles.status, expenses: vehicles.expenses }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
-      db.select({ saleAmount: vehicleSales.saleAmount, purchasePrice: vehicles.purchasePrice, expenses: vehicles.expenses }).from(vehicleSales).innerJoin(vehicles, eq(vehicleSales.vehicleId, vehicles.id)).where(and(eq(vehicleSales.databaseId, databaseId), eq(vehicles.databaseId, databaseId))),
-      db.select({ amount: cashFlow.amount }).from(cashFlow).where(and(eq(cashFlow.databaseId, databaseId), eq(cashFlow.type, "SAIDA"), eq(cashFlow.category, "COMPRA_VEICULO"))),
-      db.select().from(vehicleFinancings).where(and(eq(vehicleFinancings.databaseId, databaseId), sql`${vehicleFinancings.status} <> 'cancelado'`)),
+      db.select({
+        id: loans.id,
+        clientId: loans.clientId,
+        amount: loans.amount,
+        remainingBalance: loans.remainingBalance,
+        accruedInterest: loans.accruedInterest,
+        status: loans.status,
+        startDate: loans.startDate,
+        endDate: loans.endDate,
+        installments: loans.installments,
+        installmentAmount: loans.installmentAmount,
+        ratePeriod: loans.ratePeriod,
+        description: loans.description
+      }).from(loans).where(
+        and(
+          eq(loans.databaseId, databaseId),
+          sql`${loans.status} <> 'cancelado'`
+        )
+      ),
+      db.select({
+        amount: payments.amount,
+        interestAmount: payments.interestAmount,
+        principalAmount: payments.principalAmount,
+        status: payments.status,
+        loanId: payments.loanId
+      }).from(payments).where(
+        and(
+          eq(payments.databaseId, databaseId),
+          sql`${payments.loanId} is not null`
+        )
+      ),
+      db.select({
+        id: vehicles.id,
+        model: vehicles.model,
+        brand: vehicles.brand,
+        status: vehicles.status,
+        expenses: vehicles.expenses
+      }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
+      db.select({
+        saleAmount: vehicleSales.saleAmount,
+        purchasePrice: vehicles.purchasePrice,
+        expenses: vehicles.expenses
+      }).from(vehicleSales).innerJoin(vehicles, eq(vehicleSales.vehicleId, vehicles.id)).where(
+        and(
+          eq(vehicleSales.databaseId, databaseId),
+          eq(vehicles.databaseId, databaseId)
+        )
+      ),
+      db.select({ amount: cashFlow.amount }).from(cashFlow).where(
+        and(
+          eq(cashFlow.databaseId, databaseId),
+          eq(cashFlow.type, "SAIDA"),
+          eq(cashFlow.category, "COMPRA_VEICULO")
+        )
+      ),
+      db.select().from(vehicleFinancings).where(
+        and(
+          eq(vehicleFinancings.databaseId, databaseId),
+          sql`${vehicleFinancings.status} <> 'cancelado'`
+        )
+      ),
       db.select().from(payments).where(eq(payments.databaseId, databaseId)),
       db.select({ id: clients.id, name: clients.name }).from(clients).where(eq(clients.databaseId, databaseId))
     ]);
     const totalEntradas = Number(cashInResult[0]?.total || 0);
     const totalSaidas = Number(cashOutResult[0]?.total || 0);
-    const vehicleExpenses = vehicleRows.reduce((sum, vehicle) => sum + Number(vehicle.expenses || 0), 0);
-    const vehicleProfit = vehicleSaleRows.reduce((sum, sale) => sum + Number(sale.saleAmount) - Number(sale.purchasePrice || 0) - Number(sale.expenses || 0), 0);
+    const vehicleExpenses = vehicleRows.reduce(
+      (sum, vehicle) => sum + Number(vehicle.expenses || 0),
+      0
+    );
+    const vehicleProfit = vehicleSaleRows.reduce(
+      (sum, sale) => sum + Number(sale.saleAmount) - Number(sale.purchasePrice || 0) - Number(sale.expenses || 0),
+      0
+    );
     const loanRowsNotCancelled = loanRows;
-    const loanPaymentRowsPaid = loanPaymentRows.filter((payment) => payment.status === "pago");
-    const totalLent = loanRowsNotCancelled.reduce((sum, loan) => sum + Number(loan.amount || 0), 0);
-    const totalReceived = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    const totalInterestReceived = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0);
-    const totalPrincipalAmortized = loanPaymentRowsPaid.reduce((sum, payment) => sum + Number(payment.principalAmount || 0), 0);
+    const loanPaymentRowsPaid = loanPaymentRows.filter(
+      (payment) => payment.status === "pago"
+    );
+    const totalLent = loanRowsNotCancelled.reduce(
+      (sum, loan) => sum + Number(loan.amount || 0),
+      0
+    );
+    const totalReceived = loanPaymentRowsPaid.reduce(
+      (sum, payment) => sum + Number(payment.amount || 0),
+      0
+    );
+    const totalInterestReceived = loanPaymentRowsPaid.reduce(
+      (sum, payment) => sum + Number(payment.interestAmount || 0),
+      0
+    );
+    const totalPrincipalAmortized = loanPaymentRowsPaid.reduce(
+      (sum, payment) => sum + Number(payment.principalAmount || 0),
+      0
+    );
     const totalOpen = loanRowsNotCancelled.filter((loan) => !["pago", "cancelado"].includes(loan.status)).reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
     const totalInterestOpen = loanRowsNotCancelled.filter((loan) => !["pago", "cancelado"].includes(loan.status)).reduce((sum, loan) => sum + Number(loan.accruedInterest || 0), 0);
-    const overdueLoans = loanRowsNotCancelled.filter((loan) => loan.status === "atrasado" || loan.status === "ativo" && new Date(loan.endDate).getTime() < Date.now());
-    const totalOverdue = overdueLoans.reduce((sum, loan) => sum + Number(loan.remainingBalance || 0), 0);
-    const totalVehiclePurchases = vehiclePurchaseRows.reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
-    const clientNames = new Map(clientRows.map((client) => [client.id, client.name]));
-    const vehicleNames = new Map(vehicleRows.map((vehicle) => [vehicle.id, `${vehicle.brand ?? ""} ${vehicle.model}`.trim()]));
+    const overdueLoans = loanRowsNotCancelled.filter(
+      (loan) => loan.status === "atrasado" || loan.status === "ativo" && new Date(loan.endDate).getTime() < Date.now()
+    );
+    const totalOverdue = overdueLoans.reduce(
+      (sum, loan) => sum + Number(loan.remainingBalance || 0),
+      0
+    );
+    const totalVehiclePurchases = vehiclePurchaseRows.reduce(
+      (sum, movement) => sum + Number(movement.amount || 0),
+      0
+    );
+    const clientNames = new Map(
+      clientRows.map((client) => [client.id, client.name])
+    );
+    const vehicleNames = new Map(
+      vehicleRows.map((vehicle) => [
+        vehicle.id,
+        `${vehicle.brand ?? ""} ${vehicle.model}`.trim()
+      ])
+    );
     const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
       timeZone: "America/Sao_Paulo",
       year: "numeric",
@@ -1470,15 +1884,21 @@ async function getDashboardStats(databaseId) {
       day: "2-digit"
     });
     const dateKey = (date) => {
-      const parts = Object.fromEntries(dateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+      const parts = Object.fromEntries(
+        dateFormatter.formatToParts(date).map((part) => [part.type, part.value])
+      );
       return `${parts.year}-${parts.month}-${parts.day}`;
     };
     const todayKey = dateKey(/* @__PURE__ */ new Date());
     const dueItems = [];
-    const paidKeys = new Set(allPaymentRows.filter((payment) => payment.status === "pago").map(
-      (payment) => payment.loanId ? `loan:${payment.loanId}:${payment.installmentNumber}` : `financing:${payment.vehicleFinancingId}:${payment.installmentNumber}`
-    ));
-    for (const loan of loanRows.filter((item) => ["ativo", "atrasado"].includes(item.status))) {
+    const paidKeys = new Set(
+      allPaymentRows.filter((payment) => payment.status === "pago").map(
+        (payment) => payment.loanId ? `loan:${payment.loanId}:${payment.installmentNumber}` : `financing:${payment.vehicleFinancingId}:${payment.installmentNumber}`
+      )
+    );
+    for (const loan of loanRows.filter(
+      (item) => ["ativo", "atrasado"].includes(item.status)
+    )) {
       for (let installmentNumber = 1; installmentNumber <= loan.installments; installmentNumber += 1) {
         if (paidKeys.has(`loan:${loan.id}:${installmentNumber}`)) continue;
         dueItems.push({
@@ -1486,36 +1906,79 @@ async function getDashboardStats(databaseId) {
           clientName: clientNames.get(loan.clientId) ?? `Cliente #${loan.clientId}`,
           amount: Number(loan.installmentAmount),
           product: loan.description?.trim() || `Empr\xE9stimo #${loan.id}`,
-          dueDate: addPeriods(new Date(loan.startDate), installmentNumber, loan.ratePeriod),
+          dueDate: addPeriods(
+            new Date(loan.startDate),
+            installmentNumber,
+            loan.ratePeriod
+          ),
           installmentNumber,
           contractType: "emprestimo"
         });
       }
     }
-    for (const financing of financingRows.filter((item) => ["ativo", "atrasado"].includes(item.status))) {
+    for (const financing of financingRows.filter(
+      (item) => ["ativo", "atrasado"].includes(item.status)
+    )) {
       for (let installmentNumber = 1; installmentNumber <= financing.installments; installmentNumber += 1) {
-        if (paidKeys.has(`financing:${financing.id}:${installmentNumber}`)) continue;
+        if (paidKeys.has(`financing:${financing.id}:${installmentNumber}`))
+          continue;
         dueItems.push({
           clientId: financing.clientId,
           clientName: clientNames.get(financing.clientId) ?? `Cliente #${financing.clientId}`,
           amount: Number(financing.installmentAmount),
           product: vehicleNames.get(financing.vehicleId) ?? `Financiamento #${financing.id}`,
-          dueDate: addPeriods(new Date(financing.startDate), installmentNumber, "month"),
+          dueDate: addPeriods(
+            new Date(financing.startDate),
+            installmentNumber,
+            "month"
+          ),
           installmentNumber,
           contractType: "financiamento"
         });
       }
     }
-    const serializeDue = (item) => ({ ...item, dueDate: item.dueDate.toISOString() });
-    const dueToday = dueItems.filter((item) => dateKey(item.dueDate) === todayKey).sort((a, b) => a.clientName.localeCompare(b.clientName)).map(serializeDue);
-    const overdue = dueItems.filter((item) => dateKey(item.dueDate) < todayKey).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime()).map(serializeDue);
-    const financedVehicleIds = new Set(financingRows.map((financing) => financing.vehicleId));
-    const soldVehicleIds = /* @__PURE__ */ new Set([...vehicleRows.filter((vehicle) => vehicle.status === "vendido").map((vehicle) => vehicle.id), ...Array.from(financedVehicleIds)]);
-    const vehiclePayments = allPaymentRows.filter((payment) => payment.vehicleFinancingId !== null);
+    const serializeDue = (item) => ({
+      ...item,
+      dueDate: item.dueDate.toISOString()
+    });
+    const dueTodayItems = dueItems.filter((item) => dateKey(item.dueDate) === todayKey).sort((a, b) => a.clientName.localeCompare(b.clientName));
+    const overdueItems = dueItems.filter((item) => dateKey(item.dueDate) < todayKey).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+    const dueToday = dueTodayItems.slice(0, 100).map(serializeDue);
+    const overdue = overdueItems.slice(0, 100).map(serializeDue);
+    const financedVehicleIds = new Set(
+      financingRows.map((financing) => financing.vehicleId)
+    );
+    const soldVehicleIds = /* @__PURE__ */ new Set([
+      ...vehicleRows.filter((vehicle) => vehicle.status === "vendido").map((vehicle) => vehicle.id),
+      ...Array.from(financedVehicleIds)
+    ]);
+    const vehiclePayments = allPaymentRows.filter(
+      (payment) => payment.vehicleFinancingId !== null
+    );
+    const paidVehiclePayments = vehiclePayments.filter(
+      (payment) => payment.status === "pago"
+    );
+    const totalFinancingContracts = financingRows.reduce(
+      (sum, financing) => sum + Number(financing.totalAmount || 0),
+      0
+    );
+    const totalFinancingPaid = paidVehiclePayments.reduce(
+      (sum, payment) => sum + Number(payment.amount || 0),
+      0
+    );
     return {
-      activeLoans: { count: Number(activeLoansResult[0]?.count || 0), total: Number(activeLoansResult[0]?.total || 0) },
-      paidLoans: { count: Number(paidLoansResult[0]?.count || 0), total: Number(paidLoansResult[0]?.total || 0) },
-      pendingPayments: { count: Number(pendingPaymentsResult[0]?.count || 0), total: Number(pendingPaymentsResult[0]?.total || 0) },
+      activeLoans: {
+        count: Number(activeLoansResult[0]?.count || 0),
+        total: Number(activeLoansResult[0]?.total || 0)
+      },
+      paidLoans: {
+        count: Number(paidLoansResult[0]?.count || 0),
+        total: Number(paidLoansResult[0]?.total || 0)
+      },
+      pendingPayments: {
+        count: Number(pendingPaymentsResult[0]?.count || 0),
+        total: Number(pendingPaymentsResult[0]?.total || 0)
+      },
       totalClients: Number(clientsResult[0]?.count || 0),
       totalEntradas: roundMoney(totalEntradas),
       totalSaidas: roundMoney(totalSaidas),
@@ -1527,8 +1990,14 @@ async function getDashboardStats(databaseId) {
       vehicleMetrics: {
         carsSold: soldVehicleIds.size,
         financings: financingRows.length,
-        installmentsPaid: vehiclePayments.filter((payment) => payment.status === "pago").length,
-        installmentsOverdue: overdue.filter((item) => item.contractType === "financiamento").length
+        installmentsPaid: vehiclePayments.filter(
+          (payment) => payment.status === "pago"
+        ).length,
+        installmentsOverdue: overdueItems.filter(
+          (item) => item.contractType === "financiamento"
+        ).length,
+        totalContracts: roundMoney(totalFinancingContracts),
+        totalPaid: roundMoney(totalFinancingPaid)
       },
       loanMetrics: {
         totalLent: roundMoney(totalLent),
@@ -1540,7 +2009,12 @@ async function getDashboardStats(databaseId) {
         overdueCount: overdueLoans.length,
         totalOverdue: roundMoney(totalOverdue),
         totalVehiclePurchases: roundMoney(totalVehiclePurchases),
-        totalVehicleSales: roundMoney(vehicleSaleRows.reduce((sum, sale) => sum + Number(sale.saleAmount || 0), 0))
+        totalVehicleSales: roundMoney(
+          vehicleSaleRows.reduce(
+            (sum, sale) => sum + Number(sale.saleAmount || 0),
+            0
+          )
+        )
       }
     };
   } catch (error) {
@@ -1709,11 +2183,19 @@ var stripLegacyCpf = (client) => {
   return withoutCpf;
 };
 var protectedProcedure2 = protectedProcedure.use(({ ctx, next, path }) => {
-  const dashboardAllowed = path.startsWith("dashboard.") || ["databases.list", "databases.getActive", "databases.setActive"].includes(path);
+  const dashboardAllowed = path.startsWith("dashboard.") || ["databases.list", "databases.getActive", "databases.setActive"].includes(
+    path
+  );
   if (ctx.user.dashboardOnly && !dashboardAllowed) {
-    throw new TRPCError3({ code: "FORBIDDEN", message: "Este usu\xE1rio possui acesso somente ao dashboard." });
+    throw new TRPCError3({
+      code: "FORBIDDEN",
+      message: "Este usu\xE1rio possui acesso somente ao dashboard."
+    });
   }
-  return withUserDatabaseScope({ userId: ctx.user.id, role: ctx.user.role }, () => next({ ctx }));
+  return withUserDatabaseScope(
+    { userId: ctx.user.id, role: ctx.user.role },
+    () => next({ ctx })
+  );
 });
 var adminProcedure2 = protectedProcedure2.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin" && ctx.user.role !== "super_admin") {
@@ -1726,7 +2208,10 @@ var adminProcedure2 = protectedProcedure2.use(({ ctx, next }) => {
 });
 var superAdminProcedure = protectedProcedure2.use(({ ctx, next }) => {
   if (ctx.user.role !== "super_admin") {
-    throw new TRPCError3({ code: "FORBIDDEN", message: "Apenas o Super Admin pode acessar este recurso." });
+    throw new TRPCError3({
+      code: "FORBIDDEN",
+      message: "Apenas o Super Admin pode acessar este recurso."
+    });
   }
   return next({ ctx });
 });
@@ -1750,15 +2235,20 @@ var appRouter = router({
       }
       return { success: true };
     }),
-    loginLocal: publicProcedure.input(z2.object({
-      username: z2.string().min(1),
-      password: z2.string().min(1),
-      rememberMe: z2.boolean().optional().default(false),
-      captchaToken: z2.string().min(1),
-      captchaAnswer: z2.string().min(1)
-    })).mutation(async ({ input, ctx }) => {
+    loginLocal: publicProcedure.input(
+      z2.object({
+        username: z2.string().min(1),
+        password: z2.string().min(1),
+        rememberMe: z2.boolean().optional().default(false),
+        captchaToken: z2.string().min(1),
+        captchaAnswer: z2.string().min(1)
+      })
+    ).mutation(async ({ input, ctx }) => {
       if (!verifyLoginCaptcha(input.captchaToken, input.captchaAnswer)) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Confirme corretamente que voc\xEA n\xE3o \xE9 um rob\xF4." });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Confirme corretamente que voc\xEA n\xE3o \xE9 um rob\xF4."
+        });
       }
       const user = await getUserByUsername(input.username);
       if (!user || !user.passwordHash) {
@@ -1767,10 +2257,16 @@ var appRouter = router({
           message: "Usu\xE1rio ou senha inv\xE1lidos"
         });
       }
-      const passwordMatch = await bcrypt.compare(input.password, user.passwordHash);
+      const passwordMatch = await bcrypt.compare(
+        input.password,
+        user.passwordHash
+      );
       if (!passwordMatch) {
         if (user.role === "super_admin" || user.username?.toLowerCase() === "draco") {
-          throw new TRPCError3({ code: "UNAUTHORIZED", message: "Usu\xE1rio ou senha inv\xE1lidos" });
+          throw new TRPCError3({
+            code: "UNAUTHORIZED",
+            message: "Usu\xE1rio ou senha inv\xE1lidos"
+          });
         }
         const attempts = await registerFailedLogin(user.id);
         throw new TRPCError3({
@@ -1790,7 +2286,10 @@ var appRouter = router({
       const expiresAt = new Date(Date.now() + sessionDuration);
       await createLocalSession(user.id, token, expiresAt);
       const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: sessionDuration });
+      ctx.res.cookie(COOKIE_NAME, token, {
+        ...cookieOptions,
+        maxAge: sessionDuration
+      });
       await createAuditLog({
         userId: user.id,
         username: user.username || user.email || "Desconhecido",
@@ -1801,12 +2300,14 @@ var appRouter = router({
       });
       return { success: true };
     }),
-    registerLocal: publicProcedure.input(z2.object({
-      username: z2.string().min(3).max(100),
-      email: z2.string().email(),
-      name: z2.string().min(1),
-      password: z2.string().min(6)
-    })).mutation(async ({ input }) => {
+    registerLocal: publicProcedure.input(
+      z2.object({
+        username: z2.string().min(3).max(100),
+        email: z2.string().email(),
+        name: z2.string().min(1),
+        password: z2.string().min(6)
+      })
+    ).mutation(async ({ input }) => {
       const existingUser = await getUserByUsername(input.username);
       if (existingUser) {
         throw new TRPCError3({
@@ -1830,17 +2331,23 @@ var appRouter = router({
       });
       return { success: true };
     }),
-    requestPasswordReset: publicProcedure.input(z2.object({
-      identifier: z2.string().min(1),
-      origin: z2.string().url()
-    })).mutation(async ({ input }) => {
+    requestPasswordReset: publicProcedure.input(
+      z2.object({
+        identifier: z2.string().min(1),
+        origin: z2.string().url()
+      })
+    ).mutation(async ({ input }) => {
       const user = await getUserByUsername(input.identifier) ?? await getUserByEmail(input.identifier);
       if (!user?.passwordHash || user.username === "Draco") {
         return { success: true };
       }
       const token = nanoid(48);
       const expiresAt = new Date(Date.now() + 30 * 60 * 1e3);
-      await createPasswordResetToken({ userId: user.id, token, expiresAt });
+      await createPasswordResetToken({
+        userId: user.id,
+        token,
+        expiresAt
+      });
       await notifyOwner({
         title: "Solicita\xE7\xE3o de recupera\xE7\xE3o de senha",
         content: `Usu\xE1rio: ${user.username ?? user.email}
@@ -1848,17 +2355,25 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    resetPassword: publicProcedure.input(z2.object({
-      token: z2.string().min(1),
-      password: z2.string().min(6)
-    })).mutation(async ({ input }) => {
+    resetPassword: publicProcedure.input(
+      z2.object({
+        token: z2.string().min(1),
+        password: z2.string().min(6)
+      })
+    ).mutation(async ({ input }) => {
       const resetToken = await getPasswordResetToken(input.token);
       if (!resetToken) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Token inv\xE1lido ou expirado" });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Token inv\xE1lido ou expirado"
+        });
       }
       const user = await getUserById(resetToken.userId);
       if (!user || user.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Esta conta n\xE3o pode usar recupera\xE7\xE3o de senha." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Esta conta n\xE3o pode usar recupera\xE7\xE3o de senha."
+        });
       }
       const passwordHash = await bcrypt.hash(input.password, 10);
       await updateLocalPassword(user.id, passwordHash);
@@ -1882,32 +2397,47 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     getById: adminProcedure2.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
       return await getUserById(input.id);
     }),
-    create: superAdminProcedure.input(z2.object({
-      username: z2.string().trim().min(3).max(100),
-      email: z2.string().trim().email(),
-      name: z2.string().trim().min(1).max(200),
-      password: z2.string().min(6),
-      role: z2.enum(["user", "admin"]).default("user"),
-      canView: z2.boolean().default(true),
-      canInsert: z2.boolean().default(false),
-      canEdit: z2.boolean().default(false),
-      canDelete: z2.boolean().default(false),
-      canGenerateReports: z2.boolean().default(false),
-      canAccessSettings: z2.boolean().default(false),
-      dashboardOnly: z2.boolean().default(false),
-      databaseIds: z2.array(z2.number().int().positive()).max(3).default([])
-    })).mutation(async ({ input, ctx }) => {
+    create: superAdminProcedure.input(
+      z2.object({
+        username: z2.string().trim().min(3).max(100),
+        email: z2.string().trim().email(),
+        name: z2.string().trim().min(1).max(200),
+        password: z2.string().min(6),
+        role: z2.enum(["user", "admin"]).default("user"),
+        canView: z2.boolean().default(true),
+        canInsert: z2.boolean().default(false),
+        canEdit: z2.boolean().default(false),
+        canDelete: z2.boolean().default(false),
+        canGenerateReports: z2.boolean().default(false),
+        canAccessSettings: z2.boolean().default(false),
+        dashboardOnly: z2.boolean().default(false),
+        databaseIds: z2.array(z2.number().int().positive()).max(3).default([])
+      })
+    ).mutation(async ({ input, ctx }) => {
       if (await getUserByUsername(input.username)) {
-        throw new TRPCError3({ code: "CONFLICT", message: "Nome de usu\xE1rio j\xE1 cadastrado." });
+        throw new TRPCError3({
+          code: "CONFLICT",
+          message: "Nome de usu\xE1rio j\xE1 cadastrado."
+        });
       }
       if (await getUserByEmail(input.email)) {
-        throw new TRPCError3({ code: "CONFLICT", message: "E-mail j\xE1 cadastrado." });
+        throw new TRPCError3({
+          code: "CONFLICT",
+          message: "E-mail j\xE1 cadastrado."
+        });
       }
       const passwordHash = await bcrypt.hash(input.password, 10);
       const { databaseIds, ...userInput } = input;
-      const created = await createLocalUser({ ...userInput, passwordHash });
+      const created = await createLocalUser({
+        ...userInput,
+        passwordHash
+      });
       const createdUser = await getUserByUsername(input.username);
-      if (!createdUser) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR", message: "N\xE3o foi poss\xEDvel confirmar o usu\xE1rio criado." });
+      if (!createdUser)
+        throw new TRPCError3({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "N\xE3o foi poss\xEDvel confirmar o usu\xE1rio criado."
+        });
       await assignUserDatabases(createdUser.id, databaseIds);
       await createAuditLog({
         userId: ctx.user.id,
@@ -1932,46 +2462,77 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return createdUser ?? created;
     }),
-    update: superAdminProcedure.input(z2.object({
-      userId: z2.number(),
-      username: z2.string().trim().min(3).max(100),
-      email: z2.string().trim().email(),
-      name: z2.string().trim().min(1).max(200),
-      role: z2.enum(["user", "admin"]),
-      canView: z2.boolean(),
-      canInsert: z2.boolean(),
-      canEdit: z2.boolean(),
-      canDelete: z2.boolean(),
-      canGenerateReports: z2.boolean(),
-      canAccessSettings: z2.boolean(),
-      dashboardOnly: z2.boolean(),
-      databaseIds: z2.array(z2.number().int().positive()).max(3)
-    })).mutation(async ({ input, ctx }) => {
+    update: superAdminProcedure.input(
+      z2.object({
+        userId: z2.number(),
+        username: z2.string().trim().min(3).max(100),
+        email: z2.string().trim().email(),
+        name: z2.string().trim().min(1).max(200),
+        role: z2.enum(["user", "admin"]),
+        canView: z2.boolean(),
+        canInsert: z2.boolean(),
+        canEdit: z2.boolean(),
+        canDelete: z2.boolean(),
+        canGenerateReports: z2.boolean(),
+        canAccessSettings: z2.boolean(),
+        dashboardOnly: z2.boolean(),
+        databaseIds: z2.array(z2.number().int().positive()).max(3)
+      })
+    ).mutation(async ({ input, ctx }) => {
       const target = await getUserById(input.userId);
-      if (!target) throw new TRPCError3({ code: "NOT_FOUND", message: "Usu\xE1rio n\xE3o encontrado." });
-      if (target.username?.toLowerCase() === "draco") throw new TRPCError3({ code: "FORBIDDEN", message: "O Super Admin protegido n\xE3o pode ser editado." });
+      if (!target)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Usu\xE1rio n\xE3o encontrado."
+        });
+      if (target.username?.toLowerCase() === "draco")
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "O Super Admin protegido n\xE3o pode ser editado."
+        });
       const usernameOwner = await getUserByUsername(input.username);
-      if (usernameOwner && usernameOwner.id !== input.userId) throw new TRPCError3({ code: "CONFLICT", message: "Nome de usu\xE1rio j\xE1 cadastrado." });
+      if (usernameOwner && usernameOwner.id !== input.userId)
+        throw new TRPCError3({
+          code: "CONFLICT",
+          message: "Nome de usu\xE1rio j\xE1 cadastrado."
+        });
       const emailOwner = await getUserByEmail(input.email);
-      if (emailOwner && emailOwner.id !== input.userId) throw new TRPCError3({ code: "CONFLICT", message: "E-mail j\xE1 cadastrado." });
+      if (emailOwner && emailOwner.id !== input.userId)
+        throw new TRPCError3({
+          code: "CONFLICT",
+          message: "E-mail j\xE1 cadastrado."
+        });
       const { userId, databaseIds, ...data } = input;
       await updateLocalUser(userId, data);
       await assignUserDatabases(userId, databaseIds);
-      await createAuditLog({ userId: ctx.user.id, username: ctx.user.username || ctx.user.email || "Super Admin", action: "update_user", entity: "users", entityId: userId, details: `Usu\xE1rio editado: ${input.username}`, status: "success" });
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.username || ctx.user.email || "Super Admin",
+        action: "update_user",
+        entity: "users",
+        entityId: userId,
+        details: `Usu\xE1rio editado: ${input.username}`,
+        status: "success"
+      });
       return { success: true };
     }),
-    updatePermissions: superAdminProcedure.input(z2.object({
-      userId: z2.number(),
-      canView: z2.boolean().optional(),
-      canInsert: z2.boolean().optional(),
-      canEdit: z2.boolean().optional(),
-      canDelete: z2.boolean().optional(),
-      canGenerateReports: z2.boolean().optional(),
-      canAccessSettings: z2.boolean().optional()
-    })).mutation(async ({ input, ctx }) => {
+    updatePermissions: superAdminProcedure.input(
+      z2.object({
+        userId: z2.number(),
+        canView: z2.boolean().optional(),
+        canInsert: z2.boolean().optional(),
+        canEdit: z2.boolean().optional(),
+        canDelete: z2.boolean().optional(),
+        canGenerateReports: z2.boolean().optional(),
+        canAccessSettings: z2.boolean().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (targetUser?.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "As permiss\xF5es do super administrador Draco s\xE3o imut\xE1veis." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "As permiss\xF5es do super administrador Draco s\xE3o imut\xE1veis."
+        });
       }
       const { userId, ...permissions } = input;
       await updateUserPermissions(userId, permissions);
@@ -1986,13 +2547,18 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    updateRole: superAdminProcedure.input(z2.object({
-      userId: z2.number(),
-      role: z2.enum(["user", "admin", "super_admin"])
-    })).mutation(async ({ input, ctx }) => {
+    updateRole: superAdminProcedure.input(
+      z2.object({
+        userId: z2.number(),
+        role: z2.enum(["user", "admin", "super_admin"])
+      })
+    ).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (targetUser?.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ter o perfil alterado." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "O super administrador Draco n\xE3o pode ter o perfil alterado."
+        });
       }
       await updateUserRole(input.userId, input.role);
       await createAuditLog({
@@ -2006,13 +2572,18 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    toggleActive: superAdminProcedure.input(z2.object({
-      userId: z2.number(),
-      isActive: z2.boolean()
-    })).mutation(async ({ input, ctx }) => {
+    toggleActive: superAdminProcedure.input(
+      z2.object({
+        userId: z2.number(),
+        isActive: z2.boolean()
+      })
+    ).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (targetUser?.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ser desativado." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "O super administrador Draco n\xE3o pode ser desativado."
+        });
       }
       await toggleUserActive(input.userId, input.isActive);
       if (!input.isActive) await deleteUserSessions(input.userId);
@@ -2027,16 +2598,24 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    adminResetPassword: superAdminProcedure.input(z2.object({
-      userId: z2.number(),
-      password: z2.string().min(6)
-    })).mutation(async ({ input, ctx }) => {
+    adminResetPassword: superAdminProcedure.input(
+      z2.object({
+        userId: z2.number(),
+        password: z2.string().min(6)
+      })
+    ).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (!targetUser) {
-        throw new TRPCError3({ code: "NOT_FOUND", message: "Usu\xE1rio n\xE3o encontrado." });
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Usu\xE1rio n\xE3o encontrado."
+        });
       }
       if (targetUser.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "A senha do super administrador Draco n\xE3o pode ser alterada." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "A senha do super administrador Draco n\xE3o pode ser alterada."
+        });
       }
       const passwordHash = await bcrypt.hash(input.password, 10);
       await updateLocalPassword(targetUser.id, passwordHash);
@@ -2055,7 +2634,10 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     delete: superAdminProcedure.input(z2.object({ userId: z2.number() })).mutation(async ({ input, ctx }) => {
       const targetUser = await getUserById(input.userId);
       if (targetUser?.username === "Draco") {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "O super administrador Draco n\xE3o pode ser exclu\xEDdo." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "O super administrador Draco n\xE3o pode ser exclu\xEDdo."
+        });
       }
       await deleteUser(input.userId);
       await createAuditLog({
@@ -2078,11 +2660,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     getActive: protectedProcedure2.query(async () => {
       return await getActiveDatabase();
     }),
-    create: adminProcedure2.input(z2.object({
-      name: z2.string().min(1),
-      description: z2.string().optional(),
-      type: z2.enum(["novo", "copia", "existente"])
-    })).mutation(async ({ input, ctx }) => {
+    create: adminProcedure2.input(
+      z2.object({
+        name: z2.string().min(1),
+        description: z2.string().optional(),
+        type: z2.enum(["novo", "copia", "existente"])
+      })
+    ).mutation(async ({ input, ctx }) => {
       const result = await createDatabase({
         ...input,
         createdBy: ctx.user.id
@@ -2112,11 +2696,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    update: adminProcedure2.input(z2.object({
-      id: z2.number(),
-      name: z2.string().optional(),
-      description: z2.string().optional()
-    })).mutation(async ({ input, ctx }) => {
+    update: adminProcedure2.input(
+      z2.object({
+        id: z2.number(),
+        name: z2.string().optional(),
+        description: z2.string().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
       const { id, ...data } = input;
       await updateDatabase(id, data);
       await createAuditLog({
@@ -2132,7 +2718,11 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     delete: superAdminProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
       const dbInfo = await getDatabaseById(input.id);
-      if (!dbInfo) throw new TRPCError3({ code: "NOT_FOUND", message: "Banco de dados n\xE3o encontrado." });
+      if (!dbInfo)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Banco de dados n\xE3o encontrado."
+        });
       await deleteDatabase(input.id);
       if (dbInfo.isActive) {
         const remaining = await getAllDatabases();
@@ -2152,28 +2742,49 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== AGENTS ====================
   agents: router({
-    list: protectedProcedure2.input(z2.object({ includeInactive: z2.boolean().default(true).optional() }).optional()).query(async ({ input, ctx }) => {
+    list: protectedProcedure2.input(
+      z2.object({ includeInactive: z2.boolean().default(true).optional() }).optional()
+    ).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar agentes." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar agentes."
+        });
       }
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
-      return await getAgentsByDatabase(activeDb.id, input?.includeInactive ?? true);
+      return await getAgentsByDatabase(
+        activeDb.id,
+        input?.includeInactive ?? true
+      );
     }),
     getById: protectedProcedure2.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
       const agent = await getAgentById(input.id);
-      if (!agent) throw new TRPCError3({ code: "NOT_FOUND", message: "Agente n\xE3o encontrado." });
+      if (!agent)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Agente n\xE3o encontrado."
+        });
       return agent;
     }),
-    create: protectedProcedure2.input(z2.object({
-      name: z2.string().trim().min(1).max(255),
-      defaultCommissionPercentage: z2.coerce.number().min(0).max(100)
-    })).mutation(async ({ input, ctx }) => {
+    create: protectedProcedure2.input(
+      z2.object({
+        name: z2.string().trim().min(1).max(255),
+        defaultCommissionPercentage: z2.coerce.number().min(0).max(100)
+      })
+    ).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canInsert) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir agentes." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir agentes."
+        });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo."
+        });
       const result = await createAgent({
         databaseId: activeDb.id,
         name: input.name.trim(),
@@ -2192,24 +2803,38 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return result;
     }),
-    update: protectedProcedure2.input(z2.object({
-      id: z2.number(),
-      name: z2.string().min(1).max(255).optional(),
-      defaultCommissionPercentage: z2.coerce.number().min(0).max(100).optional()
-    })).mutation(async ({ input, ctx }) => {
+    update: protectedProcedure2.input(
+      z2.object({
+        id: z2.number(),
+        name: z2.string().min(1).max(255).optional(),
+        defaultCommissionPercentage: z2.coerce.number().min(0).max(100).optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para editar agentes." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para editar agentes."
+        });
       }
       const activeDb = await getActiveDatabase();
       const targetAgent = activeDb ? await getAgentById(input.id) : void 0;
       if (!activeDb || !targetAgent || targetAgent.databaseId !== activeDb.id) {
-        throw new TRPCError3({ code: "NOT_FOUND", message: "Agente n\xE3o encontrado no banco ativo." });
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Agente n\xE3o encontrado no banco ativo."
+        });
       }
       const { id, defaultCommissionPercentage, ...rest } = input;
-      await updateAgent(id, {
-        ...rest,
-        ...defaultCommissionPercentage === void 0 ? {} : { defaultCommissionPercentage: defaultCommissionPercentage.toFixed(2) }
-      }, activeDb.id);
+      await updateAgent(
+        id,
+        {
+          ...rest,
+          ...defaultCommissionPercentage === void 0 ? {} : {
+            defaultCommissionPercentage: defaultCommissionPercentage.toFixed(2)
+          }
+        },
+        activeDb.id
+      );
       await createAuditLog({
         userId: ctx.user.id,
         username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
@@ -2223,12 +2848,18 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     deactivate: protectedProcedure2.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para desativar agentes." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para desativar agentes."
+        });
       }
       const activeDb = await getActiveDatabase();
       const targetAgent = activeDb ? await getAgentById(input.id) : void 0;
       if (!activeDb || !targetAgent || targetAgent.databaseId !== activeDb.id) {
-        throw new TRPCError3({ code: "NOT_FOUND", message: "Agente n\xE3o encontrado no banco ativo." });
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Agente n\xE3o encontrado no banco ativo."
+        });
       }
       await deactivateAgent(input.id, activeDb.id);
       await createAuditLog({
@@ -2242,16 +2873,30 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    history: protectedProcedure2.input(z2.object({
-      agentId: z2.number(),
-      startDate: z2.string().optional(),
-      endDate: z2.string().optional()
-    })).query(async ({ input, ctx }) => {
+    history: protectedProcedure2.input(
+      z2.object({
+        agentId: z2.number(),
+        startDate: z2.string().optional(),
+        endDate: z2.string().optional()
+      })
+    ).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o hist\xF3rico." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o hist\xF3rico."
+        });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) return { payments: [], totals: { totalPayments: 0, totalPaymentAmount: 0, totalCommission: 0, averageCommission: 0 } };
+      if (!activeDb)
+        return {
+          payments: [],
+          totals: {
+            totalPayments: 0,
+            totalPaymentAmount: 0,
+            totalCommission: 0,
+            averageCommission: 0
+          }
+        };
       return await getAgentPaymentHistory(
         input.agentId,
         activeDb.id,
@@ -2263,7 +2908,11 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   // ==================== CLIENTS ====================
   clients: router({
     list: protectedProcedure2.query(async ({ ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar clientes." });
+      if (!ctx.user.canView)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar clientes."
+        });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       return (await getClientsByDatabase(activeDb.id)).map(stripLegacyCpf);
@@ -2276,29 +2925,39 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return stripLegacyCpf(client);
     }),
     profile: protectedProcedure2.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input, ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar clientes." });
+      if (!ctx.user.canView)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar clientes."
+        });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return void 0;
       const profile = await getClientProfile(input.id, activeDb.id);
-      if (!profile) throw new TRPCError3({ code: "NOT_FOUND", message: "Cliente n\xE3o encontrado no banco ativo." });
+      if (!profile)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Cliente n\xE3o encontrado no banco ativo."
+        });
       return { ...profile, client: stripLegacyCpf(profile.client) };
     }),
-    create: protectedProcedure2.input(z2.object({
-      name: z2.string().trim().min(1),
-      birthDate: z2.string().optional(),
-      email: optionalEmail,
-      phone: optionalText,
-      whatsapp: optionalText,
-      profession: optionalText,
-      indicatorAgentId: z2.number().int().positive().optional(),
-      address: optionalText,
-      residentialAddress: optionalAddress,
-      commercialAddress: optionalAddress,
-      city: optionalText,
-      state: optionalText,
-      zipCode: optionalText,
-      notes: optionalText
-    })).mutation(async ({ input, ctx }) => {
+    create: protectedProcedure2.input(
+      z2.object({
+        name: z2.string().trim().min(1),
+        birthDate: z2.string().optional(),
+        email: optionalEmail,
+        phone: optionalText,
+        whatsapp: optionalText,
+        profession: optionalText,
+        indicatorAgentId: z2.number().int().positive().optional(),
+        address: optionalText,
+        residentialAddress: optionalAddress,
+        commercialAddress: optionalAddress,
+        city: optionalText,
+        state: optionalText,
+        zipCode: optionalText,
+        notes: optionalText
+      })
+    ).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
         throw new TRPCError3({
@@ -2341,23 +3000,25 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return result;
     }),
-    update: protectedProcedure2.input(z2.object({
-      id: z2.number().int().positive(),
-      name: z2.string().trim().min(1).optional(),
-      birthDate: z2.string().optional(),
-      email: optionalEmail,
-      phone: optionalText,
-      whatsapp: optionalText,
-      profession: optionalText,
-      indicatorAgentId: z2.number().int().positive().optional(),
-      address: optionalText,
-      residentialAddress: optionalAddress,
-      commercialAddress: optionalAddress,
-      city: optionalText,
-      state: optionalText,
-      zipCode: optionalText,
-      notes: optionalText
-    })).mutation(async ({ input, ctx }) => {
+    update: protectedProcedure2.input(
+      z2.object({
+        id: z2.number().int().positive(),
+        name: z2.string().trim().min(1).optional(),
+        birthDate: z2.string().optional(),
+        email: optionalEmail,
+        phone: optionalText,
+        whatsapp: optionalText,
+        profession: optionalText,
+        indicatorAgentId: z2.number().int().positive().optional(),
+        address: optionalText,
+        residentialAddress: optionalAddress,
+        commercialAddress: optionalAddress,
+        city: optionalText,
+        state: optionalText,
+        zipCode: optionalText,
+        notes: optionalText
+      })
+    ).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
         throw new TRPCError3({
           code: "FORBIDDEN",
@@ -2365,11 +3026,26 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo"
+        });
       const currentClient = await getClientById(input.id);
-      if (!currentClient || currentClient.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Cliente n\xE3o encontrado no banco ativo." });
+      if (!currentClient || currentClient.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Cliente n\xE3o encontrado no banco ativo."
+        });
       const { id, birthDate, ...data } = input;
-      await updateClientInDatabase(id, { ...data, ...birthDate !== void 0 ? { birthDate: birthDate ? new Date(birthDate) : null } : {} }, activeDb.id);
+      await updateClientInDatabase(
+        id,
+        {
+          ...data,
+          ...birthDate !== void 0 ? { birthDate: birthDate ? new Date(birthDate) : null } : {}
+        },
+        activeDb.id
+      );
       await createAuditLog({
         userId: ctx.user.id,
         username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
@@ -2384,9 +3060,17 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     delete: superAdminProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo"
+        });
       const currentClient = await getClientById(input.id);
-      if (!currentClient || currentClient.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Cliente n\xE3o encontrado no banco ativo." });
+      if (!currentClient || currentClient.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Cliente n\xE3o encontrado no banco ativo."
+        });
       await deleteClientInDatabase(input.id, activeDb.id);
       await createAuditLog({
         userId: ctx.user.id,
@@ -2404,34 +3088,58 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   // ==================== LOANS ====================
   loans: router({
     list: protectedProcedure2.query(async ({ ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
+      if (!ctx.user.canView)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos."
+        });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       return await getLoansByDatabase(activeDb.id);
     }),
     getById: protectedProcedure2.input(z2.object({ id: z2.number() })).query(async ({ input, ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
+      if (!ctx.user.canView)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos."
+        });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return null;
       const loan = await getLoanById(input.id);
       return loan?.databaseId === activeDb.id ? loan : null;
     }),
     details: protectedProcedure2.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input, ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar detalhes." });
+      if (!ctx.user.canView)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar detalhes."
+        });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return null;
       const loan = await getLoanById(input.id);
       if (!loan || loan.databaseId !== activeDb.id) return null;
-      const [client, payments2, interestHistory, cashFlow2] = await Promise.all([
-        getClientById(loan.clientId),
-        getPaymentsByLoan(loan.id, activeDb.id),
-        getLoanInterestHistory(loan.id, activeDb.id),
-        getCashFlowByLoan(loan.id, activeDb.id)
-      ]);
-      return { loan, client: client && client.databaseId === activeDb.id ? client : null, payments: payments2, interestHistory, cashFlow: cashFlow2 };
+      const [client, payments2, interestHistory, cashFlow2] = await Promise.all(
+        [
+          getClientById(loan.clientId),
+          getPaymentsByLoan(loan.id, activeDb.id),
+          getLoanInterestHistory(loan.id, activeDb.id),
+          getCashFlowByLoan(loan.id, activeDb.id)
+        ]
+      );
+      return {
+        loan,
+        client: client && client.databaseId === activeDb.id ? client : null,
+        payments: payments2,
+        interestHistory,
+        cashFlow: cashFlow2
+      };
     }),
     getByClient: protectedProcedure2.input(z2.object({ clientId: z2.number() })).query(async ({ input, ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos." });
+      if (!ctx.user.canView)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar empr\xE9stimos."
+        });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       const client = await getClientById(input.clientId);
@@ -2439,26 +3147,63 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return await getLoansByClient(input.clientId, activeDb.id);
     }),
     history: protectedProcedure2.input(z2.object({ loanId: z2.number().int().positive() })).query(async ({ input, ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o hist\xF3rico." });
+      if (!ctx.user.canView)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o hist\xF3rico."
+        });
       const activeDb = await getActiveDatabase();
       if (!activeDb) return [];
       const loan = await getLoanById(input.loanId);
       if (!loan || loan.databaseId !== activeDb.id) return [];
       return getLoanInterestHistory(input.loanId, activeDb.id);
     }),
-    generateInterest: protectedProcedure2.input(z2.object({ loanId: z2.number().int().positive(), periodReference: z2.string().trim().min(1).max(20) })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canEdit) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para lan\xE7ar juros." });
+    generateInterest: protectedProcedure2.input(
+      z2.object({
+        loanId: z2.number().int().positive(),
+        periodReference: z2.string().trim().min(1).max(20)
+      })
+    ).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.canEdit)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para lan\xE7ar juros."
+        });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo."
+        });
       const loan = await getLoanById(input.loanId);
-      if (!loan || loan.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Empr\xE9stimo n\xE3o encontrado no banco ativo." });
-      if (loan.status === "pago" || loan.status === "cancelado") throw new TRPCError3({ code: "BAD_REQUEST", message: "N\xE3o \xE9 poss\xEDvel lan\xE7ar juros em um empr\xE9stimo encerrado." });
-      if (await getLoanInterestPeriod(input.loanId, activeDb.id, input.periodReference)) {
-        throw new TRPCError3({ code: "CONFLICT", message: "Os juros deste per\xEDodo j\xE1 foram lan\xE7ados." });
+      if (!loan || loan.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Empr\xE9stimo n\xE3o encontrado no banco ativo."
+        });
+      if (loan.status === "pago" || loan.status === "cancelado")
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "N\xE3o \xE9 poss\xEDvel lan\xE7ar juros em um empr\xE9stimo encerrado."
+        });
+      if (await getLoanInterestPeriod(
+        input.loanId,
+        activeDb.id,
+        input.periodReference
+      )) {
+        throw new TRPCError3({
+          code: "CONFLICT",
+          message: "Os juros deste per\xEDodo j\xE1 foram lan\xE7ados."
+        });
       }
       const principalBalance = Number(loan.principalBalance || loan.amount);
-      const interest = calculateInterestOnBalance(principalBalance, Number(loan.interestRate));
-      const accruedInterest = roundMoney(Number(loan.accruedInterest || 0) + interest);
+      const interest = calculateInterestOnBalance(
+        principalBalance,
+        Number(loan.interestRate)
+      );
+      const accruedInterest = roundMoney(
+        Number(loan.accruedInterest || 0) + interest
+      );
       await createLoanInterestHistory({
         databaseId: activeDb.id,
         loanId: loan.id,
@@ -2473,25 +3218,38 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       await updateLoanBalance(loan.id, activeDb.id, {
         principalBalance: principalBalance.toFixed(2),
         accruedInterest: accruedInterest.toFixed(2),
-        remainingBalance: roundMoney(principalBalance + accruedInterest).toFixed(2),
+        remainingBalance: roundMoney(
+          principalBalance + accruedInterest
+        ).toFixed(2),
         lastInterestPeriod: input.periodReference
       });
-      await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "generate_loan_interest", entity: "loans", entityId: loan.id, databaseId: activeDb.id, details: `Juros de ${input.periodReference}: R$ ${interest.toFixed(2)}`, status: "success" });
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
+        action: "generate_loan_interest",
+        entity: "loans",
+        entityId: loan.id,
+        databaseId: activeDb.id,
+        details: `Juros de ${input.periodReference}: R$ ${interest.toFixed(2)}`,
+        status: "success"
+      });
       return { interest, accruedInterest, principalBalance };
     }),
-    create: protectedProcedure2.input(z2.object({
-      clientId: z2.number().int().positive(),
-      amount: positiveDecimal("Valor principal"),
-      interestType: z2.enum(["simple", "compound"]).default("simple").optional(),
-      interestRate: nonNegativeDecimal("Taxa de juros"),
-      ratePeriod: z2.enum(["day", "week", "month", "year"]).default("month").optional(),
-      installments: z2.coerce.number().int().positive().optional(),
-      installmentAmount: z2.string().optional(),
-      totalAmount: z2.string().optional(),
-      startDate: validDate("Data inicial"),
-      endDate: validDate("Data final").optional(),
-      description: z2.string().optional()
-    })).mutation(async ({ input, ctx }) => {
+    create: protectedProcedure2.input(
+      z2.object({
+        clientId: z2.number().int().positive(),
+        amount: positiveDecimal("Valor principal"),
+        interestType: z2.enum(["simple", "compound"]).default("simple").optional(),
+        interestRate: nonNegativeDecimal("Taxa de juros"),
+        ratePeriod: z2.enum(["day", "week", "month", "year"]).default("month").optional(),
+        installments: z2.coerce.number().int().positive().optional(),
+        installmentAmount: z2.string().optional(),
+        totalAmount: z2.string().optional(),
+        startDate: validDate("Data inicial"),
+        endDate: validDate("Data final").optional(),
+        description: z2.string().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
         throw new TRPCError3({
@@ -2506,53 +3264,93 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         });
       }
       const client = await getClientById(input.clientId);
-      if (!client || client.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+      if (!client || client.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Cliente inv\xE1lido para o banco ativo."
+        });
       const principal = Number(input.amount);
       const ratePercent = Number(input.interestRate);
       if (!Number.isFinite(principal) || principal <= 0 || !Number.isFinite(ratePercent) || ratePercent < 0) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Valor principal ou taxa de juros inv\xE1lidos." });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Valor principal ou taxa de juros inv\xE1lidos."
+        });
       }
       const interestType = input.interestType ?? "simple";
       const ratePeriod = input.ratePeriod ?? "month";
       const periods = input.installments ?? 1;
-      const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
-      const startDate = new Date(input.startDate);
-      if (Number.isNaN(startDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data inicial inv\xE1lida." });
-      const endDate = input.endDate ? new Date(input.endDate) : addPeriods(startDate, plan.periods, ratePeriod);
-      if (Number.isNaN(endDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data final inv\xE1lida." });
-      if (endDate < startDate) throw new TRPCError3({ code: "BAD_REQUEST", message: "A data final deve ser igual ou posterior \xE0 data inicial." });
-      const result = await createLoanBundle({
-        clientId: input.clientId,
-        amount: plan.principal.toFixed(2),
+      const plan = calculateLoanPlan({
+        principal,
+        ratePercent,
+        periods,
         interestType,
-        interestRate: ratePercent.toFixed(4),
-        ratePeriod,
-        installments: plan.periods,
-        installmentAmount: plan.installmentAmount.toFixed(2),
-        totalAmount: plan.totalAmount.toFixed(2),
-        remainingBalance: plan.totalAmount.toFixed(2),
-        principalBalance: plan.principal.toFixed(2),
-        accruedInterest: plan.interestAmount.toFixed(2),
-        totalPaid: "0.00",
-        lastInterestPeriod: null,
-        startDate,
-        endDate,
-        status: "ativo",
-        description: input.description,
-        databaseId: activeDb.id,
-        createdBy: ctx.user.id
-      }, {
-        databaseId: activeDb.id,
-        type: "SAIDA",
-        category: "LIBERACAO_EMPRESTIMO",
-        description: "Libera\xE7\xE3o de empr\xE9stimo",
-        amount: plan.principal.toFixed(2),
-        movementDate: startDate,
-        clientId: input.clientId,
-        responsible: ctx.user.name || ctx.user.email || "Usu\xE1rio",
-        notes: input.description,
-        createdBy: ctx.user.id
+        ratePeriod
       });
+      const initialInterest = calculateInterestOnBalance(
+        principal,
+        ratePercent
+      );
+      const installmentAmount = input.installmentAmount === void 0 || input.installmentAmount.trim() === "" ? plan.installmentAmount : Number(input.installmentAmount);
+      if (!Number.isFinite(installmentAmount) || installmentAmount <= 0)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "O valor da parcela deve ser maior que zero."
+        });
+      const startDate = new Date(input.startDate);
+      if (Number.isNaN(startDate.getTime()))
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Data inicial inv\xE1lida."
+        });
+      const endDate = input.endDate ? new Date(input.endDate) : addPeriods(startDate, plan.periods, ratePeriod);
+      if (Number.isNaN(endDate.getTime()))
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Data final inv\xE1lida."
+        });
+      if (endDate < startDate)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "A data final deve ser igual ou posterior \xE0 data inicial."
+        });
+      const result = await createLoanBundle(
+        {
+          clientId: input.clientId,
+          amount: plan.principal.toFixed(2),
+          interestType,
+          interestRate: ratePercent.toFixed(4),
+          ratePeriod,
+          installments: plan.periods,
+          installmentAmount: roundMoney(installmentAmount).toFixed(2),
+          totalAmount: roundMoney(principal + initialInterest).toFixed(2),
+          remainingBalance: roundMoney(principal + initialInterest).toFixed(
+            2
+          ),
+          principalBalance: plan.principal.toFixed(2),
+          accruedInterest: initialInterest.toFixed(2),
+          totalPaid: "0.00",
+          lastInterestPeriod: null,
+          startDate,
+          endDate,
+          status: "ativo",
+          description: input.description,
+          databaseId: activeDb.id,
+          createdBy: ctx.user.id
+        },
+        {
+          databaseId: activeDb.id,
+          type: "SAIDA",
+          category: "LIBERACAO_EMPRESTIMO",
+          description: "Libera\xE7\xE3o de empr\xE9stimo",
+          amount: plan.principal.toFixed(2),
+          movementDate: startDate,
+          clientId: input.clientId,
+          responsible: ctx.user.name || ctx.user.email || "Usu\xE1rio",
+          notes: input.description,
+          createdBy: ctx.user.id
+        }
+      );
       await createAuditLog({
         userId: ctx.user.id,
         username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
@@ -2564,62 +3362,120 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return result;
     }),
-    update: protectedProcedure2.input(z2.object({
-      id: z2.number(),
-      clientId: z2.number().int().positive().optional(),
-      amount: z2.string().optional(),
-      interestType: z2.enum(["simple", "compound"]).optional(),
-      interestRate: z2.string().optional(),
-      ratePeriod: z2.enum(["day", "week", "month", "year"]).optional(),
-      installments: z2.coerce.number().int().positive().optional(),
-      installmentAmount: z2.string().optional(),
-      totalAmount: z2.string().optional(),
-      startDate: z2.string().optional(),
-      endDate: z2.string().optional(),
-      status: z2.enum(["ativo", "pago", "atrasado", "cancelado"]).optional(),
-      description: z2.string().optional()
-    })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canEdit) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados" });
+    update: protectedProcedure2.input(
+      z2.object({
+        id: z2.number(),
+        clientId: z2.number().int().positive().optional(),
+        amount: z2.string().optional(),
+        interestType: z2.enum(["simple", "compound"]).optional(),
+        interestRate: z2.string().optional(),
+        ratePeriod: z2.enum(["day", "week", "month", "year"]).optional(),
+        installments: z2.coerce.number().int().positive().optional(),
+        installmentAmount: z2.string().optional(),
+        totalAmount: z2.string().optional(),
+        startDate: z2.string().optional(),
+        endDate: z2.string().optional(),
+        status: z2.enum(["ativo", "pago", "atrasado", "cancelado"]).optional(),
+        description: z2.string().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.canEdit)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados"
+        });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo."
+        });
       const currentLoan = await getLoanById(input.id);
-      if (!currentLoan || currentLoan.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Empr\xE9stimo n\xE3o encontrado no banco ativo." });
+      if (!currentLoan || currentLoan.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Empr\xE9stimo n\xE3o encontrado no banco ativo."
+        });
       if (input.clientId !== void 0) {
         const client = await getClientById(input.clientId);
-        if (!client || client.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+        if (!client || client.databaseId !== activeDb.id)
+          throw new TRPCError3({
+            code: "BAD_REQUEST",
+            message: "Cliente inv\xE1lido para o banco ativo."
+          });
       }
       const startDate = input.startDate ? new Date(input.startDate) : currentLoan.startDate;
       const endDate = input.endDate ? new Date(input.endDate) : currentLoan.endDate;
-      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Datas do empr\xE9stimo inv\xE1lidas." });
+      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()))
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Datas do empr\xE9stimo inv\xE1lidas."
+        });
       const principal = input.amount !== void 0 ? Number(input.amount) : Number(currentLoan.amount);
       const ratePercent = input.interestRate !== void 0 ? Number(input.interestRate) : Number(currentLoan.interestRate);
-      if (!Number.isFinite(principal) || principal <= 0 || !Number.isFinite(ratePercent) || ratePercent < 0) throw new TRPCError3({ code: "BAD_REQUEST", message: "Valor principal ou taxa de juros inv\xE1lidos." });
+      if (!Number.isFinite(principal) || principal <= 0 || !Number.isFinite(ratePercent) || ratePercent < 0)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Valor principal ou taxa de juros inv\xE1lidos."
+        });
       const interestType = input.interestType ?? currentLoan.interestType;
       const ratePeriod = input.ratePeriod ?? currentLoan.ratePeriod;
       const periods = input.installments ?? currentLoan.installments ?? 1;
       const { id, status, description, clientId } = input;
-      const plan = calculateLoanPlan({ principal, ratePercent, periods, interestType, ratePeriod });
+      const plan = calculateLoanPlan({
+        principal,
+        ratePercent,
+        periods,
+        interestType,
+        ratePeriod
+      });
+      const initialInterest = calculateInterestOnBalance(
+        principal,
+        ratePercent
+      );
+      const installmentAmount = input.installmentAmount === void 0 ? Number(currentLoan.installmentAmount) : Number(input.installmentAmount);
+      if (!Number.isFinite(installmentAmount) || installmentAmount <= 0)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "O valor da parcela deve ser maior que zero."
+        });
       const financialTermsChanged = input.amount !== void 0 || input.interestType !== void 0 || input.interestRate !== void 0 || input.ratePeriod !== void 0 || input.installments !== void 0 || input.installmentAmount !== void 0 || input.totalAmount !== void 0;
-      const hasInitialInterest = Boolean(await getLoanInterestPeriod(
+      const hasInitialInterest = Boolean(
+        await getLoanInterestPeriod(
+          id,
+          activeDb.id,
+          INITIAL_LOAN_INTEREST_PERIOD
+        )
+      );
+      await updateLoanInDatabase(
         id,
         activeDb.id,
-        INITIAL_LOAN_INTEREST_PERIOD
-      ));
-      await updateLoanInDatabase(id, activeDb.id, {
-        clientId,
-        amount: plan.principal.toFixed(2),
-        interestType,
-        interestRate: ratePercent.toFixed(4),
-        ratePeriod,
-        installments: plan.periods,
-        installmentAmount: plan.installmentAmount.toFixed(2),
-        totalAmount: plan.totalAmount.toFixed(2),
-        startDate,
-        endDate,
-        ...status !== void 0 ? { status } : {},
-        ...description !== void 0 ? { description } : {}
-      }, financialTermsChanged || hasInitialInterest ? plan.interestAmount : void 0);
-      await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "update_loan", entity: "loans", entityId: id, databaseId: activeDb.id, details: JSON.stringify(input), status: "success" });
+        {
+          clientId,
+          amount: plan.principal.toFixed(2),
+          interestType,
+          interestRate: ratePercent.toFixed(4),
+          ratePeriod,
+          installments: plan.periods,
+          installmentAmount: roundMoney(installmentAmount).toFixed(2),
+          totalAmount: roundMoney(principal + initialInterest).toFixed(2),
+          startDate,
+          endDate,
+          ...status !== void 0 ? { status } : {},
+          ...description !== void 0 ? { description } : {}
+        },
+        financialTermsChanged || hasInitialInterest ? initialInterest : void 0
+      );
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
+        action: "update_loan",
+        entity: "loans",
+        entityId: id,
+        databaseId: activeDb.id,
+        details: JSON.stringify(input),
+        status: "success"
+      });
       return { success: true, message: "Empr\xE9stimo atualizado com sucesso." };
     }),
     delete: protectedProcedure2.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
@@ -2630,9 +3486,17 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo."
+        });
       const currentLoan = await getLoanById(input.id);
-      if (!currentLoan || currentLoan.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Empr\xE9stimo n\xE3o encontrado no banco ativo." });
+      if (!currentLoan || currentLoan.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Empr\xE9stimo n\xE3o encontrado no banco ativo."
+        });
       const result = await deleteLoanSafely(input.id, activeDb.id);
       await createAuditLog({
         userId: ctx.user.id,
@@ -2664,68 +3528,188 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       if (!activeDb) return [];
       return await getPaymentsByLoan(input.loanId, activeDb.id);
     }),
-    create: protectedProcedure2.input(z2.object({
-      loanId: z2.number().int().positive().optional(),
-      vehicleFinancingId: z2.number().int().positive().optional(),
-      installmentNumber: z2.coerce.number().int().positive(),
-      amount: z2.string(),
-      paymentDate: z2.string(),
-      dueDate: z2.string(),
-      status: z2.enum(["pago", "pendente", "atrasado"]),
-      lateFee: z2.string().optional(),
-      interest: z2.string().optional(),
-      notes: z2.string().optional(),
-      agentId: z2.number().int().positive().optional(),
-      commissionPercentage: z2.coerce.number().min(0).max(100).optional()
-    })).mutation(async ({ input, ctx }) => {
+    create: protectedProcedure2.input(
+      z2.object({
+        loanId: z2.number().int().positive().optional(),
+        vehicleFinancingId: z2.number().int().positive().optional(),
+        installmentNumber: z2.coerce.number().int().positive(),
+        amount: z2.string(),
+        paymentDate: z2.string(),
+        dueDate: z2.string(),
+        status: z2.enum(["pago", "pendente", "atrasado"]),
+        lateFee: z2.string().optional(),
+        interest: z2.string().optional(),
+        notes: z2.string().optional(),
+        agentId: z2.number().int().positive().optional(),
+        commissionPercentage: z2.coerce.number().min(0).max(100).optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
-      if (!ctx.user.canInsert) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados" });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo"
+        });
+      if (!ctx.user.canInsert)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados"
+        });
       if (input.loanId === void 0 === (input.vehicleFinancingId === void 0)) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Informe exatamente um empr\xE9stimo ou um financiamento." });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Informe exatamente um empr\xE9stimo ou um financiamento."
+        });
       }
       const loan = input.loanId === void 0 ? void 0 : await getLoanById(input.loanId);
       const vehicleFinancing = input.vehicleFinancingId === void 0 ? void 0 : await getVehicleFinancingById(input.vehicleFinancingId);
       if (input.loanId !== void 0 && (!loan || loan.databaseId !== activeDb.id || ["pago", "cancelado"].includes(loan.status))) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Empr\xE9stimo inv\xE1lido, encerrado ou fora do banco ativo." });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Empr\xE9stimo inv\xE1lido, encerrado ou fora do banco ativo."
+        });
       }
       if (input.vehicleFinancingId !== void 0 && (!vehicleFinancing || vehicleFinancing.databaseId !== activeDb.id || ["pago", "cancelado"].includes(vehicleFinancing.status))) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Financiamento inv\xE1lido, encerrado ou fora do banco ativo." });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Financiamento inv\xE1lido, encerrado ou fora do banco ativo."
+        });
       }
       const paymentAmount = Number(input.amount);
-      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) throw new TRPCError3({ code: "BAD_REQUEST", message: "O valor do pagamento deve ser maior que zero." });
+      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "O valor do pagamento deve ser maior que zero."
+        });
       const paymentDate = new Date(input.paymentDate);
       const dueDate = new Date(input.dueDate);
-      if (Number.isNaN(paymentDate.getTime()) || Number.isNaN(dueDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "As datas do pagamento s\xE3o inv\xE1lidas." });
+      if (Number.isNaN(paymentDate.getTime()) || Number.isNaN(dueDate.getTime()))
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "As datas do pagamento s\xE3o inv\xE1lidas."
+        });
       let commissionPercentage = 0;
       let agentId;
       if (input.agentId !== void 0) {
         const agent = await getAgentById(input.agentId);
-        if (!agent || agent.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Agente inv\xE1lido para o banco ativo." });
-        if (agent.status !== "ACTIVE") throw new TRPCError3({ code: "BAD_REQUEST", message: "Agentes inativos n\xE3o podem ser selecionados em novos pagamentos." });
+        if (!agent || agent.databaseId !== activeDb.id)
+          throw new TRPCError3({
+            code: "BAD_REQUEST",
+            message: "Agente inv\xE1lido para o banco ativo."
+          });
+        if (agent.status !== "ACTIVE")
+          throw new TRPCError3({
+            code: "BAD_REQUEST",
+            message: "Agentes inativos n\xE3o podem ser selecionados em novos pagamentos."
+          });
         agentId = agent.id;
         commissionPercentage = input.commissionPercentage ?? Number(agent.defaultCommissionPercentage || 0);
       } else if (input.commissionPercentage !== void 0 && input.commissionPercentage !== 0) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "A comiss\xE3o s\xF3 pode ser informada quando um agente \xE9 selecionado." });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "A comiss\xE3o s\xF3 pode ser informada quando um agente \xE9 selecionado."
+        });
       }
       const priorPayments = loan ? await getPaymentsByLoan(loan.id, activeDb.id) : await getPaymentsByFinancing(vehicleFinancing.id, activeDb.id);
+      if (vehicleFinancing && input.status === "pago") {
+        if (input.installmentNumber > vehicleFinancing.installments)
+          throw new TRPCError3({
+            code: "BAD_REQUEST",
+            message: `A cota deve estar entre 1 e ${vehicleFinancing.installments}.`
+          });
+        if (priorPayments.some(
+          (payment) => payment.status === "pago" && payment.installmentNumber === input.installmentNumber
+        )) {
+          throw new TRPCError3({
+            code: "CONFLICT",
+            message: `A cota ${input.installmentNumber} j\xE1 foi paga.`
+          });
+        }
+      }
       const contractPrincipal = loan ? Number(loan.principalBalance || loan.amount) : Number(vehicleFinancing?.financedAmount || 0);
-      const accruedInterest = loan ? Number(loan.accruedInterest || 0) : Math.max(0, Number(vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0) - contractPrincipal);
+      const accruedInterest = loan ? Number(loan.accruedInterest || 0) : Math.max(
+        0,
+        Number(
+          vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0
+        ) - contractPrincipal
+      );
       const priorPaid = priorPayments.filter((payment) => payment.status === "pago").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-      const balanceBefore = loan ? roundMoney(contractPrincipal + accruedInterest) : Math.max(0, Number(vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0) - priorPaid);
-      if (input.status === "pago" && paymentAmount > balanceBefore + 0.01) throw new TRPCError3({ code: "BAD_REQUEST", message: "O pagamento n\xE3o pode exceder o saldo do contrato." });
-      const allocation = input.status === "pago" ? loan ? allocateBalancePayment(paymentAmount, accruedInterest, contractPrincipal) : allocatePayment(paymentAmount, Number(vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0), accruedInterest, priorPayments.reduce((sum, payment) => sum + Number(payment.interestAmount || 0), 0), balanceBefore) : { principalAmount: 0, interestAmount: 0, remainingBalance: balanceBefore };
+      const balanceBefore = loan ? roundMoney(contractPrincipal + accruedInterest) : Math.max(
+        0,
+        Number(
+          vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0
+        ) - priorPaid
+      );
+      if (input.status === "pago" && paymentAmount > balanceBefore + 0.01)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "O pagamento n\xE3o pode exceder o saldo do contrato."
+        });
+      const allocation = input.status === "pago" ? loan ? allocateBalancePayment(
+        paymentAmount,
+        accruedInterest,
+        contractPrincipal
+      ) : (() => {
+        const installmentValue = Number(
+          vehicleFinancing.installmentAmount
+        );
+        const installmentInterest = roundMoney(
+          Math.max(
+            0,
+            Number(vehicleFinancing.totalAmount) - Number(vehicleFinancing.financedAmount)
+          ) / vehicleFinancing.installments
+        );
+        const regularQuota = Math.min(
+          paymentAmount,
+          installmentValue
+        );
+        const extraAmortization = roundMoney(
+          Math.max(0, paymentAmount - regularQuota)
+        );
+        const interestAmount = roundMoney(
+          Math.min(regularQuota, installmentInterest)
+        );
+        return {
+          interestAmount,
+          principalAmount: roundMoney(
+            Math.max(0, regularQuota - interestAmount) + extraAmortization
+          ),
+          remainingBalance: roundMoney(
+            Math.max(0, balanceBefore - paymentAmount)
+          )
+        };
+      })() : {
+        principalAmount: 0,
+        interestAmount: 0,
+        remainingBalance: balanceBefore
+      };
       const commissionAmount = Math.round(paymentAmount * commissionPercentage) / 100;
       const netAmount = Math.round((paymentAmount - commissionAmount) * 100) / 100;
-      const duplicate = await paymentAlreadyRegistered({ databaseId: activeDb.id, loanId: input.loanId, vehicleFinancingId: input.vehicleFinancingId, installmentNumber: input.installmentNumber, amount: input.amount, paymentDate, agentId });
-      if (duplicate) throw new TRPCError3({ code: "CONFLICT", message: "Este pagamento e sua comiss\xE3o j\xE1 foram registrados." });
+      const duplicate = await paymentAlreadyRegistered({
+        databaseId: activeDb.id,
+        loanId: input.loanId,
+        vehicleFinancingId: input.vehicleFinancingId,
+        installmentNumber: input.installmentNumber,
+        amount: input.amount,
+        paymentDate,
+        agentId
+      });
+      if (duplicate)
+        throw new TRPCError3({
+          code: "CONFLICT",
+          message: "Este pagamento e sua comiss\xE3o j\xE1 foram registrados."
+        });
       const paymentData = {
         loanId: input.loanId,
         vehicleFinancingId: input.vehicleFinancingId,
         installmentNumber: input.installmentNumber,
         amount: paymentAmount.toFixed(2),
         paymentDate,
-        dueDate,
+        dueDate: vehicleFinancing ? addPeriods(
+          new Date(vehicleFinancing.startDate),
+          input.installmentNumber,
+          "month"
+        ) : dueDate,
         status: input.status,
         lateFee: input.lateFee,
         interest: input.interest,
@@ -2740,53 +3724,99 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         databaseId: activeDb.id,
         createdBy: ctx.user.id
       };
-      const nextPrincipal = roundMoney(Math.max(0, Number(loan?.principalBalance || loan?.amount || 0) - allocation.principalAmount));
-      const nextInterest = roundMoney(Math.max(0, Number(loan?.accruedInterest || 0) - allocation.interestAmount));
-      const nextTotalPaid = roundMoney(Number(loan?.totalPaid || 0) + paymentAmount);
-      const result = await createPaymentBundle(paymentData, {
+      const nextPrincipal = roundMoney(
+        Math.max(
+          0,
+          Number(loan?.principalBalance || loan?.amount || 0) - allocation.principalAmount
+        )
+      );
+      const nextInterest = roundMoney(
+        Math.max(
+          0,
+          Number(loan?.accruedInterest || 0) - allocation.interestAmount
+        )
+      );
+      const nextTotalPaid = roundMoney(
+        Number(loan?.totalPaid || 0) + paymentAmount
+      );
+      const result = await createPaymentBundle(
+        paymentData,
+        {
+          databaseId: activeDb.id,
+          type: "ENTRADA",
+          category: loan ? allocation.interestAmount > 0 && allocation.principalAmount === 0 ? "JUROS_EMPRESTIMO" : allocation.remainingBalance <= 0 ? "QUITACAO_EMPRESTIMO" : "PAGAMENTO_EMPRESTIMO" : "PAGAMENTO_FINANCIAMENTO",
+          description: loan ? `Recebimento do empr\xE9stimo #${loan.id}` : `Recebimento do financiamento #${vehicleFinancing.id}`,
+          amount: paymentAmount.toFixed(2),
+          movementDate: paymentDate,
+          clientId: loan?.clientId ?? vehicleFinancing?.clientId,
+          loanId: loan?.id,
+          responsible: ctx.user.name || ctx.user.email || "Usu\xE1rio",
+          notes: input.notes,
+          createdBy: ctx.user.id
+        },
+        loan && input.status === "pago" ? {
+          id: loan.id,
+          databaseId: activeDb.id,
+          values: {
+            principalBalance: nextPrincipal.toFixed(2),
+            accruedInterest: nextInterest.toFixed(2),
+            totalPaid: nextTotalPaid.toFixed(2),
+            remainingBalance: allocation.remainingBalance.toFixed(2),
+            status: allocation.remainingBalance <= 0 ? "pago" : new Date(loan.endDate) < /* @__PURE__ */ new Date() ? "atrasado" : "ativo"
+          }
+        } : void 0
+      );
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
+        action: "create_payment",
+        entity: "payments",
         databaseId: activeDb.id,
-        type: "ENTRADA",
-        category: loan ? allocation.interestAmount > 0 && allocation.principalAmount === 0 ? "JUROS_EMPRESTIMO" : allocation.remainingBalance <= 0 ? "QUITACAO_EMPRESTIMO" : "PAGAMENTO_EMPRESTIMO" : "PAGAMENTO_FINANCIAMENTO",
-        description: loan ? `Recebimento do empr\xE9stimo #${loan.id}` : `Recebimento do financiamento #${vehicleFinancing.id}`,
-        amount: paymentAmount.toFixed(2),
-        movementDate: paymentDate,
-        clientId: loan?.clientId ?? vehicleFinancing?.clientId,
-        loanId: loan?.id,
-        responsible: ctx.user.name || ctx.user.email || "Usu\xE1rio",
-        notes: input.notes,
-        createdBy: ctx.user.id
-      }, loan && input.status === "pago" ? {
-        id: loan.id,
-        databaseId: activeDb.id,
-        values: {
-          principalBalance: nextPrincipal.toFixed(2),
-          accruedInterest: nextInterest.toFixed(2),
-          totalPaid: nextTotalPaid.toFixed(2),
-          remainingBalance: allocation.remainingBalance.toFixed(2),
-          status: allocation.remainingBalance <= 0 ? "pago" : new Date(loan.endDate) < /* @__PURE__ */ new Date() ? "atrasado" : "ativo"
-        }
-      } : void 0);
-      await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "create_payment", entity: "payments", databaseId: activeDb.id, details: `Pagamento registrado: R$ ${paymentAmount.toFixed(2)}; comiss\xE3o: R$ ${commissionAmount.toFixed(2)}`, status: "success" });
+        details: `Pagamento registrado: R$ ${paymentAmount.toFixed(2)}; comiss\xE3o: R$ ${commissionAmount.toFixed(2)}`,
+        status: "success"
+      });
       return result;
     }),
-    update: protectedProcedure2.input(z2.object({
-      id: z2.number(),
-      amount: z2.string().optional(),
-      status: z2.enum(["pago", "pendente", "atrasado"]).optional(),
-      paymentDate: z2.string().optional(),
-      dueDate: z2.string().optional(),
-      notes: z2.string().optional()
-    })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canEdit) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados" });
+    update: protectedProcedure2.input(
+      z2.object({
+        id: z2.number(),
+        amount: z2.string().optional(),
+        status: z2.enum(["pago", "pendente", "atrasado"]).optional(),
+        paymentDate: z2.string().optional(),
+        dueDate: z2.string().optional(),
+        notes: z2.string().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.canEdit)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para editar dados"
+        });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo."
+        });
       const current = await getPaymentById(input.id);
-      if (!current || current.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Pagamento n\xE3o encontrado no banco ativo." });
+      if (!current || current.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Pagamento n\xE3o encontrado no banco ativo."
+        });
       const amount = input.amount !== void 0 ? Number(input.amount) : Number(current.amount);
-      if (!Number.isFinite(amount) || amount <= 0) throw new TRPCError3({ code: "BAD_REQUEST", message: "O valor do pagamento deve ser maior que zero." });
+      if (!Number.isFinite(amount) || amount <= 0)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "O valor do pagamento deve ser maior que zero."
+        });
       const paymentDate = input.paymentDate ? new Date(input.paymentDate) : current.paymentDate;
       const dueDate = input.dueDate ? new Date(input.dueDate) : current.dueDate;
-      if (Number.isNaN(paymentDate.getTime()) || Number.isNaN(dueDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "As datas do pagamento s\xE3o inv\xE1lidas." });
+      if (Number.isNaN(paymentDate.getTime()) || Number.isNaN(dueDate.getTime()))
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "As datas do pagamento s\xE3o inv\xE1lidas."
+        });
       const result = await updatePaymentBundle(input.id, activeDb.id, {
         amount: amount.toFixed(2),
         status: input.status ?? current.status,
@@ -2794,51 +3824,127 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         dueDate,
         notes: input.notes !== void 0 ? input.notes : current.notes
       });
-      await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "update_payment", entity: "payments", entityId: input.id, databaseId: activeDb.id, details: JSON.stringify(input), status: "success" });
-      return { success: true, message: "Pagamento atualizado e caixa reconciliado.", result };
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
+        action: "update_payment",
+        entity: "payments",
+        entityId: input.id,
+        databaseId: activeDb.id,
+        details: JSON.stringify(input),
+        status: "success"
+      });
+      return {
+        success: true,
+        message: "Pagamento atualizado e caixa reconciliado.",
+        result
+      };
     }),
     delete: protectedProcedure2.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canDelete) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para excluir pagamentos." });
+      if (!ctx.user.canDelete)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para excluir pagamentos."
+        });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo."
+        });
       const current = await getPaymentById(input.id);
-      if (!current || current.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Pagamento n\xE3o encontrado no banco ativo." });
+      if (!current || current.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Pagamento n\xE3o encontrado no banco ativo."
+        });
       const result = await deletePaymentBundle(input.id, activeDb.id);
-      await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "delete_payment", entity: "payments", entityId: input.id, databaseId: activeDb.id, details: "Pagamento removido; caixa e saldo recalculados.", status: "warning" });
-      return { success: true, message: "Pagamento exclu\xEDdo e caixa reconciliado.", result };
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
+        action: "delete_payment",
+        entity: "payments",
+        entityId: input.id,
+        databaseId: activeDb.id,
+        details: "Pagamento removido; caixa e saldo recalculados.",
+        status: "warning"
+      });
+      return {
+        success: true,
+        message: "Pagamento exclu\xEDdo e caixa reconciliado.",
+        result
+      };
     })
   }),
   // ==================== CASH FLOW ====================
   cashFlow: router({
     list: protectedProcedure2.query(async ({ ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o fluxo de caixa." });
+      if (!ctx.user.canView)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar o fluxo de caixa."
+        });
       const activeDb = await getActiveDatabase();
       return activeDb ? getCashFlowByDatabase(activeDb.id) : [];
     }),
-    create: protectedProcedure2.input(z2.object({
-      type: z2.enum(["ENTRADA", "SAIDA"]),
-      category: z2.string().trim().min(1),
-      description: z2.string().trim().min(1),
-      amount: z2.coerce.number().positive(),
-      movementDate: z2.string(),
-      responsible: z2.string().optional(),
-      notes: z2.string().optional()
-    })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canInsert) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar movimenta\xE7\xF5es." });
+    create: protectedProcedure2.input(
+      z2.object({
+        type: z2.enum(["ENTRADA", "SAIDA"]),
+        category: z2.string().trim().min(1),
+        description: z2.string().trim().min(1),
+        amount: z2.coerce.number().positive(),
+        movementDate: z2.string(),
+        responsible: z2.string().optional(),
+        notes: z2.string().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.canInsert)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar movimenta\xE7\xF5es."
+        });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo."
+        });
       const movementDate = new Date(input.movementDate);
-      if (Number.isNaN(movementDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data da movimenta\xE7\xE3o inv\xE1lida." });
-      await createCashFlowEntry({ ...input, amount: input.amount.toFixed(2), movementDate, databaseId: activeDb.id, createdBy: ctx.user.id });
+      if (Number.isNaN(movementDate.getTime()))
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Data da movimenta\xE7\xE3o inv\xE1lida."
+        });
+      await createCashFlowEntry({
+        ...input,
+        amount: input.amount.toFixed(2),
+        movementDate,
+        databaseId: activeDb.id,
+        createdBy: ctx.user.id
+      });
       return { success: true };
     }),
     delete: superAdminProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
-      const result = await deleteManualCashFlowEntry(input.id, activeDb.id);
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo."
+        });
+      const result = await deleteManualCashFlowEntry(
+        input.id,
+        activeDb.id
+      );
       if (!result.deleted) {
-        if (result.reason === "not_found") throw new TRPCError3({ code: "NOT_FOUND", message: "Lan\xE7amento n\xE3o encontrado no banco ativo." });
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Lan\xE7amentos autom\xE1ticos devem ser corrigidos na opera\xE7\xE3o de origem e n\xE3o podem ser exclu\xEDdos diretamente do caixa." });
+        if (result.reason === "not_found")
+          throw new TRPCError3({
+            code: "NOT_FOUND",
+            message: "Lan\xE7amento n\xE3o encontrado no banco ativo."
+          });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Lan\xE7amentos autom\xE1ticos devem ser corrigidos na opera\xE7\xE3o de origem e n\xE3o podem ser exclu\xEDdos diretamente do caixa."
+        });
       }
       await createAuditLog({
         userId: ctx.user.id,
@@ -2847,10 +3953,18 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         entity: "cash_flow",
         entityId: result.entry.id,
         databaseId: activeDb.id,
-        details: JSON.stringify({ type: result.entry.type, category: result.entry.category, description: result.entry.description, amount: result.entry.amount }),
+        details: JSON.stringify({
+          type: result.entry.type,
+          category: result.entry.category,
+          description: result.entry.description,
+          amount: result.entry.amount
+        }),
         status: "warning"
       });
-      return { success: true, message: "Lan\xE7amento manual exclu\xEDdo do caixa." };
+      return {
+        success: true,
+        message: "Lan\xE7amento manual exclu\xEDdo do caixa."
+      };
     })
   }),
   // ==================== VEHICLES ====================
@@ -2865,24 +3979,26 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       const vehicle = await getVehicleById(input.id);
       return activeDb && vehicle?.databaseId === activeDb.id ? vehicle : null;
     }),
-    create: protectedProcedure2.input(z2.object({
-      clientId: z2.number().int().positive().optional(),
-      vehicleType: z2.enum(["CARRO", "MOTO", "OUTRO"]).optional(),
-      brand: z2.string().trim().optional(),
-      model: z2.string().trim().min(1, "Informe o modelo do ve\xEDculo."),
-      year: z2.coerce.number().int().min(1900).max(2200).optional(),
-      color: z2.string().optional(),
-      plate: z2.string().optional(),
-      renavam: z2.string().optional(),
-      chassi: z2.string().optional(),
-      mileage: z2.coerce.number().int().nonnegative().optional(),
-      purchasePrice: z2.coerce.number().nonnegative().default(0),
-      expenses: z2.coerce.number().nonnegative().default(0),
-      salePrice: z2.coerce.number().nonnegative().optional(),
-      purchaseDate: z2.string().optional(),
-      price: z2.string().optional(),
-      description: z2.string().optional()
-    })).mutation(async ({ input, ctx }) => {
+    create: protectedProcedure2.input(
+      z2.object({
+        clientId: z2.number().int().positive().optional(),
+        vehicleType: z2.enum(["CARRO", "MOTO", "OUTRO"]).optional(),
+        brand: z2.string().trim().optional(),
+        model: z2.string().trim().min(1, "Informe o modelo do ve\xEDculo."),
+        year: z2.coerce.number().int().min(1900).max(2200).optional(),
+        color: z2.string().optional(),
+        plate: z2.string().optional(),
+        renavam: z2.string().optional(),
+        chassi: z2.string().optional(),
+        mileage: z2.coerce.number().int().nonnegative().optional(),
+        purchasePrice: z2.coerce.number().nonnegative().default(0),
+        expenses: z2.coerce.number().nonnegative().default(0),
+        salePrice: z2.coerce.number().nonnegative().optional(),
+        purchaseDate: z2.string().optional(),
+        price: z2.string().optional(),
+        description: z2.string().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
         throw new TRPCError3({
@@ -2898,7 +4014,11 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       }
       if (input.clientId !== void 0) {
         const client = await getClientById(input.clientId);
-        if (!client || client.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+        if (!client || client.databaseId !== activeDb.id)
+          throw new TRPCError3({
+            code: "BAD_REQUEST",
+            message: "Cliente inv\xE1lido para o banco ativo."
+          });
       }
       const purchasePrice = input.purchasePrice.toFixed(2);
       const vehicleData = {
@@ -2915,15 +4035,18 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         databaseId: activeDb.id,
         createdBy: ctx.user.id
       };
-      const { result } = await createVehicleBundle(vehicleData, input.purchasePrice > 0 ? {
-        databaseId: activeDb.id,
-        type: "SAIDA",
-        category: "COMPRA_VEICULO",
-        description: `Compra de ve\xEDculo: ${input.model}`,
-        amount: purchasePrice,
-        movementDate: input.purchaseDate ? new Date(input.purchaseDate) : /* @__PURE__ */ new Date(),
-        createdBy: ctx.user.id
-      } : void 0);
+      const { result } = await createVehicleBundle(
+        vehicleData,
+        input.purchasePrice > 0 ? {
+          databaseId: activeDb.id,
+          type: "SAIDA",
+          category: "COMPRA_VEICULO",
+          description: `Compra de ve\xEDculo: ${input.model}`,
+          amount: purchasePrice,
+          movementDate: input.purchaseDate ? new Date(input.purchaseDate) : /* @__PURE__ */ new Date(),
+          createdBy: ctx.user.id
+        } : void 0
+      );
       await createAuditLog({
         userId: ctx.user.id,
         username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
@@ -2935,25 +4058,27 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return result;
     }),
-    update: protectedProcedure2.input(z2.object({
-      id: z2.number().int().positive(),
-      clientId: z2.number().int().positive().optional().nullable(),
-      vehicleType: z2.enum(["CARRO", "MOTO", "OUTRO"]).optional(),
-      brand: z2.string().trim().optional().nullable(),
-      model: z2.string().trim().min(1).optional(),
-      year: z2.coerce.number().int().min(1900).max(2200).optional().nullable(),
-      color: z2.string().optional().nullable(),
-      plate: z2.string().optional().nullable(),
-      renavam: z2.string().optional().nullable(),
-      chassi: z2.string().optional().nullable(),
-      mileage: z2.coerce.number().int().nonnegative().optional().nullable(),
-      purchasePrice: z2.coerce.number().nonnegative().optional(),
-      expenses: z2.coerce.number().nonnegative().optional(),
-      salePrice: z2.coerce.number().nonnegative().optional().nullable(),
-      status: z2.enum(["disponivel", "vendido", "reservado", "indisponivel"]).optional(),
-      price: z2.string().optional(),
-      description: z2.string().optional().nullable()
-    })).mutation(async ({ input, ctx }) => {
+    update: protectedProcedure2.input(
+      z2.object({
+        id: z2.number().int().positive(),
+        clientId: z2.number().int().positive().optional().nullable(),
+        vehicleType: z2.enum(["CARRO", "MOTO", "OUTRO"]).optional(),
+        brand: z2.string().trim().optional().nullable(),
+        model: z2.string().trim().min(1).optional(),
+        year: z2.coerce.number().int().min(1900).max(2200).optional().nullable(),
+        color: z2.string().optional().nullable(),
+        plate: z2.string().optional().nullable(),
+        renavam: z2.string().optional().nullable(),
+        chassi: z2.string().optional().nullable(),
+        mileage: z2.coerce.number().int().nonnegative().optional().nullable(),
+        purchasePrice: z2.coerce.number().nonnegative().optional(),
+        expenses: z2.coerce.number().nonnegative().optional(),
+        salePrice: z2.coerce.number().nonnegative().optional().nullable(),
+        status: z2.enum(["disponivel", "vendido", "reservado", "indisponivel"]).optional(),
+        price: z2.string().optional(),
+        description: z2.string().optional().nullable()
+      })
+    ).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
         throw new TRPCError3({
           code: "FORBIDDEN",
@@ -2961,12 +4086,24 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo"
+        });
       const currentVehicle = await getVehicleById(input.id);
-      if (!currentVehicle || currentVehicle.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Ve\xEDculo n\xE3o encontrado no banco ativo." });
+      if (!currentVehicle || currentVehicle.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Ve\xEDculo n\xE3o encontrado no banco ativo."
+        });
       if (input.clientId !== void 0 && input.clientId !== null) {
         const client = await getClientById(input.clientId);
-        if (!client || client.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+        if (!client || client.databaseId !== activeDb.id)
+          throw new TRPCError3({
+            code: "BAD_REQUEST",
+            message: "Cliente inv\xE1lido para o banco ativo."
+          });
       }
       const { id, ...data } = input;
       const normalizedData = {
@@ -2996,9 +4133,17 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         });
       }
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo" });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo"
+        });
       const currentVehicle = await getVehicleById(input.id);
-      if (!currentVehicle || currentVehicle.databaseId !== activeDb.id) throw new TRPCError3({ code: "NOT_FOUND", message: "Ve\xEDculo n\xE3o encontrado no banco ativo." });
+      if (!currentVehicle || currentVehicle.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Ve\xEDculo n\xE3o encontrado no banco ativo."
+        });
       await deleteVehicleInDatabase(input.id, activeDb.id);
       await createAuditLog({
         userId: ctx.user.id,
@@ -3016,27 +4161,56 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   // ==================== VEHICLE SALES ====================
   vehicleSales: router({
     list: protectedProcedure2.query(async ({ ctx }) => {
-      if (!ctx.user.canView) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar vendas." });
+      if (!ctx.user.canView)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar vendas."
+        });
       const activeDb = await getActiveDatabase();
       return activeDb ? getVehicleSalesByDatabase(activeDb.id) : [];
     }),
-    create: protectedProcedure2.input(z2.object({
-      vehicleId: z2.number().int().positive(),
-      clientId: z2.number().int().positive().optional(),
-      saleAmount: z2.coerce.number().positive(),
-      receivedAmount: z2.coerce.number().min(0).default(0),
-      paymentMethod: z2.enum(["DINHEIRO", "PIX", "TRANSFERENCIA", "CARTAO", "FINANCIAMENTO", "OUTRO"]).optional(),
-      saleDate: z2.string(),
-      notes: z2.string().optional()
-    })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canInsert) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar vendas." });
+    create: protectedProcedure2.input(
+      z2.object({
+        vehicleId: z2.number().int().positive(),
+        clientId: z2.number().int().positive().optional(),
+        saleAmount: z2.coerce.number().positive(),
+        receivedAmount: z2.coerce.number().min(0).default(0),
+        paymentMethod: z2.enum([
+          "DINHEIRO",
+          "PIX",
+          "TRANSFERENCIA",
+          "CARTAO",
+          "FINANCIAMENTO",
+          "OUTRO"
+        ]).optional(),
+        saleDate: z2.string(),
+        notes: z2.string().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.canInsert)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar vendas."
+        });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo."
+        });
       const saleDate = new Date(input.saleDate);
-      if (Number.isNaN(saleDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data da venda inv\xE1lida." });
+      if (Number.isNaN(saleDate.getTime()))
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Data da venda inv\xE1lida."
+        });
       if (input.clientId !== void 0) {
         const client = await getClientById(input.clientId);
-        if (!client || client.databaseId !== activeDb.id) throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+        if (!client || client.databaseId !== activeDb.id)
+          throw new TRPCError3({
+            code: "BAD_REQUEST",
+            message: "Cliente inv\xE1lido para o banco ativo."
+          });
       }
       const receivedAmount = Math.min(input.receivedAmount, input.saleAmount);
       const data = {
@@ -3051,26 +4225,64 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         notes: input.notes,
         createdBy: ctx.user.id
       };
-      const result = await createVehicleSaleBundle(data, input.vehicleId, activeDb.id, {
+      const result = await createVehicleSaleBundle(
+        data,
+        input.vehicleId,
+        activeDb.id,
+        {
+          databaseId: activeDb.id,
+          type: "ENTRADA",
+          category: "VENDA_VEICULO",
+          description: `Venda de ve\xEDculo #${input.vehicleId}`,
+          amount: receivedAmount.toFixed(2),
+          movementDate: saleDate,
+          clientId: input.clientId ?? null,
+          createdBy: ctx.user.id
+        }
+      );
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
+        action: "create_vehicle_sale",
+        entity: "vehicle_sales",
+        entityId: result.saleId,
         databaseId: activeDb.id,
-        type: "ENTRADA",
-        category: "VENDA_VEICULO",
-        description: `Venda de ve\xEDculo #${input.vehicleId}`,
-        amount: receivedAmount.toFixed(2),
-        movementDate: saleDate,
-        clientId: input.clientId ?? null,
-        createdBy: ctx.user.id
+        details: JSON.stringify(input),
+        status: "success"
       });
-      await createAuditLog({ userId: ctx.user.id, username: ctx.user.name || ctx.user.email || "Usu\xE1rio", action: "create_vehicle_sale", entity: "vehicle_sales", entityId: result.saleId, databaseId: activeDb.id, details: JSON.stringify(input), status: "success" });
       return result;
     }),
-    receive: protectedProcedure2.input(z2.object({ saleId: z2.number().int().positive(), amount: z2.coerce.number().positive(), movementDate: z2.string() })).mutation(async ({ input, ctx }) => {
-      if (!ctx.user.canInsert) throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar recebimentos." });
+    receive: protectedProcedure2.input(
+      z2.object({
+        saleId: z2.number().int().positive(),
+        amount: z2.coerce.number().positive(),
+        movementDate: z2.string()
+      })
+    ).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.canInsert)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para registrar recebimentos."
+        });
       const activeDb = await getActiveDatabase();
-      if (!activeDb) throw new TRPCError3({ code: "BAD_REQUEST", message: "Nenhum banco de dados ativo." });
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco de dados ativo."
+        });
       const movementDate = new Date(input.movementDate);
-      if (Number.isNaN(movementDate.getTime())) throw new TRPCError3({ code: "BAD_REQUEST", message: "Data do recebimento inv\xE1lida." });
-      const result = await receiveVehicleSaleBundle(input.saleId, activeDb.id, input.amount.toFixed(2), movementDate, ctx.user.id);
+      if (Number.isNaN(movementDate.getTime()))
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Data do recebimento inv\xE1lida."
+        });
+      const result = await receiveVehicleSaleBundle(
+        input.saleId,
+        activeDb.id,
+        input.amount.toFixed(2),
+        movementDate,
+        ctx.user.id
+      );
       return { success: true, ...result };
     })
   }),
@@ -3085,20 +4297,53 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       const activeDb = await getActiveDatabase();
       const financing = await getVehicleFinancingById(input.id);
       if (!activeDb || !financing || financing.databaseId !== activeDb.id) {
-        throw new TRPCError3({ code: "NOT_FOUND", message: "Financiamento n\xE3o encontrado no banco ativo." });
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Financiamento n\xE3o encontrado no banco ativo."
+        });
       }
       return financing;
     }),
-    create: protectedProcedure2.input(z2.object({
-      vehicleId: z2.number().int().positive(),
-      clientId: z2.number().int().positive(),
-      vehiclePrice: positiveDecimal("Pre\xE7o do ve\xEDculo"),
-      downPayment: nonNegativeDecimal("Entrada"),
-      interestRate: nonNegativeDecimal("Taxa de juros"),
-      installments: z2.number().int().positive(),
-      startDate: validDate("Data inicial"),
-      notes: z2.string().optional()
-    })).mutation(async ({ input, ctx }) => {
+    details: protectedProcedure2.input(z2.object({ id: z2.number().int().positive() })).query(async ({ input }) => {
+      const activeDb = await getActiveDatabase();
+      const financing = await getVehicleFinancingById(input.id);
+      if (!activeDb || !financing || financing.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Financiamento n\xE3o encontrado no banco ativo."
+        });
+      const [client, vehicle, payments2] = await Promise.all([
+        getClientById(financing.clientId),
+        getVehicleById(financing.vehicleId),
+        getPaymentsByFinancing(financing.id, activeDb.id)
+      ]);
+      const paid = payments2.filter((payment) => payment.status === "pago");
+      const totalPaid = roundMoney(
+        paid.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+      );
+      return {
+        financing,
+        client,
+        vehicle,
+        payments: payments2,
+        totalPaid,
+        remainingBalance: roundMoney(
+          Math.max(0, Number(financing.totalAmount) - totalPaid)
+        )
+      };
+    }),
+    create: protectedProcedure2.input(
+      z2.object({
+        vehicleId: z2.number().int().positive(),
+        clientId: z2.number().int().positive(),
+        vehiclePrice: positiveDecimal("Pre\xE7o do ve\xEDculo"),
+        downPayment: nonNegativeDecimal("Entrada"),
+        interestRate: nonNegativeDecimal("Taxa de juros"),
+        installments: z2.number().int().positive(),
+        startDate: validDate("Data inicial"),
+        notes: z2.string().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
         throw new TRPCError3({
@@ -3117,16 +4362,25 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         getVehicleById(input.vehicleId)
       ]);
       if (!client || client.databaseId !== activeDb.id) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Cliente inv\xE1lido para o banco ativo." });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Cliente inv\xE1lido para o banco ativo."
+        });
       }
       if (!vehicle || vehicle.databaseId !== activeDb.id) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Ve\xEDculo inv\xE1lido para o banco ativo." });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Ve\xEDculo inv\xE1lido para o banco ativo."
+        });
       }
       const startDate = new Date(input.startDate);
       const vehiclePrice = Number(input.vehiclePrice);
       const downPayment = Number(input.downPayment);
       if (downPayment >= vehiclePrice) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "A entrada n\xE3o pode ser maior que o pre\xE7o do ve\xEDculo." });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "A entrada n\xE3o pode ser maior que o pre\xE7o do ve\xEDculo."
+        });
       }
       const financedAmount = roundMoney(vehiclePrice - downPayment);
       const plan = calculateLoanPlan({
@@ -3158,13 +4412,26 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         details: `Financiamento criado: principal R$ ${financedAmount.toFixed(2)}, total R$ ${plan.totalAmount.toFixed(2)}`,
         status: "success"
       });
-      return { ...result, financedAmount, totalAmount: plan.totalAmount, installmentAmount: plan.installmentAmount, endDate };
+      return {
+        ...result,
+        financedAmount,
+        totalAmount: plan.totalAmount,
+        installmentAmount: plan.installmentAmount,
+        endDate
+      };
     }),
-    update: protectedProcedure2.input(z2.object({
-      id: z2.number(),
-      status: z2.enum(["ativo", "pago", "atrasado", "cancelado"]).optional(),
-      notes: z2.string().optional()
-    })).mutation(async ({ input, ctx }) => {
+    update: protectedProcedure2.input(
+      z2.object({
+        id: z2.number(),
+        vehiclePrice: positiveDecimal("Pre\xE7o do ve\xEDculo").optional(),
+        downPayment: nonNegativeDecimal("Entrada").optional(),
+        interestRate: nonNegativeDecimal("Taxa de juros").optional(),
+        installments: z2.coerce.number().int().positive().optional(),
+        startDate: validDate("Data inicial").optional(),
+        status: z2.enum(["ativo", "pago", "atrasado", "cancelado"]).optional(),
+        notes: z2.string().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canEdit) {
         throw new TRPCError3({
           code: "FORBIDDEN",
@@ -3174,9 +4441,43 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       const activeDb = await getActiveDatabase();
       const financing = await getVehicleFinancingById(input.id);
       if (!activeDb || !financing || financing.databaseId !== activeDb.id) {
-        throw new TRPCError3({ code: "NOT_FOUND", message: "Financiamento n\xE3o encontrado no banco ativo." });
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Financiamento n\xE3o encontrado no banco ativo."
+        });
       }
-      const { id, ...data } = input;
+      const { id } = input;
+      const vehiclePrice = input.vehiclePrice === void 0 ? Number(financing.vehiclePrice) : Number(input.vehiclePrice);
+      const downPayment = input.downPayment === void 0 ? Number(financing.downPayment) : Number(input.downPayment);
+      if (downPayment >= vehiclePrice)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "A entrada deve ser menor que o pre\xE7o do ve\xEDculo."
+        });
+      const interestRate = input.interestRate === void 0 ? Number(financing.interestRate) : Number(input.interestRate);
+      const installments = input.installments ?? financing.installments;
+      const startDate = input.startDate ? new Date(input.startDate) : financing.startDate;
+      const financedAmount = roundMoney(vehiclePrice - downPayment);
+      const plan = calculateLoanPlan({
+        principal: financedAmount,
+        ratePercent: interestRate,
+        periods: installments,
+        interestType: "simple",
+        ratePeriod: "month"
+      });
+      const data = {
+        vehiclePrice: vehiclePrice.toFixed(2),
+        downPayment: downPayment.toFixed(2),
+        financedAmount: financedAmount.toFixed(2),
+        interestRate: interestRate.toFixed(2),
+        installments,
+        installmentAmount: plan.installmentAmount.toFixed(2),
+        totalAmount: plan.totalAmount.toFixed(2),
+        startDate,
+        endDate: addPeriods(startDate, installments, "month"),
+        ...input.status !== void 0 ? { status: input.status } : {},
+        ...input.notes !== void 0 ? { notes: input.notes } : {}
+      };
       await updateVehicleFinancing(id, data);
       await createAuditLog({
         userId: ctx.user.id,
@@ -3220,7 +4521,14 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           vehicleExpenses: 0,
           vehicleSalesCount: 0,
           collections: { dueToday: [], overdue: [] },
-          vehicleMetrics: { carsSold: 0, financings: 0, installmentsPaid: 0, installmentsOverdue: 0 },
+          vehicleMetrics: {
+            carsSold: 0,
+            financings: 0,
+            installmentsPaid: 0,
+            installmentsOverdue: 0,
+            totalContracts: 0,
+            totalPaid: 0
+          },
           loanMetrics: {
             totalLent: 0,
             totalReceived: 0,
@@ -3237,13 +4545,32 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       }
       return await getDashboardStats(activeDb.id);
     }),
-    agentPerformance: protectedProcedure2.input(z2.object({ startDate: z2.string().optional(), endDate: z2.string().optional() }).optional()).query(async ({ input, ctx }) => {
+    agentPerformance: protectedProcedure2.input(
+      z2.object({
+        startDate: z2.string().optional(),
+        endDate: z2.string().optional()
+      }).optional()
+    ).query(async ({ input, ctx }) => {
       if (!ctx.user.canView) {
-        throw new TRPCError3({ code: "FORBIDDEN", message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar performance." });
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Voc\xEA n\xE3o tem permiss\xE3o para visualizar performance."
+        });
       }
       const activeDb = await getActiveDatabase();
       if (!activeDb) {
-        return { kpis: { totalAgents: 0, activeAgents: 0, totalPayments: 0, totalPaymentVolume: 0, totalCommissions: 0, bestAgent: null }, ranking: [], evolution: [] };
+        return {
+          kpis: {
+            totalAgents: 0,
+            activeAgents: 0,
+            totalPayments: 0,
+            totalPaymentVolume: 0,
+            totalCommissions: 0,
+            bestAgent: null
+          },
+          ranking: [],
+          evolution: []
+        };
       }
       return await getAgentPerformance(
         activeDb.id,
