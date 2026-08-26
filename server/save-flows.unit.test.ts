@@ -15,7 +15,7 @@ const dbMock = vi.hoisted(() => ({
   createLoanBundle: vi.fn(),
   getLoanById: vi.fn(),
   deleteLoanSafely: vi.fn(),
-  deleteManualCashFlowEntry: vi.fn(),
+  deleteCashFlowEntry: vi.fn(),
   getUserByUsername: vi.fn(),
   getUserByEmail: vi.fn(),
   createLocalUser: vi.fn(),
@@ -215,29 +215,20 @@ describe("fluxos de gravação", () => {
     );
   });
 
-  it("permite ao Super Admin excluir um lançamento manual do caixa", async () => {
-    dbMock.deleteManualCashFlowEntry.mockResolvedValue({
+  it("permite ao Super Admin excluir qualquer lançamento do caixa", async () => {
+    dbMock.deleteCashFlowEntry.mockResolvedValue({
       deleted: true,
-      entry: { id: 31, type: "SAIDA", category: "OUTROS", description: "Despesa manual", amount: "25.00" },
+      entry: { id: 31, type: "SAIDA", category: "LIBERACAO_EMPRESTIMO", description: "Liberação", amount: "1000.00", sourceKey: "LOAN_RELEASE:23", paymentId: null, loanId: 23, vehicleId: null, vehicleSaleId: null },
     });
-    await expect(appRouter.createCaller(context).cashFlow.delete({ id: 31 })).resolves.toMatchObject({ success: true });
-    expect(dbMock.deleteManualCashFlowEntry).toHaveBeenCalledWith(31, 7);
-    expect(dbMock.createAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "delete_manual_cash_flow", entityId: 31 }));
-  });
-
-  it("bloqueia exclusão direta de movimentos automáticos", async () => {
-    dbMock.deleteManualCashFlowEntry.mockResolvedValue({
-      deleted: false,
-      reason: "automatic",
-      entry: { id: 32, type: "SAIDA", category: "LIBERACAO_EMPRESTIMO", description: "Liberação", amount: "1000.00" },
-    });
-    await expect(appRouter.createCaller(context).cashFlow.delete({ id: 32 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(appRouter.createCaller(context).cashFlow.delete({ id: 31, reason: "Correção autorizada" })).resolves.toMatchObject({ success: true });
+    expect(dbMock.deleteCashFlowEntry).toHaveBeenCalledWith(31, 7);
+    expect(dbMock.createAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "delete_cash_flow", entityId: 31, details: expect.stringContaining("Correção autorizada") }));
   });
 
   it("nega a exclusão no caixa para quem não é Super Admin", async () => {
     const adminContext = { ...context, user: { ...context.user!, role: "admin" as const } } as TrpcContext;
-    await expect(appRouter.createCaller(adminContext).cashFlow.delete({ id: 31 })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    expect(dbMock.deleteManualCashFlowEntry).not.toHaveBeenCalled();
+    await expect(appRouter.createCaller(adminContext).cashFlow.delete({ id: 31, reason: "Tentativa sem permissão" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(dbMock.deleteCashFlowEntry).not.toHaveBeenCalled();
   });
 
   it("cria usuário com o perfil e todas as permissões selecionadas", async () => {

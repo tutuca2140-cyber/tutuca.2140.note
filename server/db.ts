@@ -1643,7 +1643,7 @@ export function isManualCashFlowEntry(
   );
 }
 
-export async function deleteManualCashFlowEntry(
+export async function deleteCashFlowEntry(
   id: number,
   databaseId: number
 ) {
@@ -1658,8 +1658,6 @@ export async function deleteManualCashFlowEntry(
     const entry = rows[0];
     if (!entry)
       return { deleted: false as const, reason: "not_found" as const };
-    if (!isManualCashFlowEntry(entry))
-      return { deleted: false as const, reason: "automatic" as const, entry };
     await tx
       .delete(cashFlow)
       .where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId)));

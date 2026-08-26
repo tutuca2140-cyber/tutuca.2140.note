@@ -2200,7 +2200,12 @@ export const appRouter = router({
         return { success: true };
       }),
     delete: superAdminProcedure
-      .input(z.object({ id: z.number().int().positive() }))
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          reason: z.string().trim().min(3).max(500),
+        })
+      )
       .mutation(async ({ input, ctx }) => {
         const activeDb = await db.getActiveDatabase();
         if (!activeDb)
@@ -2208,26 +2213,18 @@ export const appRouter = router({
             code: "BAD_REQUEST",
             message: "Nenhum banco de dados ativo.",
           });
-        const result = await db.deleteManualCashFlowEntry(
-          input.id,
-          activeDb.id
-        );
+        const result = await db.deleteCashFlowEntry(input.id, activeDb.id);
         if (!result.deleted) {
           if (result.reason === "not_found")
             throw new TRPCError({
               code: "NOT_FOUND",
               message: "Lançamento não encontrado no banco ativo.",
             });
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message:
-              "Lançamentos automáticos devem ser corrigidos na operação de origem e não podem ser excluídos diretamente do caixa.",
-          });
         }
         await db.createAuditLog({
           userId: ctx.user.id,
           username: ctx.user.name || ctx.user.email || "Super Admin",
-          action: "delete_manual_cash_flow",
+          action: "delete_cash_flow",
           entity: "cash_flow",
           entityId: result.entry.id,
           databaseId: activeDb.id,
@@ -2236,12 +2233,18 @@ export const appRouter = router({
             category: result.entry.category,
             description: result.entry.description,
             amount: result.entry.amount,
+            reason: input.reason,
+            sourceKey: result.entry.sourceKey,
+            paymentId: result.entry.paymentId,
+            loanId: result.entry.loanId,
+            vehicleId: result.entry.vehicleId,
+            vehicleSaleId: result.entry.vehicleSaleId,
           }),
           status: "warning",
         });
         return {
           success: true,
-          message: "Lançamento manual excluído do caixa.",
+          message: "Lançamento excluído do caixa.",
         };
       }),
   }),

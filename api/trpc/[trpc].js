@@ -1466,20 +1466,7 @@ async function getCashFlowByDatabase(databaseId) {
   if (!db) return [];
   return db.select().from(cashFlow).where(eq(cashFlow.databaseId, databaseId)).orderBy(desc(cashFlow.movementDate));
 }
-var automaticCashCategories = /* @__PURE__ */ new Set([
-  "LIBERACAO_EMPRESTIMO",
-  "JUROS_EMPRESTIMO",
-  "PAGAMENTO_EMPRESTIMO",
-  "QUITACAO_EMPRESTIMO",
-  "PAGAMENTO_FINANCIAMENTO",
-  "COMPRA_VEICULO",
-  "VENDA_VEICULO",
-  "RECEBIMENTO_VENDA_VEICULO"
-]);
-function isManualCashFlowEntry(entry) {
-  return !entry.sourceKey && !entry.paymentId && !entry.loanId && !entry.vehicleId && !entry.vehicleSaleId && !automaticCashCategories.has(entry.category);
-}
-async function deleteManualCashFlowEntry(id, databaseId) {
+async function deleteCashFlowEntry(id, databaseId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.transaction(async (tx) => {
@@ -1487,8 +1474,6 @@ async function deleteManualCashFlowEntry(id, databaseId) {
     const entry = rows[0];
     if (!entry)
       return { deleted: false, reason: "not_found" };
-    if (!isManualCashFlowEntry(entry))
-      return { deleted: false, reason: "automatic", entry };
     await tx.delete(cashFlow).where(and(eq(cashFlow.id, id), eq(cashFlow.databaseId, databaseId)));
     return { deleted: true, entry };
   });
@@ -3937,32 +3922,30 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true };
     }),
-    delete: superAdminProcedure.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
+    delete: superAdminProcedure.input(
+      z2.object({
+        id: z2.number().int().positive(),
+        reason: z2.string().trim().min(3).max(500)
+      })
+    ).mutation(async ({ input, ctx }) => {
       const activeDb = await getActiveDatabase();
       if (!activeDb)
         throw new TRPCError3({
           code: "BAD_REQUEST",
           message: "Nenhum banco de dados ativo."
         });
-      const result = await deleteManualCashFlowEntry(
-        input.id,
-        activeDb.id
-      );
+      const result = await deleteCashFlowEntry(input.id, activeDb.id);
       if (!result.deleted) {
         if (result.reason === "not_found")
           throw new TRPCError3({
             code: "NOT_FOUND",
             message: "Lan\xE7amento n\xE3o encontrado no banco ativo."
           });
-        throw new TRPCError3({
-          code: "BAD_REQUEST",
-          message: "Lan\xE7amentos autom\xE1ticos devem ser corrigidos na opera\xE7\xE3o de origem e n\xE3o podem ser exclu\xEDdos diretamente do caixa."
-        });
       }
       await createAuditLog({
         userId: ctx.user.id,
         username: ctx.user.name || ctx.user.email || "Super Admin",
-        action: "delete_manual_cash_flow",
+        action: "delete_cash_flow",
         entity: "cash_flow",
         entityId: result.entry.id,
         databaseId: activeDb.id,
@@ -3970,13 +3953,19 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           type: result.entry.type,
           category: result.entry.category,
           description: result.entry.description,
-          amount: result.entry.amount
+          amount: result.entry.amount,
+          reason: input.reason,
+          sourceKey: result.entry.sourceKey,
+          paymentId: result.entry.paymentId,
+          loanId: result.entry.loanId,
+          vehicleId: result.entry.vehicleId,
+          vehicleSaleId: result.entry.vehicleSaleId
         }),
         status: "warning"
       });
       return {
         success: true,
-        message: "Lan\xE7amento manual exclu\xEDdo do caixa."
+        message: "Lan\xE7amento exclu\xEDdo do caixa."
       };
     })
   }),
