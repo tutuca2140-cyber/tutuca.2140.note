@@ -23,6 +23,7 @@ import {
   X,
   ClipboardList,
   CalendarDays,
+  Package,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useEffect, useState } from "react";
@@ -132,6 +133,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       name: "Veículos",
       href: "/veiculos",
       icon: Car,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Produtos",
+      href: "/produtos",
+      icon: Package,
       show: user?.canView && regularAccess,
     },
     {

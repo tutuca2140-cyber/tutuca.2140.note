@@ -26,6 +26,7 @@ import { toast } from "sonner";
 
 type Status = "ativo" | "pago" | "atrasado" | "cancelado";
 const emptyForm = () => ({
+  assetType: "veiculo" as "veiculo" | "produto",
   clientId: "",
   vehicleId: "",
   vehiclePrice: "",
@@ -75,6 +76,7 @@ export default function Financiamentos() {
       ),
     [vehicles]
   );
+  const assetLabel = form.assetType === "produto" ? "produto" : "veículo";
   const calculation = useMemo(() => {
     const price = Number(form.vehiclePrice),
       entry = Number(form.downPayment),
@@ -111,7 +113,7 @@ export default function Financiamentos() {
     if (!Number.isInteger(clientId) || clientId <= 0)
       return toast.error("Selecione um cliente.");
     if (!Number.isInteger(vehicleId) || vehicleId <= 0)
-      return toast.error("Selecione um veículo.");
+      return toast.error(`Selecione um ${assetLabel}.`);
     if (!Number.isFinite(vehiclePrice) || vehiclePrice <= 0)
       return toast.error("Informe o preço do veículo.");
     if (
@@ -245,19 +247,60 @@ export default function Financiamentos() {
                       </Select>
                     </div>
                     <div>
-                      <Label>Veículo *</Label>
+                      <Label>Tipo da venda *</Label>
                       <Select
-                        value={form.vehicleId}
-                        onValueChange={value =>
-                          setForm(current => ({ ...current, vehicleId: value }))
+                        value={form.assetType}
+                        onValueChange={(value: "veiculo" | "produto") =>
+                          setForm(current => ({
+                            ...current,
+                            assetType: value,
+                            vehicleId: "",
+                            vehiclePrice: "",
+                          }))
                         }
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Selecionar veículo" />
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="veiculo">Veículo</SelectItem>
+                          <SelectItem value="produto">Produto</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>
+                        {form.assetType === "produto" ? "Produto" : "Veículo"} *
+                      </Label>
+                      <Select
+                        value={form.vehicleId}
+                        onValueChange={value => {
+                          const asset = vehicles.find(
+                            item => item.id === Number(value)
+                          );
+                          setForm(current => ({
+                            ...current,
+                            vehicleId: value,
+                            vehiclePrice: String(
+                              asset?.salePrice ?? asset?.price ?? ""
+                            ),
+                          }));
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue
+                            placeholder={`Selecionar ${assetLabel}`}
+                          />
                         </SelectTrigger>
                         <SelectContent>
                           {vehicles
-                            .filter(vehicle => vehicle.status !== "vendido")
+                            .filter(
+                              vehicle =>
+                                vehicle.status !== "vendido" &&
+                                (form.assetType === "produto"
+                                  ? vehicle.vehicleType === "PRODUTO"
+                                  : vehicle.vehicleType !== "PRODUTO")
+                            )
                             .map(vehicle => (
                               <SelectItem
                                 key={vehicle.id}
@@ -270,7 +313,7 @@ export default function Financiamentos() {
                       </Select>
                     </div>
                     <div>
-                      <Label htmlFor="vehiclePrice">Preço do veículo *</Label>
+                      <Label htmlFor="vehiclePrice">Valor da venda *</Label>
                       <Input
                         id="vehiclePrice"
                         type="number"

@@ -2196,6 +2196,7 @@ export async function getDashboardStats(databaseId: number) {
           model: vehicles.model,
           brand: vehicles.brand,
           plate: vehicles.plate,
+          vehicleType: vehicles.vehicleType,
           status: vehicles.status,
           expenses: vehicles.expenses,
         })
@@ -2422,9 +2423,18 @@ export async function getDashboardStats(databaseId: number) {
     );
     const soldVehicleIds = new Set([
       ...vehicleRows
-        .filter(vehicle => vehicle.status === "vendido")
+        .filter(
+          vehicle =>
+            vehicle.status === "vendido" && vehicle.vehicleType !== "PRODUTO"
+        )
         .map(vehicle => vehicle.id),
-      ...Array.from(financedVehicleIds),
+      ...vehicleRows
+        .filter(
+          vehicle =>
+            financedVehicleIds.has(vehicle.id) &&
+            vehicle.vehicleType !== "PRODUTO"
+        )
+        .map(vehicle => vehicle.id),
     ]);
     const vehiclePayments = allPaymentRows.filter(
       payment => payment.vehicleFinancingId !== null

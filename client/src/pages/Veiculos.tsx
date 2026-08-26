@@ -73,6 +73,7 @@ export default function Veiculos() {
     [clients]
   );
   const filtered = (vehicles ?? []).filter(vehicle => {
+    if (vehicle.vehicleType === "PRODUTO") return false;
     const matchesText =
       `${vehicle.brand ?? ""} ${vehicle.model} ${vehicle.plate ?? ""} ${vehicle.renavam ?? ""}`
         .toLowerCase()

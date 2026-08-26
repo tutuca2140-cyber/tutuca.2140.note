@@ -14,6 +14,7 @@ const Pagamentos = lazy(() => import("./pages/Pagamentos"));
 const Caixa = lazy(() => import("./pages/Caixa"));
 const Agentes = lazy(() => import("./pages/Agentes"));
 const Veiculos = lazy(() => import("./pages/Veiculos"));
+const Produtos = lazy(() => import("./pages/Produtos"));
 const Financiamentos = lazy(() => import("./pages/Financiamentos"));
 const ContasAReceber = lazy(() => import("./pages/ContasAReceber"));
 const Relatorios = lazy(() => import("./pages/Relatorios"));
@@ -35,6 +36,7 @@ function Router() {
       <Route path={"/caixa"} component={Caixa} />
       <Route path={"/agentes"} component={Agentes} />
       <Route path={"/veiculos"} component={Veiculos} />
+      <Route path={"/produtos"} component={Produtos} />
       <Route path={"/financiamentos"} component={Financiamentos} />
       <Route path={"/contas-a-receber"} component={ContasAReceber} />
       <Route path={"/relatorios"} component={Relatorios} />

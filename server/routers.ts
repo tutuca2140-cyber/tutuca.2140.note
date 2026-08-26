@@ -2269,7 +2269,7 @@ export const appRouter = router({
       .input(
         z.object({
           clientId: z.number().int().positive().optional(),
-          vehicleType: z.enum(["CARRO", "MOTO", "OUTRO"]).optional(),
+          vehicleType: z.enum(["CARRO", "MOTO", "PRODUTO", "OUTRO"]).optional(),
           brand: z.string().trim().optional(),
           model: z.string().trim().min(1, "Informe o modelo do veículo."),
           year: z.coerce.number().int().min(1900).max(2200).optional(),
@@ -2332,8 +2332,11 @@ export const appRouter = router({
             ? {
                 databaseId: activeDb.id,
                 type: "SAIDA",
-                category: "COMPRA_VEICULO",
-                description: `Compra de veículo: ${input.model}`,
+                category:
+                  input.vehicleType === "PRODUTO"
+                    ? "COMPRA_PRODUTO"
+                    : "COMPRA_VEICULO",
+                description: `${input.vehicleType === "PRODUTO" ? "Compra de produto" : "Compra de veículo"}: ${input.model}`,
                 amount: purchasePrice,
                 movementDate: input.purchaseDate
                   ? new Date(input.purchaseDate)
@@ -2346,10 +2349,13 @@ export const appRouter = router({
         await db.createAuditLog({
           userId: ctx.user.id,
           username: ctx.user.name || ctx.user.email || "Usuário",
-          action: "create_vehicle",
+          action:
+            input.vehicleType === "PRODUTO"
+              ? "create_product"
+              : "create_vehicle",
           entity: "vehicles",
           databaseId: activeDb.id,
-          details: `Veículo criado: ${input.brand} ${input.model}`,
+          details: `${input.vehicleType === "PRODUTO" ? "Produto" : "Veículo"} criado: ${input.brand ?? ""} ${input.model}`,
           status: "success",
         });
 
@@ -2361,7 +2367,7 @@ export const appRouter = router({
         z.object({
           id: z.number().int().positive(),
           clientId: z.number().int().positive().optional().nullable(),
-          vehicleType: z.enum(["CARRO", "MOTO", "OUTRO"]).optional(),
+          vehicleType: z.enum(["CARRO", "MOTO", "PRODUTO", "OUTRO"]).optional(),
           brand: z.string().trim().optional().nullable(),
           model: z.string().trim().min(1).optional(),
           year: z.coerce
@@ -2749,6 +2755,11 @@ export const appRouter = router({
           databaseId: activeDb.id,
           createdBy: ctx.user.id,
         });
+        await db.updateVehicleInDatabase(
+          input.vehicleId,
+          { status: "vendido", clientId: input.clientId },
+          activeDb.id
+        );
 
         await db.createAuditLog({
           userId: ctx.user.id,
