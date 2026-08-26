@@ -1088,7 +1088,9 @@ export async function getLoansByDatabase(databaseId: number) {
   return await db
     .select()
     .from(loans)
-    .where(eq(loans.databaseId, databaseId))
+    .where(
+      and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)
+    )
     .orderBy(desc(loans.createdAt));
 }
 

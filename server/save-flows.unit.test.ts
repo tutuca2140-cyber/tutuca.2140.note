@@ -13,6 +13,8 @@ const dbMock = vi.hoisted(() => ({
   createAgent: vi.fn(),
   createVehicleFinancing: vi.fn(),
   createLoanBundle: vi.fn(),
+  getLoanById: vi.fn(),
+  deleteLoanSafely: vi.fn(),
   deleteManualCashFlowEntry: vi.fn(),
   getUserByUsername: vi.fn(),
   getUserByEmail: vi.fn(),
@@ -62,6 +64,8 @@ describe("fluxos de gravação", () => {
     dbMock.paymentAlreadyRegistered.mockResolvedValue(false);
     dbMock.createPaymentBundle.mockResolvedValue({ id: 29 });
     dbMock.createAuditLog.mockResolvedValue(undefined);
+    dbMock.getLoanById.mockResolvedValue({ id: 23, databaseId: 7, clientId: 11, amount: "1000.00", status: "ativo" });
+    dbMock.deleteLoanSafely.mockResolvedValue({ deleted: false, cancelled: true, relations: { payments: 1, interestHistory: 1, cashMovements: 1 } });
   });
 
   it("normaliza e salva um agente", async () => {
@@ -192,6 +196,22 @@ describe("fluxos de gravação", () => {
         totalAmount: "1300.00",
       }),
       expect.objectContaining({ amount: "1000.00", category: "LIBERACAO_EMPRESTIMO" }),
+    );
+  });
+
+  it("remove empréstimo do operacional e registra a observação na auditoria", async () => {
+    const result = await appRouter.createCaller(context).loans.delete({
+      id: 23,
+      reason: "Lançamento realizado em duplicidade",
+    });
+    expect(result).toMatchObject({ success: true, cancelled: true });
+    expect(dbMock.deleteLoanSafely).toHaveBeenCalledWith(23, 7);
+    expect(dbMock.createAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "cancel_loan",
+        entityId: 23,
+        details: expect.stringContaining("Lançamento realizado em duplicidade"),
+      })
     );
   });
 

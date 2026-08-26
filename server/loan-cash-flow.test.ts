@@ -62,7 +62,10 @@ describe("ciclo financeiro de empréstimo e caixa", () => {
       expect(Number(restoredLoan?.accruedInterest)).toBe(1152);
       expect(Number(restoredLoan?.remainingBalance)).toBe(2352);
 
-      const deleted = await caller.loans.delete({ id: loanId });
+      const deleted = await caller.loans.delete({
+        id: loanId,
+        reason: "Contrato lançado em duplicidade",
+      });
       expect(deleted.cancelled).toBe(true);
       expect((await db.getLoanById(loanId))?.status).toBe("cancelado");
     } finally {

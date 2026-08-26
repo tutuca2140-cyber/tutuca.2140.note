@@ -1626,7 +1626,16 @@ export const appRouter = router({
       }),
 
     delete: protectedProcedure
-      .input(z.object({ id: z.number() }))
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          reason: z
+            .string()
+            .trim()
+            .min(3, "Informe uma observação com pelo menos 3 caracteres.")
+            .max(500, "A observação deve ter no máximo 500 caracteres."),
+        })
+      )
       .mutation(async ({ input, ctx }) => {
         if (!ctx.user.canDelete) {
           throw new TRPCError({
@@ -1655,14 +1664,20 @@ export const appRouter = router({
           entity: "loans",
           entityId: input.id,
           databaseId: activeDb.id,
-          details: JSON.stringify(result),
+          details: JSON.stringify({
+            ...result,
+            reason: input.reason,
+            previousStatus: currentLoan.status,
+            clientId: currentLoan.clientId,
+            amount: currentLoan.amount,
+          }),
           status: result.cancelled ? "warning" : "success",
         });
         return {
           success: true,
           cancelled: result.cancelled,
           message: result.cancelled
-            ? "Empréstimo cancelado para preservar o histórico financeiro."
+            ? "Empréstimo removido dos registros operacionais e do dashboard."
             : "Empréstimo excluído com sucesso.",
           relations: result.relations,
         };

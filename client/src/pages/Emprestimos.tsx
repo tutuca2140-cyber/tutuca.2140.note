@@ -71,6 +71,8 @@ export default function Emprestimos() {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [form, setForm] = useState<LoanForm>(emptyForm);
   const { data: loans, isLoading } = trpc.loans.list.useQuery();
@@ -205,17 +207,19 @@ export default function Emprestimos() {
     }
   };
 
-  const handleDelete = async (loanId: number) => {
-    if (
-      !window.confirm(
-        "Este empréstimo possui histórico e movimentações financeiras vinculadas. A exclusão será protegida para preservar o caixa. Deseja continuar?"
-      )
-    )
+  const handleDelete = async () => {
+    if (deletingId === null) return;
+    const reason = deleteReason.trim();
+    if (reason.length < 3) {
+      toast.error("Informe uma observação com pelo menos 3 caracteres.");
       return;
+    }
     try {
-      const result = await deleteLoan.mutateAsync({ id: loanId });
+      const result = await deleteLoan.mutateAsync({ id: deletingId, reason });
       await invalidateFinance();
       toast.success(result.message);
+      setDeletingId(null);
+      setDeleteReason("");
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -567,7 +571,10 @@ export default function Emprestimos() {
                       <Button
                         size="sm"
                         variant="destructive"
-                        onClick={() => handleDelete(loan.id)}
+                        onClick={() => {
+                          setDeletingId(loan.id);
+                          setDeleteReason("");
+                        }}
                         disabled={deleteLoan.isPending}
                       >
                         <Trash2 className="mr-1.5 h-4 w-4" />
@@ -746,6 +753,51 @@ export default function Emprestimos() {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+        <Dialog
+          open={deletingId !== null}
+          onOpenChange={value => {
+            if (!value) {
+              setDeletingId(null);
+              setDeleteReason("");
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Apagar empréstimo #{deletingId}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                O empréstimo deixará de aparecer nos registros operacionais e
+                no dashboard. A observação ficará salva na auditoria.
+              </p>
+              <div>
+                <Label htmlFor="loan-delete-reason">Observação obrigatória</Label>
+                <Textarea
+                  id="loan-delete-reason"
+                  value={deleteReason}
+                  onChange={event => setDeleteReason(event.target.value)}
+                  maxLength={500}
+                  placeholder="Informe o motivo da exclusão"
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setDeletingId(null)}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={handleDelete}
+                  disabled={deleteLoan.isPending || deleteReason.trim().length < 3}
+                >
+                  {deleteLoan.isPending ? "Apagando..." : "Confirmar exclusão"}
+                </Button>
+              </div>
+            </div>
           </DialogContent>
         </Dialog>
       </div>

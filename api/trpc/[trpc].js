@@ -1144,7 +1144,9 @@ async function deletePaymentBundle(id, databaseId) {
 async function getLoansByDatabase(databaseId) {
   const db = await getDb();
   if (!db) return [];
-  return await db.select().from(loans).where(eq(loans.databaseId, databaseId)).orderBy(desc(loans.createdAt));
+  return await db.select().from(loans).where(
+    and(eq(loans.databaseId, databaseId), sql`${loans.status} <> 'cancelado'`)
+  ).orderBy(desc(loans.createdAt));
 }
 async function getLoanById(id) {
   const db = await getDb();
@@ -3478,7 +3480,12 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return { success: true, message: "Empr\xE9stimo atualizado com sucesso." };
     }),
-    delete: protectedProcedure2.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
+    delete: protectedProcedure2.input(
+      z2.object({
+        id: z2.number().int().positive(),
+        reason: z2.string().trim().min(3, "Informe uma observa\xE7\xE3o com pelo menos 3 caracteres.").max(500, "A observa\xE7\xE3o deve ter no m\xE1ximo 500 caracteres.")
+      })
+    ).mutation(async ({ input, ctx }) => {
       if (!ctx.user.canDelete) {
         throw new TRPCError3({
           code: "FORBIDDEN",
@@ -3505,13 +3512,19 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         entity: "loans",
         entityId: input.id,
         databaseId: activeDb.id,
-        details: JSON.stringify(result),
+        details: JSON.stringify({
+          ...result,
+          reason: input.reason,
+          previousStatus: currentLoan.status,
+          clientId: currentLoan.clientId,
+          amount: currentLoan.amount
+        }),
         status: result.cancelled ? "warning" : "success"
       });
       return {
         success: true,
         cancelled: result.cancelled,
-        message: result.cancelled ? "Empr\xE9stimo cancelado para preservar o hist\xF3rico financeiro." : "Empr\xE9stimo exclu\xEDdo com sucesso.",
+        message: result.cancelled ? "Empr\xE9stimo removido dos registros operacionais e do dashboard." : "Empr\xE9stimo exclu\xEDdo com sucesso.",
         relations: result.relations
       };
     })
