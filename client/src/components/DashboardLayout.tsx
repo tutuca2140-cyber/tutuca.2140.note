@@ -185,9 +185,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             )}
           </Button>
           <img
-            src="/note-note-logo.webp"
+            src="/brand/note-note-logo-official.png"
             alt="Note Note"
-            className="h-10 w-24 rounded-md object-cover object-center"
+            className="h-10 w-32 object-contain object-left"
           />
         </div>
       </div>
@@ -203,9 +203,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <div className="flex flex-col h-full">
           <div className="px-4 py-4 border-b border-border">
             <img
-              src="/note-note-logo.webp"
+              src="/brand/note-note-logo-official.png"
               alt="Note Note"
-              className="h-auto w-full rounded-xl border border-border object-contain shadow-sm"
+              className="h-auto w-full object-contain"
             />
             <p className="text-xs text-muted-foreground mt-1 tracking-wide">
               Sistema de Gestão

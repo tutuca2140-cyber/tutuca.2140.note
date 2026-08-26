@@ -79,9 +79,9 @@ export default function Login() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <img
-            src="/note-note-logo.webp"
+            src="/brand/note-note-logo-official.png"
             alt="Note Note"
-            className="mx-auto mb-4 w-full max-w-sm rounded-2xl border border-blue-900/10 object-contain shadow-lg"
+            className="mx-auto mb-4 w-full max-w-sm object-contain"
           />
           <p className="text-gray-600 mt-2">Sistema de Gestão Financeira</p>
         </div>
