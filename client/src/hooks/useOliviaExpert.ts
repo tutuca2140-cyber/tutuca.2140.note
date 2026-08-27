@@ -4,12 +4,62 @@ import { useOliviaActions } from "@/hooks/useOliviaActions";
 const ACTION_HINT = /\b(criar|cadastrar|registrar|lançar|lancar|atualizar|alterar|editar|marcar|incluir|excluir|apagar|deletar|remover)\b/i;
 const INSIGHT_HINT = /\b(risco|previs[aã]o|prever|inadimpl[eê]ncia|chance de atraso|caixa previsto|pr[oó]ximos 30 dias)\b/i;
 
+type ChunkHandler = (accumulated: string) => void;
+
+async function readOliviaStream(message: string, onChunk?: ChunkHandler) {
+  const response = await fetch("/api/olivia-stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (!response.ok || !response.body) return null;
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let accumulated = "";
+
+  const consume = (block: string) => {
+    for (const line of block.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const raw = trimmed.slice(5).trim();
+      if (!raw || raw === "[DONE]") continue;
+      try {
+        const parsed = JSON.parse(raw);
+        const delta = parsed?.choices?.[0]?.delta?.content;
+        if (typeof delta === "string" && delta) {
+          accumulated += delta;
+          onChunk?.(accumulated);
+        }
+      } catch {
+        // fragmento SSE incompleto: permanece no buffer até o próximo bloco
+      }
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary >= 0) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      consume(block);
+      boundary = buffer.indexOf("\n\n");
+    }
+    if (done) break;
+  }
+  if (buffer.trim()) consume(buffer);
+  return accumulated.trim() || null;
+}
+
 export function useOliviaExpert(enabled: boolean) {
   const [pending, setPending] = useState(false);
   const actions = useOliviaActions(enabled);
   const pendingActionRef = useRef(false);
 
-  const ask = useCallback(async (message: string) => {
+  const ask = useCallback(async (message: string, onChunk?: ChunkHandler) => {
     if (!enabled) return null;
     const normalized = message.trim().toLocaleLowerCase("pt-BR");
 
@@ -48,28 +98,13 @@ export function useOliviaExpert(enabled: boolean) {
         const response = await fetch("/api/olivia-insights");
         if (response.ok) {
           const insights = await response.json();
-          const ai = await fetch("/api/olivia-intelligence", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              message: `${message}\n\nIndicadores preditivos autorizados calculados pelo sistema: ${JSON.stringify(insights)}`,
-            }),
-          });
-          if (ai.ok) {
-            const data = await ai.json();
-            if (data.reply) return String(data.reply);
-          }
+          const enriched = `${message}\n\nIndicadores preditivos autorizados calculados pelo sistema: ${JSON.stringify(insights)}`;
+          const streamed = await readOliviaStream(enriched, onChunk);
+          if (streamed) return streamed;
         }
       }
 
-      const response = await fetch("/api/olivia-intelligence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-      });
-      if (!response.ok) return null;
-      const data = (await response.json()) as { reply?: string };
-      return data.reply?.trim() || null;
+      return await readOliviaStream(message, onChunk);
     } catch {
       return null;
     } finally {
