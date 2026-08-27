@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { useOliviaActions } from "@/hooks/useOliviaActions";
 
 const ACTION_HINT = /\b(criar|cadastrar|registrar|lançar|lancar|atualizar|alterar|editar|marcar|incluir|excluir|apagar|deletar|remover)\b/i;
+const INSIGHT_HINT = /\b(risco|previs[aã]o|prever|inadimpl[eê]ncia|chance de atraso|caixa previsto|pr[oó]ximos 30 dias)\b/i;
 
 export function useOliviaExpert(enabled: boolean) {
   const [pending, setPending] = useState(false);
@@ -41,6 +42,24 @@ export function useOliviaExpert(enabled: boolean) {
           return String(plan.reply);
         }
         if (plan?.question) return String(plan.question);
+      }
+
+      if (INSIGHT_HINT.test(message)) {
+        const response = await fetch("/api/olivia-insights");
+        if (response.ok) {
+          const insights = await response.json();
+          const ai = await fetch("/api/olivia-intelligence", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: `${message}\n\nIndicadores preditivos autorizados calculados pelo sistema: ${JSON.stringify(insights)}`,
+            }),
+          });
+          if (ai.ok) {
+            const data = await ai.json();
+            if (data.reply) return String(data.reply);
+          }
+        }
       }
 
       const response = await fetch("/api/olivia-intelligence", {
