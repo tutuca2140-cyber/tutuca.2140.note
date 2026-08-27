@@ -13,6 +13,7 @@ export type OliviaUserContext = {
   role: "user" | "admin" | "super_admin" | string;
   username?: string | null;
   name?: string | null;
+  canUseOlivia?: boolean;
   canView: boolean;
   canInsert: boolean;
   canEdit: boolean;
@@ -31,17 +32,32 @@ const permissionMap: Record<Exclude<OliviaAction, "delete">, keyof OliviaUserCon
 };
 
 /**
+ * Super Admin is the only authority that can grant Olivia access.
+ * The protected Super Admin account is always allowed to use Olivia.
+ */
+export function assertOliviaEnabled(user: OliviaUserContext) {
+  const isSuperAdmin = user.role === "super_admin";
+  if (!isSuperAdmin && user.canUseOlivia !== true) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "O acesso à Olivia não foi liberado pelo Super Administrador para este usuário.",
+    });
+  }
+}
+
+/**
  * Central security gate for every Olivia operation.
  *
  * Rules:
- * 1. Olivia never has more authority than the authenticated user.
- * 2. Delete is never delegated to Olivia. It remains a direct Super Admin action.
- * 3. Dashboard-only accounts cannot use Olivia for operational actions.
- * 4. Super Admin remains the highest authority; Olivia is always subordinate.
- *
- * This guard must be called server-side before any Olivia query or mutation.
+ * 1. Olivia access must first be granted by the Super Admin.
+ * 2. Olivia never has more authority than the authenticated user.
+ * 3. Delete is never delegated to Olivia. It remains a direct Super Admin action.
+ * 4. Dashboard-only accounts cannot use Olivia for operational actions.
+ * 5. Super Admin remains the highest authority; Olivia is always subordinate.
  */
 export function assertOliviaActionAllowed(user: OliviaUserContext, action: OliviaAction) {
+  assertOliviaEnabled(user);
+
   if (action === "delete") {
     throw new TRPCError({
       code: "FORBIDDEN",
@@ -70,13 +86,15 @@ export function assertOliviaActionAllowed(user: OliviaUserContext, action: Olivi
  * Useful for both the backend prompt/tool registry and the frontend UI.
  */
 export function getOliviaCapabilities(user: OliviaUserContext) {
+  const enabled = user.role === "super_admin" || user.canUseOlivia === true;
   return {
-    canView: user.canView,
-    canInsert: !user.dashboardOnly && user.canInsert,
-    canEdit: !user.dashboardOnly && user.canEdit,
+    enabled,
+    canView: enabled && user.canView,
+    canInsert: enabled && !user.dashboardOnly && user.canInsert,
+    canEdit: enabled && !user.dashboardOnly && user.canEdit,
     canDelete: false,
-    canGenerateReports: user.canGenerateReports,
-    canAccessSettings: !user.dashboardOnly && user.canAccessSettings,
+    canGenerateReports: enabled && user.canGenerateReports,
+    canAccessSettings: enabled && !user.dashboardOnly && user.canAccessSettings,
     isSuperAdmin: user.role === "super_admin",
     dashboardOnly: user.dashboardOnly,
   } as const;
