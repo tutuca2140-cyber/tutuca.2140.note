@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useOliviaExpert } from "@/hooks/useOliviaExpert";
 import { useOliviaMemory } from "@/hooks/useOliviaMemory";
-import { useOliviaV2 } from "@/hooks/useOliviaV2";
 import { trpc } from "@/lib/trpc";
 import { Clock3, Send, ShieldCheck, UserRound } from "lucide-react";
 import { FormEvent, useState } from "react";
@@ -27,22 +26,15 @@ const planLabel = (plan: string) =>
 export default function Olivia() {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: "Oi! Como posso te ajudar?",
-    },
+    { role: "assistant", content: "Oi! Como posso te ajudar?" },
   ]);
   const { data: access, isLoading } = trpc.olivia.access.useQuery();
   const enabled = access?.enabled === true;
   const { data: history = [], refetch: refreshHistory } =
-    trpc.olivia.history.useQuery(undefined, {
-      enabled,
-    });
-  const chat = trpc.olivia.chat.useMutation();
+    trpc.olivia.history.useQuery(undefined, { enabled });
   const expert = useOliviaExpert(enabled);
   const memory = useOliviaMemory(enabled);
-  const oliviaV2 = useOliviaV2(enabled);
-  const isPending = chat.isPending || expert.pending;
+  const isPending = expert.pending;
 
   const send = async (text?: string) => {
     const content = (text ?? message).trim();
@@ -50,43 +42,17 @@ export default function Olivia() {
     setMessage("");
     setMessages(current => [...current, { role: "user", content }]);
 
-    const expertReply = await expert.ask(content);
-    if (expertReply) {
-      setMessages(current => [
-        ...current,
-        { role: "assistant", content: expertReply },
-      ]);
-      void memory.remember(content, expertReply);
-      void refreshHistory();
-      return;
-    }
-
-    const v2Result = oliviaV2.tryHandle(content);
-    if (v2Result) {
-      setMessages(current => [
-        ...current,
-        { role: "assistant", content: v2Result.reply },
-      ]);
-      void memory.remember(content, v2Result.reply);
-      return;
-    }
-
-    try {
-      const result = await chat.mutateAsync({ message: content });
-      setMessages(current => [
-        ...current,
-        { role: "assistant", content: result.reply },
-      ]);
-      void memory.remember(content, result.reply);
-      void refreshHistory();
-    } catch (error) {
-      const errorContent =
-        error instanceof Error
-          ? error.message
-          : "Não foi possível falar com a Olivia.";
+    const reply = await expert.ask(content);
+    if (!reply) {
+      const errorContent = "Não consegui concluir essa resposta agora. Tente novamente.";
       setMessages(current => [...current, { role: "assistant", content: errorContent }]);
       toast.error(errorContent);
+      return;
     }
+
+    setMessages(current => [...current, { role: "assistant", content: reply }]);
+    void memory.remember(content, reply);
+    void refreshHistory();
   };
 
   const submit = (event: FormEvent) => {
@@ -97,9 +63,7 @@ export default function Olivia() {
   if (isLoading)
     return (
       <DashboardLayout>
-        <p className="py-12 text-center text-muted-foreground">
-          Carregando Olivia...
-        </p>
+        <p className="py-12 text-center text-muted-foreground">Carregando Olivia...</p>
       </DashboardLayout>
     );
 
@@ -115,8 +79,7 @@ export default function Olivia() {
             />
             <h1 className="mt-4 text-2xl font-bold">Olivia não disponível</h1>
             <p className="mt-2 text-muted-foreground">
-              O Super Administrador precisa habilitar a assistente para a sua
-              conta.
+              O Super Administrador precisa habilitar a assistente para a sua conta.
             </p>
           </CardContent>
         </Card>
@@ -137,9 +100,7 @@ export default function Olivia() {
               />
               <div>
                 <h1 className="text-3xl font-bold">Olivia</h1>
-                <p className="mt-1 text-cyan-100">
-                  Assistente virtual segura do Note Note
-                </p>
+                <p className="mt-1 text-cyan-100">Assistente virtual segura do Note Note</p>
                 <p className="mt-1 flex items-center gap-1.5 text-xs text-emerald-300">
                   <span className="h-2 w-2 rounded-full bg-emerald-400" />
                   Online e pronta para ajudar
@@ -157,6 +118,7 @@ export default function Olivia() {
             </div>
           </div>
         </div>
+
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <Card className="overflow-hidden border-cyan-400/20 shadow-xl">
             <CardHeader className="border-b bg-gradient-to-r from-slate-950 to-blue-950 text-white">
@@ -214,6 +176,7 @@ export default function Olivia() {
                   </div>
                 )}
               </div>
+
               <div className="border-t bg-background/95 p-4">
                 <div className="mb-3 flex flex-wrap gap-2">
                   {suggestions.map(suggestion => (
@@ -257,6 +220,7 @@ export default function Olivia() {
               </div>
             </CardContent>
           </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
