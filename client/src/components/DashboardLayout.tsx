@@ -1,4 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import OliviaFloatingAssistant from "@/components/OliviaFloatingAssistant";
+import ThemeToggle from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -275,6 +277,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 </p>
               </div>
             </div>
+            <ThemeToggle />
             {availableDatabases.length > 0 && (
               <div className="mt-3">
                 <p className="mb-1.5 text-xs font-medium text-muted-foreground">
@@ -391,6 +394,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           onClick={() => setSidebarOpen(false)}
         />
       )}
+      <OliviaFloatingAssistant />
     </div>
   );
 }

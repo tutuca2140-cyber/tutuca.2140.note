@@ -4,11 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
-import { Bot, Clock3, Send, ShieldCheck, UserRound } from "lucide-react";
+import { Clock3, Send, ShieldCheck, UserRound } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { toast } from "sonner";
 
 type Message = { role: "user" | "assistant"; content: string };
+const OLIVIA_AVATAR = "/brand/olivia-assistant.webp";
 
 const suggestions = [
   "Quais recebimentos vencem hoje?",
@@ -77,7 +78,11 @@ export default function Olivia() {
       <DashboardLayout>
         <Card className="mx-auto max-w-xl">
           <CardContent className="flex flex-col items-center py-12 text-center">
-            <Bot className="h-12 w-12 text-muted-foreground" />
+            <img
+              src={OLIVIA_AVATAR}
+              alt="Olivia"
+              className="h-24 w-24 rounded-full border-4 border-muted object-cover grayscale"
+            />
             <h1 className="mt-4 text-2xl font-bold">Olivia não disponível</h1>
             <p className="mt-2 text-muted-foreground">
               O Super Administrador precisa habilitar a assistente para a sua
@@ -91,43 +96,65 @@ export default function Olivia() {
   return (
     <DashboardLayout>
       <div className="space-y-5">
-        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-          <div>
-            <h1 className="flex items-center gap-2 text-3xl font-bold">
-              <Bot className="h-8 w-8 text-primary" />
-              Olivia
-            </h1>
-            <p className="mt-1 text-muted-foreground">
-              Assistente virtual segura do Note Note
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Badge>{planLabel(access.plan)}</Badge>
-            <Badge variant="outline">
-              <ShieldCheck className="mr-1 h-3 w-3" />
-              Banco autorizado
-            </Badge>
+        <div className="relative overflow-hidden rounded-3xl border border-cyan-400/20 bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-900 p-5 text-white shadow-[0_20px_60px_rgba(8,145,178,0.18)]">
+          <div className="absolute inset-0 opacity-20 [background-image:radial-gradient(circle_at_20%_20%,white_1px,transparent_1px)] [background-size:20px_20px]" />
+          <div className="relative flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-4">
+              <img
+                src={OLIVIA_AVATAR}
+                alt="Olivia"
+                className="h-20 w-20 rounded-full border-2 border-cyan-300 object-cover shadow-[0_0_25px_rgba(103,232,249,0.65)]"
+              />
+              <div>
+                <h1 className="text-3xl font-bold">Olivia</h1>
+                <p className="mt-1 text-cyan-100">
+                  Assistente virtual segura do Note Note
+                </p>
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-emerald-300">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                  Online e pronta para ajudar
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Badge className="border-cyan-300/40 bg-cyan-300/15 text-cyan-50">
+                {planLabel(access.plan)}
+              </Badge>
+              <Badge className="border-white/20 bg-white/10 text-white">
+                <ShieldCheck className="mr-1 h-3 w-3" />
+                Banco autorizado
+              </Badge>
+            </div>
           </div>
         </div>
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <Card className="overflow-hidden">
-            <CardHeader className="border-b bg-muted/30">
-              <CardTitle className="text-base">Chat com a Olivia</CardTitle>
+          <Card className="overflow-hidden border-cyan-400/20 shadow-xl">
+            <CardHeader className="border-b bg-gradient-to-r from-slate-950 to-blue-950 text-white">
+              <CardTitle className="flex items-center gap-3 text-base">
+                <img
+                  src={OLIVIA_AVATAR}
+                  alt=""
+                  className="h-9 w-9 rounded-full border border-cyan-300 object-cover"
+                />
+                <span>Chat com a Olivia</span>
+              </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="h-[52vh] min-h-[420px] space-y-4 overflow-y-auto p-4 sm:p-6">
+              <div className="h-[52vh] min-h-[420px] space-y-4 overflow-y-auto bg-[linear-gradient(135deg,rgba(8,47,73,0.05)_25%,transparent_25%,transparent_50%,rgba(8,47,73,0.05)_50%,rgba(8,47,73,0.05)_75%,transparent_75%)] bg-[length:28px_28px] p-4 sm:p-6">
                 {messages.map((item, index) => (
                   <div
                     key={index}
                     className={`flex gap-3 ${item.role === "user" ? "justify-end" : "justify-start"}`}
                   >
                     {item.role === "assistant" && (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                        <Bot className="h-4 w-4 text-primary" />
-                      </div>
+                      <img
+                        src={OLIVIA_AVATAR}
+                        alt=""
+                        className="h-9 w-9 shrink-0 rounded-full border border-cyan-300 object-cover"
+                      />
                     )}
                     <div
-                      className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed ${item.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
+                      className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${item.role === "user" ? "rounded-br-md bg-gradient-to-br from-blue-600 to-cyan-600 text-white" : "rounded-bl-md border bg-card"}`}
                     >
                       {item.content}
                     </div>
@@ -139,13 +166,25 @@ export default function Olivia() {
                   </div>
                 ))}
                 {chat.isPending && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Bot className="h-4 w-4 animate-pulse" />
-                    Olivia está consultando os dados autorizados...
+                  <div className="flex items-end gap-2">
+                    <img
+                      src={OLIVIA_AVATAR}
+                      alt=""
+                      className="h-9 w-9 rounded-full border border-cyan-300 object-cover"
+                    />
+                    <div className="flex gap-1 rounded-2xl rounded-bl-md border bg-card px-4 py-3">
+                      {[0, 1, 2].map(dot => (
+                        <span
+                          key={dot}
+                          className="h-2 w-2 animate-bounce rounded-full bg-cyan-500"
+                          style={{ animationDelay: `${dot * 120}ms` }}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
-              <div className="border-t p-4">
+              <div className="border-t bg-background/95 p-4">
                 <div className="mb-3 flex flex-wrap gap-2">
                   {suggestions.map(suggestion => (
                     <Button
@@ -160,17 +199,22 @@ export default function Olivia() {
                     </Button>
                   ))}
                 </div>
-                <form onSubmit={submit} className="flex gap-2">
+                <form
+                  onSubmit={submit}
+                  className="flex gap-2 rounded-full border bg-muted/40 p-1.5 pl-4 focus-within:ring-2 focus-within:ring-cyan-500/40"
+                >
                   <Input
                     value={message}
                     onChange={event => setMessage(event.target.value)}
-                    placeholder="Pergunte sobre clientes, contratos ou vencimentos..."
+                    placeholder="Fale com a Olivia..."
+                    className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
                     maxLength={500}
                     disabled={chat.isPending}
                   />
                   <Button
                     type="submit"
                     size="icon"
+                    className="shrink-0 rounded-full bg-gradient-to-br from-blue-600 to-cyan-500"
                     disabled={!message.trim() || chat.isPending}
                     aria-label="Enviar mensagem"
                   >
