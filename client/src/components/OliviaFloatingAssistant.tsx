@@ -4,19 +4,11 @@ import { useOliviaMemory } from "@/hooks/useOliviaMemory";
 import { useOliviaV2 } from "@/hooks/useOliviaV2";
 import { useOliviaVoice } from "@/hooks/useOliviaVoice";
 import { trpc } from "@/lib/trpc";
-import {
-  Grip,
-  Mic,
-  MicOff,
-  Send,
-  ShieldCheck,
-  Volume2,
-  VolumeX,
-  X,
-} from "lucide-react";
+import { Grip, Mic, MicOff, Send, ShieldCheck, Sparkles, X } from "lucide-react";
 import {
   FormEvent,
   PointerEvent as ReactPointerEvent,
+  ReactNode,
   useEffect,
   useRef,
   useState,
@@ -28,6 +20,34 @@ type Point = { x: number; y: number };
 type Message = { role: "user" | "assistant"; content: string };
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), Math.max(min, max));
+
+function renderOliviaMessage(content: string): ReactNode {
+  const lines = content.split("\n");
+  return lines.map((line, lineIndex) => {
+    const parts = line.split(/(\*\*[^*]+\*\*|^[^:•]{2,42}:)/g).filter(Boolean);
+    return (
+      <span key={`${lineIndex}-${line}`} className="block min-h-[1.25rem]">
+        {parts.map((part, index) => {
+          if (part.startsWith("**") && part.endsWith("**")) {
+            return (
+              <strong key={index} className="font-semibold text-cyan-700 dark:text-cyan-300">
+                {part.slice(2, -2)}
+              </strong>
+            );
+          }
+          if (/^[^:•]{2,42}:$/.test(part)) {
+            return (
+              <strong key={index} className="font-semibold text-foreground">
+                {part}
+              </strong>
+            );
+          }
+          return <span key={index}>{part}</span>;
+        })}
+      </span>
+    );
+  });
+}
 
 export default function OliviaFloatingAssistant() {
   const [position, setPosition] = useState<Point | null>(null);
@@ -69,9 +89,7 @@ export default function OliviaFloatingAssistant() {
         let saved = current;
         if (!saved) {
           try {
-            saved = JSON.parse(
-              localStorage.getItem(POSITION_KEY) || "null"
-            ) as Point | null;
+            saved = JSON.parse(localStorage.getItem(POSITION_KEY) || "null") as Point | null;
           } catch {
             saved = null;
           }
@@ -189,23 +207,15 @@ export default function OliviaFloatingAssistant() {
 
     const v2Result = oliviaV2.tryHandle(content);
     if (v2Result) {
-      setMessages(current => [
-        ...current,
-        { role: "assistant", content: v2Result.reply },
-      ]);
+      setMessages(current => [...current, { role: "assistant", content: v2Result.reply }]);
       void memory.remember(content, v2Result.reply);
-      if (memory.voiceEnabled) voice.speak(v2Result.reply);
       return;
     }
 
     try {
       const result = await chat.mutateAsync({ message: content });
-      setMessages(current => [
-        ...current,
-        { role: "assistant", content: result.reply },
-      ]);
+      setMessages(current => [...current, { role: "assistant", content: result.reply }]);
       void memory.remember(content, result.reply);
-      if (memory.voiceEnabled) voice.speak(result.reply);
     } catch (error) {
       setMessages(current => [
         ...current,
@@ -231,26 +241,29 @@ export default function OliviaFloatingAssistant() {
         <section
           aria-label="Chat com a assistente Olivia"
           className="fixed z-[70] flex overflow-hidden rounded-3xl border border-cyan-400/30 bg-background/95 shadow-[0_24px_80px_rgba(8,145,178,0.28)] backdrop-blur-xl"
-          style={{
-            left: panelX,
-            top: panelY,
-            width: panelWidth,
-            height: panelHeight,
-          }}
+          style={{ left: panelX, top: panelY, width: panelWidth, height: panelHeight }}
         >
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className="relative flex items-center gap-3 overflow-hidden bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-900 px-4 py-3 text-white">
+            <header className="relative flex items-center gap-3 overflow-hidden bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-900 px-4 py-3.5 text-white">
               <div className="absolute inset-0 opacity-20 [background-image:radial-gradient(circle_at_20%_20%,white_1px,transparent_1px)] [background-size:18px_18px]" />
-              <img
-                src={OLIVIA_AVATAR}
-                alt="Olivia"
-                className="relative h-11 w-11 rounded-full border-2 border-cyan-300 object-cover shadow-[0_0_18px_rgba(103,232,249,0.7)]"
-              />
+              <div className="relative">
+                <div className="absolute -inset-1 rounded-full bg-cyan-300/20 blur-md" />
+                <img
+                  src={OLIVIA_AVATAR}
+                  alt="Olivia"
+                  className="relative h-12 w-12 rounded-full border-2 border-cyan-300 object-cover shadow-[0_0_18px_rgba(103,232,249,0.7)]"
+                />
+              </div>
               <div className="relative min-w-0 flex-1">
-                <p className="font-semibold">Olivia</p>
-                <p className="flex items-center gap-1 text-xs text-cyan-100">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                  Assistente do Note Note
+                <div className="flex items-center gap-2">
+                  <p className="bg-gradient-to-r from-white via-cyan-100 to-cyan-300 bg-clip-text text-lg font-bold tracking-wide text-transparent">
+                    Olivia
+                  </p>
+                  <Sparkles className="h-3.5 w-3.5 text-cyan-300" />
+                </div>
+                <p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-medium text-cyan-100/90">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_7px_rgba(74,222,128,0.9)]" />
+                  Assistente inteligente do Note Note
                 </p>
               </div>
               <Button
@@ -275,17 +288,17 @@ export default function OliviaFloatingAssistant() {
                     <img
                       src={OLIVIA_AVATAR}
                       alt=""
-                      className="h-7 w-7 rounded-full border border-cyan-300 object-cover"
+                      className="h-7 w-7 rounded-full border border-cyan-300 object-cover shadow-sm"
                     />
                   )}
                   <div
-                    className={`max-w-[82%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed shadow-sm ${
+                    className={`max-w-[84%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed shadow-sm ${
                       item.role === "user"
                         ? "rounded-br-md bg-gradient-to-br from-blue-600 to-cyan-600 text-white"
-                        : "rounded-bl-md border bg-card text-card-foreground"
+                        : "rounded-bl-md border border-cyan-500/15 bg-card/95 text-card-foreground shadow-[0_8px_24px_rgba(8,145,178,0.08)]"
                     }`}
                   >
-                    {item.content}
+                    {item.role === "assistant" ? renderOliviaMessage(item.content) : item.content}
                   </div>
                 </div>
               ))}
@@ -315,7 +328,7 @@ export default function OliviaFloatingAssistant() {
                 <Input
                   value={message}
                   onChange={event => setMessage(event.target.value)}
-                  placeholder={voice.listening ? "Ouvindo..." : "Fale com a Olivia..."}
+                  placeholder={voice.listening ? "Ouvindo sua pergunta..." : "Pergunte à Olivia..."}
                   className="h-9 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
                   maxLength={500}
                   disabled={chat.isPending}
@@ -327,21 +340,14 @@ export default function OliviaFloatingAssistant() {
                     variant="ghost"
                     className="h-9 w-9 shrink-0 rounded-full"
                     onClick={voice.listening ? voice.stopListening : voice.startListening}
-                    aria-label={voice.listening ? "Parar de ouvir" : "Falar com a Olivia"}
+                    aria-label={voice.listening ? "Parar de ouvir" : "Perguntar por voz"}
+                    title="Perguntar por voz"
                   >
-                    {voice.listening ? <MicOff className="h-4 w-4 text-rose-500" /> : <Mic className="h-4 w-4" />}
-                  </Button>
-                )}
-                {memory.voiceEnabled && voice.speakingSupported && (
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-9 w-9 shrink-0 rounded-full"
-                    onClick={() => voice.setVoiceReplies(!voice.voiceReplies)}
-                    aria-label={voice.voiceReplies ? "Desativar respostas por voz" : "Ativar respostas por voz"}
-                  >
-                    {voice.voiceReplies ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                    {voice.listening ? (
+                      <MicOff className="h-4 w-4 text-rose-500" />
+                    ) : (
+                      <Mic className="h-4 w-4 text-cyan-600" />
+                    )}
                   </Button>
                 )}
                 <Button
