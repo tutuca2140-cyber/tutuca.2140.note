@@ -11,7 +11,7 @@ const clamp = (value: number, min: number, max: number) =>
 
 async function ensureOliviaMemorySchema() {
   const sql = getSql();
-  await sql`ALTER TABLE olivia_settings ADD COLUMN IF NOT EXISTS "continuityCoefficient" integer DEFAULT 72 NOT NULL`;
+  await sql`ALTER TABLE olivia_settings ADD COLUMN IF NOT EXISTS "continuityCoefficient" integer DEFAULT 90 NOT NULL`;
   await sql`ALTER TABLE olivia_settings ADD COLUMN IF NOT EXISTS "memoryEnabled" boolean DEFAULT true NOT NULL`;
   await sql`ALTER TABLE olivia_settings ADD COLUMN IF NOT EXISTS "voiceEnabled" boolean DEFAULT true NOT NULL`;
   await sql`
@@ -82,7 +82,7 @@ export default async function handler(req: any, res: any) {
       LIMIT 1
     `;
     const settings = (settingsRows[0] ?? {
-      continuityCoefficient: 72,
+      continuityCoefficient: 90,
       memoryEnabled: true,
       voiceEnabled: true,
     }) as any;
@@ -91,7 +91,7 @@ export default async function handler(req: any, res: any) {
       if (!settings.memoryEnabled) {
         return sendJson(res, 200, { messages: [], settings });
       }
-      const depth = clamp(Math.round(Number(settings.continuityCoefficient || 72) / 6), 4, 20);
+      const depth = clamp(Math.round(Number(settings.continuityCoefficient || 90) / 6), 4, 20);
       const rows = await sql`
         SELECT id, role, content, "createdAt"
         FROM olivia_conversations
@@ -112,7 +112,7 @@ export default async function handler(req: any, res: any) {
         if (context.user.role !== "super_admin") {
           return sendJson(res, 403, { error: "Somente o Super Admin pode configurar a continuidade da Olivia." });
         }
-        const coefficient = clamp(Number(body.continuityCoefficient ?? 72), 0, 100);
+        const coefficient = clamp(Number(body.continuityCoefficient ?? 90), 0, 100);
         const memoryEnabled = body.memoryEnabled !== false;
         const voiceEnabled = body.voiceEnabled !== false;
         await sql`
