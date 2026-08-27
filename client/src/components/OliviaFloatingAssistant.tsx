@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useOliviaV2 } from "@/hooks/useOliviaV2";
 import { trpc } from "@/lib/trpc";
 import { Grip, Send, ShieldCheck, X } from "lucide-react";
 import {
@@ -41,6 +42,7 @@ export default function OliviaFloatingAssistant() {
   const endRef = useRef<HTMLDivElement>(null);
   const { data: access } = trpc.olivia.access.useQuery();
   const chat = trpc.olivia.chat.useMutation();
+  const oliviaV2 = useOliviaV2(access?.enabled === true);
 
   useEffect(() => {
     const updateViewport = () => {
@@ -153,6 +155,16 @@ export default function OliviaFloatingAssistant() {
     if (!content || chat.isPending) return;
     setMessage("");
     setMessages(current => [...current, { role: "user", content }]);
+
+    const v2Result = oliviaV2.tryHandle(content);
+    if (v2Result) {
+      setMessages(current => [
+        ...current,
+        { role: "assistant", content: v2Result.reply },
+      ]);
+      return;
+    }
+
     try {
       const result = await chat.mutateAsync({ message: content });
       setMessages(current => [
