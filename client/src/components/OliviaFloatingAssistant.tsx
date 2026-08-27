@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useOliviaExpert } from "@/hooks/useOliviaExpert";
 import { useOliviaMemory } from "@/hooks/useOliviaMemory";
-import { useOliviaV2 } from "@/hooks/useOliviaV2";
 import { useOliviaVoice } from "@/hooks/useOliviaVoice";
 import { trpc } from "@/lib/trpc";
 import { Grip, Mic, MicOff, Send, ShieldCheck, Sparkles, X } from "lucide-react";
@@ -57,10 +56,7 @@ export default function OliviaFloatingAssistant() {
   const [showInvitation, setShowInvitation] = useState(false);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: "Oi! Tudo bem? Como posso te ajudar?",
-    },
+    { role: "assistant", content: "Oi! Tudo bem? Como posso te ajudar?" },
   ]);
   const drag = useRef<{
     pointerId: number;
@@ -73,15 +69,13 @@ export default function OliviaFloatingAssistant() {
   const endRef = useRef<HTMLDivElement>(null);
   const memoryApplied = useRef(false);
   const { data: access } = trpc.olivia.access.useQuery();
-  const chat = trpc.olivia.chat.useMutation();
   const enabled = access?.enabled === true;
-  const oliviaV2 = useOliviaV2(enabled);
   const memory = useOliviaMemory(enabled);
   const expert = useOliviaExpert(enabled);
   const voice = useOliviaVoice(text => {
     if (enabled) void sendContent(text);
   });
-  const isPending = chat.isPending || expert.pending;
+  const isPending = expert.pending;
 
   useEffect(() => {
     const updateViewport = () => {
@@ -207,41 +201,17 @@ export default function OliviaFloatingAssistant() {
     setMessage("");
     setMessages(current => [...current, { role: "user", content }]);
 
-    // O motor completo é sempre a primeira escolha. Isso evita que respostas
-    // sociais e explicações pré-programadas interceptem uma conversa que deve
-    // ser contextual e inteligente.
-    const expertReply = await expert.ask(content);
-    if (expertReply) {
-      setMessages(current => [...current, { role: "assistant", content: expertReply }]);
-      void memory.remember(content, expertReply);
-      return;
-    }
-
-    // O V2 determinístico fica como fallback técnico caso o motor completo
-    // esteja temporariamente indisponível.
-    const v2Result = oliviaV2.tryHandle(content);
-    if (v2Result) {
-      setMessages(current => [...current, { role: "assistant", content: v2Result.reply }]);
-      void memory.remember(content, v2Result.reply);
-      return;
-    }
-
-    try {
-      const result = await chat.mutateAsync({ message: content });
-      setMessages(current => [...current, { role: "assistant", content: result.reply }]);
-      void memory.remember(content, result.reply);
-    } catch (error) {
+    const reply = await expert.ask(content);
+    if (!reply) {
       setMessages(current => [
         ...current,
-        {
-          role: "assistant",
-          content:
-            error instanceof Error
-              ? error.message
-              : "Não consegui concluir essa resposta agora.",
-        },
+        { role: "assistant", content: "Não consegui concluir essa resposta agora. Tente novamente." },
       ]);
+      return;
     }
+
+    setMessages(current => [...current, { role: "assistant", content: reply }]);
+    void memory.remember(content, reply);
   }
 
   const send = async (event: FormEvent) => {
@@ -344,7 +314,7 @@ export default function OliviaFloatingAssistant() {
                   onChange={event => setMessage(event.target.value)}
                   placeholder={voice.listening ? "Ouvindo sua pergunta..." : "Pergunte à Olivia..."}
                   className="h-9 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-                  maxLength={500}
+                  maxLength={2000}
                   disabled={isPending}
                 />
                 {memory.voiceEnabled && voice.listeningSupported && (
@@ -392,10 +362,7 @@ export default function OliviaFloatingAssistant() {
           }}
           className={`fixed z-[69] animate-in fade-in slide-in-from-bottom-2 rounded-2xl border border-cyan-300/40 bg-slate-950 px-4 py-2.5 text-sm font-medium text-white shadow-xl ${position.x > viewport.width / 2 ? "-translate-x-full" : ""}`}
           style={{
-            left:
-              position.x > viewport.width / 2
-                ? position.x - 10
-                : position.x + iconSize + 10,
+            left: position.x > viewport.width / 2 ? position.x - 10 : position.x + iconSize + 10,
             top: position.y + 12,
           }}
         >
@@ -410,9 +377,7 @@ export default function OliviaFloatingAssistant() {
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}
         onPointerUp={pointerUp}
-        onPointerCancel={() => {
-          drag.current = null;
-        }}
+        onPointerCancel={() => { drag.current = null; }}
         onKeyDown={event => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
