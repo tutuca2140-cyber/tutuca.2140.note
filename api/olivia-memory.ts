@@ -24,7 +24,20 @@ async function ensureOliviaMemorySchema() {
       "createdAt" timestamp DEFAULT now() NOT NULL
     )
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS olivia_memory_facts (
+      id serial PRIMARY KEY,
+      "userId" integer NOT NULL,
+      "databaseId" integer NOT NULL,
+      category varchar(48) DEFAULT 'context' NOT NULL,
+      fact text NOT NULL,
+      "lastUsedAt" timestamp DEFAULT now() NOT NULL,
+      "createdAt" timestamp DEFAULT now() NOT NULL,
+      UNIQUE ("userId", "databaseId", category, fact)
+    )
+  `;
   await sql`CREATE INDEX IF NOT EXISTS olivia_conversations_user_db_created_idx ON olivia_conversations ("userId", "databaseId", "createdAt" DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS olivia_memory_facts_user_db_used_idx ON olivia_memory_facts ("userId", "databaseId", "lastUsedAt" DESC)`;
 }
 
 async function getContext(req: any) {
@@ -70,6 +83,37 @@ async function getContext(req: any) {
   return { user, database };
 }
 
+async function extractFacts(userMessage: string, assistantMessage: string) {
+  const key = process.env.AI_GATEWAY_API_KEY;
+  const model = process.env.OLIVIA_AI_MODEL;
+  if (!key || !model) return [] as Array<{ category: string; fact: string }>;
+  try {
+    const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: "Extraia no máximo 3 fatos duráveis e úteis para continuidade de uma conversa de trabalho. Não salve senhas, credenciais, permissões, CPF, dados sensíveis ou frases triviais. Categorias permitidas: preference, context, workflow, reference. Responda JSON: {\"facts\":[{\"category\":\"context\",\"fact\":\"...\"}]}. Se não houver fato útil, retorne {\"facts\":[]}.",
+          },
+          { role: "user", content: `Usuário: ${userMessage}\nOlivia: ${assistantMessage}` },
+        ],
+      }),
+    });
+    if (!response.ok) return [];
+    const data = (await response.json()) as any;
+    const raw = data?.choices?.[0]?.message?.content;
+    const parsed = raw ? JSON.parse(raw) : { facts: [] };
+    return Array.isArray(parsed.facts) ? parsed.facts.slice(0, 3) : [];
+  } catch {
+    return [];
+  }
+}
+
 export default async function handler(req: any, res: any) {
   try {
     await ensureOliviaMemorySchema();
@@ -88,19 +132,27 @@ export default async function handler(req: any, res: any) {
     }) as any;
 
     if (req.method === "GET") {
-      if (!settings.memoryEnabled) {
-        return sendJson(res, 200, { messages: [], settings });
-      }
+      if (!settings.memoryEnabled) return sendJson(res, 200, { messages: [], facts: [], settings });
       const depth = clamp(Math.round(Number(settings.continuityCoefficient || 72) / 6), 4, 20);
-      const rows = await sql`
-        SELECT id, role, content, "createdAt"
-        FROM olivia_conversations
-        WHERE "userId" = ${context.user.id} AND "databaseId" = ${context.database.id}
-        ORDER BY "createdAt" DESC, id DESC
-        LIMIT ${depth * 2}
-      `;
+      const [rows, facts] = await Promise.all([
+        sql`
+          SELECT id, role, content, "createdAt"
+          FROM olivia_conversations
+          WHERE "userId" = ${context.user.id} AND "databaseId" = ${context.database.id}
+          ORDER BY "createdAt" DESC, id DESC
+          LIMIT ${depth * 2}
+        `,
+        sql`
+          SELECT category, fact, "lastUsedAt"
+          FROM olivia_memory_facts
+          WHERE "userId" = ${context.user.id} AND "databaseId" = ${context.database.id}
+          ORDER BY "lastUsedAt" DESC
+          LIMIT 24
+        `,
+      ]);
       return sendJson(res, 200, {
         messages: [...rows].reverse(),
+        facts,
         settings,
         databaseName: context.database.name,
       });
@@ -126,15 +178,32 @@ export default async function handler(req: any, res: any) {
         return sendJson(res, 200, { success: true, continuityCoefficient: coefficient, memoryEnabled, voiceEnabled });
       }
 
+      if (body?.action === "forget_facts") {
+        await sql`DELETE FROM olivia_memory_facts WHERE "userId" = ${context.user.id} AND "databaseId" = ${context.database.id}`;
+        return sendJson(res, 200, { success: true });
+      }
+
       if (!settings.memoryEnabled) return sendJson(res, 200, { success: true, stored: false });
       const userMessage = String(body?.userMessage ?? "").trim().slice(0, 4000);
       const assistantMessage = String(body?.assistantMessage ?? "").trim().slice(0, 8000);
-      if (!userMessage || !assistantMessage) {
-        return sendJson(res, 400, { error: "Troca de conversa incompleta." });
-      }
+      if (!userMessage || !assistantMessage) return sendJson(res, 400, { error: "Troca de conversa incompleta." });
+
       await sql`INSERT INTO olivia_conversations ("userId", "databaseId", role, content) VALUES (${context.user.id}, ${context.database.id}, 'user', ${userMessage})`;
       await sql`INSERT INTO olivia_conversations ("userId", "databaseId", role, content) VALUES (${context.user.id}, ${context.database.id}, 'assistant', ${assistantMessage})`;
-      return sendJson(res, 200, { success: true, stored: true });
+
+      const facts = await extractFacts(userMessage, assistantMessage);
+      for (const item of facts) {
+        const category = String(item.category || "context").slice(0, 48);
+        const fact = String(item.fact || "").trim().slice(0, 800);
+        if (!fact) continue;
+        await sql`
+          INSERT INTO olivia_memory_facts ("userId", "databaseId", category, fact)
+          VALUES (${context.user.id}, ${context.database.id}, ${category}, ${fact})
+          ON CONFLICT ("userId", "databaseId", category, fact)
+          DO UPDATE SET "lastUsedAt" = now()
+        `;
+      }
+      return sendJson(res, 200, { success: true, stored: true, factsStored: facts.length });
     }
 
     res.setHeader("Allow", "GET, POST");
