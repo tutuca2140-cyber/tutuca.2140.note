@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useOliviaExpert } from "@/hooks/useOliviaExpert";
 import { useOliviaMemory } from "@/hooks/useOliviaMemory";
 import { useOliviaV2 } from "@/hooks/useOliviaV2";
 import { useOliviaVoice } from "@/hooks/useOliviaVoice";
@@ -58,8 +59,7 @@ export default function OliviaFloatingAssistant() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content:
-        "Olá! Sou a Olivia. Posso consultar clientes, contratos, parcelas e valores do banco autorizado.",
+      content: "Oi! Tudo bem? Como posso te ajudar?",
     },
   ]);
   const drag = useRef<{
@@ -77,9 +77,11 @@ export default function OliviaFloatingAssistant() {
   const enabled = access?.enabled === true;
   const oliviaV2 = useOliviaV2(enabled);
   const memory = useOliviaMemory(enabled);
+  const expert = useOliviaExpert(enabled);
   const voice = useOliviaVoice(text => {
     if (enabled) void sendContent(text);
   });
+  const isPending = chat.isPending || expert.pending;
 
   useEffect(() => {
     const updateViewport = () => {
@@ -141,7 +143,7 @@ export default function OliviaFloatingAssistant() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, chat.isPending, open]);
+  }, [messages, isPending, open]);
 
   if (!access?.enabled || !position) return null;
 
@@ -201,7 +203,7 @@ export default function OliviaFloatingAssistant() {
 
   async function sendContent(rawContent: string) {
     const content = rawContent.trim();
-    if (!content || chat.isPending) return;
+    if (!content || isPending) return;
     setMessage("");
     setMessages(current => [...current, { role: "user", content }]);
 
@@ -209,6 +211,13 @@ export default function OliviaFloatingAssistant() {
     if (v2Result) {
       setMessages(current => [...current, { role: "assistant", content: v2Result.reply }]);
       void memory.remember(content, v2Result.reply);
+      return;
+    }
+
+    const expertReply = await expert.ask(content);
+    if (expertReply) {
+      setMessages(current => [...current, { role: "assistant", content: expertReply }]);
+      void memory.remember(content, expertReply);
       return;
     }
 
@@ -224,7 +233,7 @@ export default function OliviaFloatingAssistant() {
           content:
             error instanceof Error
               ? error.message
-              : "Não consegui concluir a consulta agora.",
+              : "Não consegui concluir essa resposta agora.",
         },
       ]);
     }
@@ -302,7 +311,7 @@ export default function OliviaFloatingAssistant() {
                   </div>
                 </div>
               ))}
-              {chat.isPending && (
+              {isPending && (
                 <div className="flex items-end gap-2">
                   <img
                     src={OLIVIA_AVATAR}
@@ -331,7 +340,7 @@ export default function OliviaFloatingAssistant() {
                   placeholder={voice.listening ? "Ouvindo sua pergunta..." : "Pergunte à Olivia..."}
                   className="h-9 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
                   maxLength={500}
-                  disabled={chat.isPending}
+                  disabled={isPending}
                 />
                 {memory.voiceEnabled && voice.listeningSupported && (
                   <Button
@@ -354,7 +363,7 @@ export default function OliviaFloatingAssistant() {
                   type="submit"
                   size="icon"
                   className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-blue-600 to-cyan-500"
-                  disabled={!message.trim() || chat.isPending}
+                  disabled={!message.trim() || isPending}
                   aria-label="Enviar mensagem"
                 >
                   <Send className="h-4 w-4" />
