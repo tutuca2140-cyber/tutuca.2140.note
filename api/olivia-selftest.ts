@@ -63,7 +63,13 @@ export default async function handler(req: any, res: any) {
   }
   const key = process.env.AI_GATEWAY_API_KEY;
   const model = process.env.OLIVIA_AI_MODEL;
-  if (!key || !model) return res.status(503).json({ error: "Olivia AI não configurada" });
+  if (!key || !model) {
+    return res.status(503).json({
+      error: "Olivia AI não configurada",
+      hasGatewayKey: Boolean(key),
+      hasModel: Boolean(model)
+    });
+  }
 
   const group = String(req.query?.group || "finance").toLowerCase();
   const cases = group === "physics" ? PHYSICS : FINANCE;
