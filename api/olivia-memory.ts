@@ -4,7 +4,7 @@ import {
   readJsonBody,
   sendJson,
   SESSION_COOKIE_NAME,
-} from "./auth/_shared";
+} from "./auth/_shared.js";
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
