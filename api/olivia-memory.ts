@@ -132,10 +132,8 @@ export default async function handler(req: any, res: any) {
       if (!userMessage || !assistantMessage) {
         return sendJson(res, 400, { error: "Troca de conversa incompleta." });
       }
-      await sql.transaction(async tx => {
-        await tx`INSERT INTO olivia_conversations ("userId", "databaseId", role, content) VALUES (${context.user.id}, ${context.database.id}, 'user', ${userMessage})`;
-        await tx`INSERT INTO olivia_conversations ("userId", "databaseId", role, content) VALUES (${context.user.id}, ${context.database.id}, 'assistant', ${assistantMessage})`;
-      });
+      await sql`INSERT INTO olivia_conversations ("userId", "databaseId", role, content) VALUES (${context.user.id}, ${context.database.id}, 'user', ${userMessage})`;
+      await sql`INSERT INTO olivia_conversations ("userId", "databaseId", role, content) VALUES (${context.user.id}, ${context.database.id}, 'assistant', ${assistantMessage})`;
       return sendJson(res, 200, { success: true, stored: true });
     }
 
