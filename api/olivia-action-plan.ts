@@ -5,8 +5,10 @@ import {
   sendJson,
   SESSION_COOKIE_NAME,
 } from "./auth/_shared";
-
-type ActionType = "create_client" | "update_client" | "create_loan" | "record_payment";
+import {
+  getAllowedOliviaActions,
+  isForbiddenOliviaAdministrativeRequest,
+} from "../shared/olivia-policy";
 
 const ACTION_HINT = /\b(criar|cadastrar|registrar|lançar|lancar|atualizar|alterar|editar|marcar|incluir)\b/i;
 
@@ -44,16 +46,6 @@ async function getContext(req: any) {
   return { user, database };
 }
 
-function allowedActions(user: any): ActionType[] {
-  const actions: ActionType[] = [];
-  if (user.dashboardOnly) return actions;
-  if (user.canInsert || user.role === "super_admin") {
-    actions.push("create_client", "create_loan", "record_payment");
-  }
-  if (user.canEdit || user.role === "super_admin") actions.push("update_client");
-  return actions;
-}
-
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -67,15 +59,15 @@ export default async function handler(req: any, res: any) {
     const message = String(body?.message ?? "").trim().slice(0, 4000);
     if (!message || !ACTION_HINT.test(message)) return sendJson(res, 200, { action: null });
 
-    if (/\b(excluir|apagar|deletar|remover usuário|criar usuário|permiss)/i.test(message)) {
+    if (isForbiddenOliviaAdministrativeRequest(message)) {
       return sendJson(res, 200, {
         action: null,
         blocked: true,
-        reply: "Essa operação não pode ser executada pela Olivia. Ela envolve exclusão, usuários ou permissões e precisa ser realizada diretamente na área administrativa autorizada.",
+        reply: "Essa operação não pode ser executada pela Olivia. Ela envolve exclusão, usuários, credenciais ou permissões e precisa ser realizada diretamente na área administrativa autorizada.",
       });
     }
 
-    const allowed = allowedActions(context.user);
+    const allowed = getAllowedOliviaActions(context.user);
     if (!allowed.length) {
       return sendJson(res, 200, {
         action: null,
@@ -106,7 +98,7 @@ export default async function handler(req: any, res: any) {
         messages: [
           {
             role: "system",
-            content: `Você transforma pedidos explícitos de alteração no ERP Note Note em uma ação estruturada. Ações permitidas: ${allowed.join(", ")}. Nunca gere delete, gestão de usuários ou permissões. Nunca invente campos ausentes. Se faltarem dados necessários, retorne {"action":null,"missing":[...],"question":"..."}. Para uma ação válida retorne {"action":"...","payload":{...},"summary":"descrição clara para confirmação"}. create_client aceita name,birthDate,email,phone,whatsapp,profession,address,city,state,zipCode,notes. update_client exige id e campos a alterar. create_loan exige clientId,amount,interestType,interestRate,ratePeriod,installments,startDate e pode incluir endDate,description. record_payment exige loanId ou vehicleFinancingId, installmentNumber, amount, paymentDate,dueDate,status e pode incluir notes. Datas em ISO YYYY-MM-DD. Valores monetários como string decimal.`,
+            content: `Você transforma pedidos explícitos de alteração no ERP Note Note em uma ação estruturada. Ações permitidas: ${allowed.join(", ")}. Nunca gere delete, gestão de usuários, permissões ou credenciais. Nunca invente campos ausentes. Se faltarem dados necessários, retorne {"action":null,"missing":[...],"question":"..."}. Para uma ação válida retorne {"action":"...","payload":{...},"summary":"descrição clara para confirmação"}. create_client aceita name,birthDate,email,phone,whatsapp,profession,address,city,state,zipCode,notes. update_client exige id e campos a alterar. create_loan exige clientId,amount,interestType,interestRate,ratePeriod,installments,startDate e pode incluir endDate,description. record_payment exige loanId ou vehicleFinancingId, installmentNumber, amount, paymentDate,dueDate,status e pode incluir notes. Datas em ISO YYYY-MM-DD. Valores monetários como string decimal.`,
           },
           { role: "system", content: `Banco: ${context.database.name}. Clientes disponíveis: ${JSON.stringify(clients)}. Empréstimos disponíveis: ${JSON.stringify(loans)}.` },
           { role: "user", content: message },
