@@ -207,17 +207,22 @@ export default function OliviaFloatingAssistant() {
     setMessage("");
     setMessages(current => [...current, { role: "user", content }]);
 
-    const v2Result = oliviaV2.tryHandle(content);
-    if (v2Result) {
-      setMessages(current => [...current, { role: "assistant", content: v2Result.reply }]);
-      void memory.remember(content, v2Result.reply);
-      return;
-    }
-
+    // O motor completo é sempre a primeira escolha. Isso evita que respostas
+    // sociais e explicações pré-programadas interceptem uma conversa que deve
+    // ser contextual e inteligente.
     const expertReply = await expert.ask(content);
     if (expertReply) {
       setMessages(current => [...current, { role: "assistant", content: expertReply }]);
       void memory.remember(content, expertReply);
+      return;
+    }
+
+    // O V2 determinístico fica como fallback técnico caso o motor completo
+    // esteja temporariamente indisponível.
+    const v2Result = oliviaV2.tryHandle(content);
+    if (v2Result) {
+      setMessages(current => [...current, { role: "assistant", content: v2Result.reply }]);
+      void memory.remember(content, v2Result.reply);
       return;
     }
 
