@@ -16,7 +16,7 @@ type MemoryResponse = {
 
 export function useOliviaMemory(enabled: boolean) {
   const [memory, setMemory] = useState<OliviaMemoryMessage[]>([]);
-  const [continuityCoefficient, setContinuityCoefficient] = useState(72);
+  const [continuityCoefficient, setContinuityCoefficient] = useState(90);
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [loaded, setLoaded] = useState(false);
@@ -30,7 +30,7 @@ export function useOliviaMemory(enabled: boolean) {
       setMemory((data.messages ?? []).filter(
         item => item && (item.role === "user" || item.role === "assistant") && typeof item.content === "string"
       ));
-      setContinuityCoefficient(Number(data.settings?.continuityCoefficient ?? 72));
+      setContinuityCoefficient(Number(data.settings?.continuityCoefficient ?? 90));
       setMemoryEnabled(data.settings?.memoryEnabled !== false);
       setVoiceEnabled(data.settings?.voiceEnabled !== false);
     } finally {
