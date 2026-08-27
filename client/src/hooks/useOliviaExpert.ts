@@ -2,22 +2,19 @@ import { useCallback, useState } from "react";
 
 type OliviaExpertResult = {
   reply?: string;
-  intent?: string;
-  context?: {
-    activeIntent?: string;
-    activeSearch?: string | null;
-  };
+  databaseId?: number;
+  search?: string | null;
 };
 
 export function useOliviaExpert(enabled: boolean) {
   const [pending, setPending] = useState(false);
-  const [activeContext, setActiveContext] = useState<OliviaExpertResult["context"]>(undefined);
+  const [activeContext, setActiveContext] = useState<{ databaseId?: number; activeSearch?: string | null } | undefined>(undefined);
 
   const ask = useCallback(async (message: string) => {
     if (!enabled) return null;
     setPending(true);
     try {
-      const response = await fetch("/api/olivia-intelligence-v2", {
+      const response = await fetch("/api/olivia-complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -25,7 +22,7 @@ export function useOliviaExpert(enabled: boolean) {
       });
       if (!response.ok) return null;
       const data = (await response.json()) as OliviaExpertResult;
-      setActiveContext(data.context);
+      setActiveContext({ databaseId: data.databaseId, activeSearch: data.search ?? null });
       return data.reply?.trim() || null;
     } catch {
       return null;
