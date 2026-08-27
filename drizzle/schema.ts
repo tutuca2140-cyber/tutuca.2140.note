@@ -2,7 +2,7 @@ import { integer, serial, pgTable, text, timestamp, varchar, numeric, boolean, j
 
 /**
  * Core user table backing auth flow.
- * Extended with permissions and role management for DEATH NOTE system.
+ * Extended with permissions and role management for NOTE NOTE system.
  */
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -14,13 +14,14 @@ export const users = pgTable("users", {
   loginMethod: varchar("loginMethod", { length: 64 }).default("local"),
   role: varchar("role", { length: 64, enum: ["user", "admin", "super_admin"] }).default("user").notNull(),
   
-  // Permissions (6 tipos granulares)
+  // Permissões granulares do sistema
   canView: boolean("canView").default(true).notNull(),
   canInsert: boolean("canInsert").default(false).notNull(),
   canEdit: boolean("canEdit").default(false).notNull(),
   canDelete: boolean("canDelete").default(false).notNull(),
   canGenerateReports: boolean("canGenerateReports").default(false).notNull(),
   canAccessSettings: boolean("canAccessSettings").default(false).notNull(),
+  canUseOlivia: boolean("canUseOlivia").default(false).notNull(),
   dashboardOnly: boolean("dashboardOnly").default(false).notNull(),
   failedLoginAttempts: integer("failedLoginAttempts").default(0).notNull(),
   
@@ -100,9 +101,8 @@ export type InsertUserDatabaseAccess = typeof userDatabaseAccess.$inferInsert;
  */
 export const clients = pgTable("clients", {
   id: serial("id").primaryKey(),
-  databaseId: integer("databaseId").notNull(), // Isolamento por banco
+  databaseId: integer("databaseId").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
-  // Campo legado mantido apenas para compatibilidade de dados; não é exposto pela API/interface.
   cpf: varchar("cpf", { length: 14 }),
   birthDate: timestamp("birthDate"),
   email: varchar("email", { length: 320 }),
@@ -130,15 +130,15 @@ export type InsertClient = typeof clients.$inferInsert;
  */
 export const loans = pgTable("loans", {
   id: serial("id").primaryKey(),
-  databaseId: integer("databaseId").notNull(), // Isolamento por banco
+  databaseId: integer("databaseId").notNull(),
   clientId: integer("clientId").notNull(),
   amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
   interestType: varchar("interestType", { length: 64, enum: ["simple", "compound"] }).default("simple").notNull(),
-  interestRate: numeric("interestRate", { precision: 8, scale: 4 }).notNull(), // Taxa de juros (%)
+  interestRate: numeric("interestRate", { precision: 8, scale: 4 }).notNull(),
   ratePeriod: varchar("ratePeriod", { length: 64, enum: ["day", "week", "month", "year"] }).default("month").notNull(),
-  installments: integer("installments").notNull(), // Número de parcelas/períodos
-  installmentAmount: numeric("installmentAmount", { precision: 15, scale: 2 }).notNull(), // Valor da parcela
-  totalAmount: numeric("totalAmount", { precision: 15, scale: 2 }).notNull(), // Valor total com juros
+  installments: integer("installments").notNull(),
+  installmentAmount: numeric("installmentAmount", { precision: 15, scale: 2 }).notNull(),
+  totalAmount: numeric("totalAmount", { precision: 15, scale: 2 }).notNull(),
   remainingBalance: numeric("remainingBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
   principalBalance: numeric("principalBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
   accruedInterest: numeric("accruedInterest", { precision: 15, scale: 2 }).default("0.00").notNull(),
@@ -156,7 +156,6 @@ export const loans = pgTable("loans", {
 export type Loan = typeof loans.$inferSelect;
 export type InsertLoan = typeof loans.$inferInsert;
 
-/** Histórico mensal de juros, com uma linha única por contrato e período de referência. */
 export const loanInterestHistory = pgTable("loan_interest_history", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(),
@@ -176,9 +175,6 @@ export const loanInterestHistory = pgTable("loan_interest_history", {
 export type LoanInterestHistory = typeof loanInterestHistory.$inferSelect;
 export type InsertLoanInterestHistory = typeof loanInterestHistory.$inferInsert;
 
-/**
- * Agents table - Agentes comissionados isolados por banco de dados
- */
 export const agents = pgTable("agents", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(),
@@ -193,21 +189,18 @@ export const agents = pgTable("agents", {
 export type Agent = typeof agents.$inferSelect;
 export type InsertAgent = typeof agents.$inferInsert;
 
-/**
- * Payments table - Pagamentos de empréstimos
- */
 export const payments = pgTable("payments", {
   id: serial("id").primaryKey(),
-  databaseId: integer("databaseId").notNull(), // Isolamento por banco
+  databaseId: integer("databaseId").notNull(),
   loanId: integer("loanId"),
   vehicleFinancingId: integer("vehicleFinancingId").references(() => vehicleFinancings.id),
-  installmentNumber: integer("installmentNumber").notNull(), // Número da parcela
+  installmentNumber: integer("installmentNumber").notNull(),
   amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
   paymentDate: timestamp("paymentDate").notNull(),
   dueDate: timestamp("dueDate").notNull(),
   status: varchar("status", { length: 64, enum: ["pago", "pendente", "atrasado"] }).default("pendente").notNull(),
-  lateFee: numeric("lateFee", { precision: 15, scale: 2 }).default("0.00"), // Multa por atraso
-  interest: numeric("interest", { precision: 15, scale: 2 }).default("0.00"), // Juros de mora
+  lateFee: numeric("lateFee", { precision: 15, scale: 2 }).default("0.00"),
+  interest: numeric("interest", { precision: 15, scale: 2 }).default("0.00"),
   principalAmount: numeric("principalAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
   interestAmount: numeric("interestAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
   remainingBalance: numeric("remainingBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
@@ -224,7 +217,6 @@ export const payments = pgTable("payments", {
 export type Payment = typeof payments.$inferSelect;
 export type InsertPayment = typeof payments.$inferInsert;
 
-/** Movimentações financeiras reais do banco ativo. */
 export const cashFlow = pgTable("cash_flow", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(),
@@ -240,7 +232,6 @@ export const cashFlow = pgTable("cash_flow", {
   paymentId: integer("paymentId").references(() => payments.id, { onDelete: "set null" }),
   responsible: varchar("responsible", { length: 255 }),
   notes: text("notes"),
-  /** Chave idempotente da origem automática; entradas manuais permanecem nulas. */
   sourceKey: varchar("sourceKey", { length: 180 }),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -251,12 +242,9 @@ export const cashFlow = pgTable("cash_flow", {
 export type CashFlow = typeof cashFlow.$inferSelect;
 export type InsertCashFlow = typeof cashFlow.$inferInsert;
 
-/**
- * Vehicles table - Veículos para financiamento
- */
 export const vehicles = pgTable("vehicles", {
   id: serial("id").primaryKey(),
-  databaseId: integer("databaseId").notNull(), // Isolamento por banco
+  databaseId: integer("databaseId").notNull(),
   clientId: integer("clientId").references(() => clients.id),
   vehicleType: varchar("vehicleType", { length: 64, enum: ["CARRO", "MOTO", "OUTRO"] }).default("OUTRO").notNull(),
   brand: varchar("brand", { length: 100 }),
@@ -283,7 +271,6 @@ export const vehicles = pgTable("vehicles", {
 export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertVehicle = typeof vehicles.$inferInsert;
 
-/** Vendas de veículos sempre apontam para um veículo já existente no estoque. */
 export const vehicleSales = pgTable("vehicle_sales", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(),
@@ -303,21 +290,18 @@ export const vehicleSales = pgTable("vehicle_sales", {
 export type VehicleSale = typeof vehicleSales.$inferSelect;
 export type InsertVehicleSale = typeof vehicleSales.$inferInsert;
 
-/**
- * Vehicle Financings table - Financiamentos de veículos
- */
 export const vehicleFinancings = pgTable("vehicleFinancings", {
   id: serial("id").primaryKey(),
-  databaseId: integer("databaseId").notNull(), // Isolamento por banco
+  databaseId: integer("databaseId").notNull(),
   vehicleId: integer("vehicleId").notNull(),
   clientId: integer("clientId").notNull(),
   vehiclePrice: numeric("vehiclePrice", { precision: 15, scale: 2 }).notNull(),
-  downPayment: numeric("downPayment", { precision: 15, scale: 2 }).notNull(), // Entrada
-  financedAmount: numeric("financedAmount", { precision: 15, scale: 2 }).notNull(), // Valor financiado
-  interestRate: numeric("interestRate", { precision: 5, scale: 2 }).notNull(), // Taxa de juros mensal (%)
-  installments: integer("installments").notNull(), // Número de parcelas
-  installmentAmount: numeric("installmentAmount", { precision: 15, scale: 2 }).notNull(), // Valor da parcela
-  totalAmount: numeric("totalAmount", { precision: 15, scale: 2 }).notNull(), // Valor total a pagar
+  downPayment: numeric("downPayment", { precision: 15, scale: 2 }).notNull(),
+  financedAmount: numeric("financedAmount", { precision: 15, scale: 2 }).notNull(),
+  interestRate: numeric("interestRate", { precision: 5, scale: 2 }).notNull(),
+  installments: integer("installments").notNull(),
+  installmentAmount: numeric("installmentAmount", { precision: 15, scale: 2 }).notNull(),
+  totalAmount: numeric("totalAmount", { precision: 15, scale: 2 }).notNull(),
   startDate: timestamp("startDate").notNull(),
   endDate: timestamp("endDate").notNull(),
   status: varchar("status", { length: 64, enum: ["ativo", "pago", "atrasado", "cancelado"] }).default("ativo").notNull(),
@@ -330,18 +314,15 @@ export const vehicleFinancings = pgTable("vehicleFinancings", {
 export type VehicleFinancing = typeof vehicleFinancings.$inferSelect;
 export type InsertVehicleFinancing = typeof vehicleFinancings.$inferInsert;
 
-/**
- * Audit Logs table - Sistema de auditoria completo
- */
 export const auditLogs = pgTable("auditLogs", {
   id: serial("id").primaryKey(),
-  userId: integer("userId"), // Pode ser null para ações do sistema
+  userId: integer("userId"),
   username: varchar("username", { length: 255 }),
-  action: varchar("action", { length: 100 }).notNull(), // login, logout, create_user, update_user, etc.
-  entity: varchar("entity", { length: 100 }), // users, loans, payments, etc.
-  entityId: integer("entityId"), // ID da entidade afetada
-  databaseId: integer("databaseId"), // Banco de dados relacionado
-  details: text("details"), // JSON com detalhes da ação
+  action: varchar("action", { length: 100 }).notNull(),
+  entity: varchar("entity", { length: 100 }),
+  entityId: integer("entityId"),
+  databaseId: integer("databaseId"),
+  details: text("details"),
   ipAddress: varchar("ipAddress", { length: 45 }),
   userAgent: text("userAgent"),
   status: varchar("status", { length: 64, enum: ["success", "failed", "warning"] }).default("success").notNull(),
