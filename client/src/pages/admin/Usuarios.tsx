@@ -29,6 +29,7 @@ import {
   Plus,
   Shield,
   UserRoundX,
+  Bot,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -50,6 +51,8 @@ type Draft = Permissions & {
   role: "user" | "admin";
   databaseIds: number[];
   dashboardOnly: boolean;
+  oliviaEnabled: boolean;
+  oliviaPlan: "basic" | "basic_plus" | "plus";
 };
 
 const permissionOptions: Array<{
@@ -116,6 +119,8 @@ const makeEmptyDraft = (): Draft => ({
   role: "user",
   databaseIds: [],
   dashboardOnly: false,
+  oliviaEnabled: false,
+  oliviaPlan: "basic",
   ...permissionsForRole("user"),
 });
 
@@ -174,6 +179,8 @@ export default function AdminUsuarios() {
       canAccessSettings: user.canAccessSettings,
       databaseIds: user.databaseIds ?? [],
       dashboardOnly: user.dashboardOnly,
+      oliviaEnabled: user.oliviaEnabled,
+      oliviaPlan: user.oliviaPlan,
     });
     setOpen(true);
   };
@@ -349,6 +356,47 @@ export default function AdminUsuarios() {
                 <section className="space-y-4 border-t pt-5">
                   <div className="flex items-start gap-3">
                     <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                      <Bot className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold">Assistente Olivia</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Autorize esta conta a usar a assistente somente nos
+                        bancos e dados já permitidos ao usuário.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={draft.oliviaEnabled}
+                      onCheckedChange={oliviaEnabled =>
+                        setDraft(current => ({ ...current, oliviaEnabled }))
+                      }
+                      aria-label="Permitir acesso à Olivia"
+                    />
+                  </div>
+                  {draft.oliviaEnabled && (
+                    <div>
+                      <Label>Plano da Olivia</Label>
+                      <Select
+                        value={draft.oliviaPlan}
+                        onValueChange={(oliviaPlan: Draft["oliviaPlan"]) =>
+                          setDraft(current => ({ ...current, oliviaPlan }))
+                        }
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="basic">Basic</SelectItem>
+                          <SelectItem value="basic_plus">Basic +</SelectItem>
+                          <SelectItem value="plus">Plus</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </section>
+                <section className="space-y-4 border-t pt-5">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-lg bg-primary/10 p-2 text-primary">
                       <Database className="h-5 w-5" />
                     </div>
                     <div>
@@ -508,15 +556,26 @@ export default function AdminUsuarios() {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div>
-              <Badge>
-                {user.dashboardOnly ? "Somente Dashboard" : user.role}
-              </Badge>
+                      <Badge>
+                        {user.dashboardOnly ? "Somente Dashboard" : user.role}
+                      </Badge>
                       <Badge
                         variant="outline"
                         className={`ml-2 ${user.isActive ? "text-green-700" : "text-red-700"}`}
                       >
                         {user.isActive ? "Ativo" : "Inativo"}
                       </Badge>
+                      {user.oliviaEnabled && (
+                        <Badge variant="secondary" className="ml-2">
+                          <Bot className="mr-1 h-3 w-3" />
+                          Olivia{" "}
+                          {user.oliviaPlan === "basic_plus"
+                            ? "Basic +"
+                            : user.oliviaPlan === "plus"
+                              ? "Plus"
+                              : "Basic"}
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-sm text-muted-foreground">
                       @{user.username}

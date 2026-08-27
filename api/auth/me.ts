@@ -8,7 +8,10 @@ import {
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "GET") {
-    return sendJson(res, 405, { success: false, message: "Método não permitido" });
+    return sendJson(res, 405, {
+      success: false,
+      message: "Método não permitido",
+    });
   }
 
   try {
@@ -34,6 +37,8 @@ export default async function handler(req: any, res: any) {
         u."canGenerateReports",
         u."canAccessSettings",
         u."dashboardOnly",
+        u."oliviaEnabled",
+        u."oliviaPlan",
         u."isActive"
       FROM local_sessions s
       INNER JOIN users u ON u.id = s."userId"

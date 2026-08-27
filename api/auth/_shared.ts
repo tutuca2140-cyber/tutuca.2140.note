@@ -18,7 +18,9 @@ export function ensureAuthUserColumns() {
   authColumnsPromise = (async () => {
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
-  })().catch((error) => {
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "oliviaEnabled" boolean DEFAULT false NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "oliviaPlan" varchar(32) DEFAULT 'basic' NOT NULL`;
+  })().catch(error => {
     authColumnsPromise = null;
     throw error;
   });

@@ -35,6 +35,7 @@ import {
   userDatabaseAccess,
   products,
   InsertProduct,
+  oliviaSettings,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import {
@@ -270,6 +271,8 @@ export async function updateLocalUser(
     canGenerateReports?: boolean;
     canAccessSettings?: boolean;
     dashboardOnly?: boolean;
+    oliviaEnabled?: boolean;
+    oliviaPlan?: "basic" | "basic_plus" | "plus";
   }
 ) {
   const db = await getDb();
@@ -2625,6 +2628,8 @@ export async function createLocalUser(data: {
   canGenerateReports?: boolean;
   canAccessSettings?: boolean;
   dashboardOnly?: boolean;
+  oliviaEnabled?: boolean;
+  oliviaPlan?: "basic" | "basic_plus" | "plus";
 }): Promise<any> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -2644,6 +2649,8 @@ export async function createLocalUser(data: {
       canGenerateReports: data.canGenerateReports ?? false,
       canAccessSettings: data.canAccessSettings ?? false,
       dashboardOnly: data.dashboardOnly ?? false,
+      oliviaEnabled: data.oliviaEnabled ?? false,
+      oliviaPlan: data.oliviaPlan ?? "basic",
       isActive: true,
       emailVerified: false,
       lastSignedIn: new Date(),
@@ -2653,6 +2660,41 @@ export async function createLocalUser(data: {
     console.error("[Database] Failed to create local user:", error);
     throw error;
   }
+}
+
+// ==================== OLIVIA ====================
+
+export async function getOliviaSettings() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const [settings] = await db.select().from(oliviaSettings).limit(1);
+  if (settings) return settings;
+  const [created] = await db.insert(oliviaSettings).values({}).returning();
+  return created;
+}
+
+export async function updateOliviaSettings(
+  data: Partial<{
+    enabled: boolean;
+    allowClientQueries: boolean;
+    allowContractQueries: boolean;
+    allowPaymentQueries: boolean;
+    allowDueDateQueries: boolean;
+    allowSummaries: boolean;
+    allowChanges: boolean;
+    requireConfirmation: boolean;
+    updatedBy: number;
+  }>
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const current = await getOliviaSettings();
+  const [updated] = await db
+    .update(oliviaSettings)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(oliviaSettings.id, current.id))
+    .returning();
+  return updated;
 }
 
 export async function getUserByUsername(username: string) {

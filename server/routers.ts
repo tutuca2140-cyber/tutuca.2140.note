@@ -62,9 +62,55 @@ const stripLegacyCpf = <T extends { cpf?: unknown }>(
   return withoutCpf;
 };
 
+const brl = (value: unknown) =>
+  Number(value || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+
+async function polishOliviaReply(message: string, factualReply: string) {
+  const key = process.env.AI_GATEWAY_API_KEY;
+  const model = process.env.OLIVIA_AI_MODEL;
+  if (!key || !model) return factualReply;
+  try {
+    const response = await fetch(
+      "https://ai-gateway.vercel.sh/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: "system",
+              content:
+                "Você é Olivia, assistente do ERP Note Note. Responda em português, de modo objetivo e cordial. Use somente os fatos fornecidos, não invente dados e não prometa alterações.",
+            },
+            {
+              role: "user",
+              content: `Pergunta: ${message}\nResposta factual autorizada: ${factualReply}`,
+            },
+          ],
+        }),
+      }
+    );
+    if (!response.ok) return factualReply;
+    const result = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return result.choices?.[0]?.message?.content?.trim() || factualReply;
+  } catch {
+    return factualReply;
+  }
+}
+
 const protectedProcedure = baseProtectedProcedure.use(({ ctx, next, path }) => {
   const dashboardAllowed =
     path.startsWith("dashboard.") ||
+    path.startsWith("olivia.") ||
     ["databases.list", "databases.getActive", "databases.setActive"].includes(
       path
     );
@@ -354,6 +400,8 @@ export const appRouter = router({
           canGenerateReports: z.boolean().default(false),
           canAccessSettings: z.boolean().default(false),
           dashboardOnly: z.boolean().default(false),
+          oliviaEnabled: z.boolean().default(false),
+          oliviaPlan: z.enum(["basic", "basic_plus", "plus"]).default("basic"),
           databaseIds: z.array(z.number().int().positive()).max(3).default([]),
         })
       )
@@ -399,6 +447,8 @@ export const appRouter = router({
               canDelete: input.canDelete,
               canGenerateReports: input.canGenerateReports,
               canAccessSettings: input.canAccessSettings,
+              oliviaEnabled: input.oliviaEnabled,
+              oliviaPlan: input.oliviaPlan,
             },
             databaseIds,
           }),
@@ -422,6 +472,8 @@ export const appRouter = router({
           canGenerateReports: z.boolean(),
           canAccessSettings: z.boolean(),
           dashboardOnly: z.boolean(),
+          oliviaEnabled: z.boolean(),
+          oliviaPlan: z.enum(["basic", "basic_plus", "plus"]),
           databaseIds: z.array(z.number().int().positive()).max(3),
         })
       )
@@ -2997,6 +3049,212 @@ export const appRouter = router({
   }),
 
   // ==================== AUDIT LOGS ====================
+  // ==================== OLIVIA ====================
+  olivia: router({
+    access: protectedProcedure.query(async ({ ctx }) => {
+      const settings = await db.getOliviaSettings();
+      const entitled =
+        ctx.user.role === "super_admin" || ctx.user.oliviaEnabled === true;
+      return {
+        enabled: settings.enabled && entitled,
+        entitled,
+        plan:
+          ctx.user.role === "super_admin"
+            ? "plus"
+            : (ctx.user.oliviaPlan ?? "basic"),
+        settings,
+        aiConnected: Boolean(
+          process.env.AI_GATEWAY_API_KEY && process.env.OLIVIA_AI_MODEL
+        ),
+      };
+    }),
+
+    settings: superAdminProcedure.query(() => db.getOliviaSettings()),
+
+    updateSettings: superAdminProcedure
+      .input(
+        z.object({
+          enabled: z.boolean(),
+          allowClientQueries: z.boolean(),
+          allowContractQueries: z.boolean(),
+          allowPaymentQueries: z.boolean(),
+          allowDueDateQueries: z.boolean(),
+          allowSummaries: z.boolean(),
+          allowChanges: z.boolean(),
+          requireConfirmation: z.boolean(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const settings = await db.updateOliviaSettings({
+          ...input,
+          updatedBy: ctx.user.id,
+        });
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.username || "Super Admin",
+          action: "olivia_settings_update",
+          entity: "olivia",
+          details: JSON.stringify(input),
+          status: "success",
+        });
+        return settings;
+      }),
+
+    history: protectedProcedure.query(async ({ ctx }) => {
+      const entitled =
+        ctx.user.role === "super_admin" || ctx.user.oliviaEnabled === true;
+      if (!entitled)
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "A Olivia não está habilitada para este usuário.",
+        });
+      const rows = await db.getAuditLogsByUser(ctx.user.id, 100);
+      return rows.filter(log => log.entity === "olivia").slice(0, 30);
+    }),
+
+    chat: protectedProcedure
+      .input(z.object({ message: z.string().trim().min(2).max(500) }))
+      .mutation(async ({ input, ctx }) => {
+        const settings = await db.getOliviaSettings();
+        const entitled =
+          ctx.user.role === "super_admin" || ctx.user.oliviaEnabled === true;
+        if (!settings.enabled || !entitled)
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "A Olivia não está habilitada para este usuário.",
+          });
+        if (!ctx.user.canView)
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Seu usuário não possui permissão para consultar dados.",
+          });
+        const activeDb = await db.getActiveDatabase();
+        if (!activeDb)
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Selecione um banco de dados autorizado.",
+          });
+
+        const normalized = input.message.toLocaleLowerCase("pt-BR");
+        const modificationWords =
+          /\b(criar|cadastrar|alterar|editar|excluir|apagar|pagar|lançar)\b/i;
+        let factualReply = "";
+        let category = "help";
+
+        if (modificationWords.test(normalized)) {
+          category = "change_request";
+          factualReply = settings.allowChanges
+            ? "Identifiquei um pedido de alteração. A Olivia nunca modifica dados sem uma confirmação explícita. Nesta primeira versão, as operações permanecem somente para consulta; faça o lançamento pela tela correspondente do Note Note."
+            : "As alterações pela Olivia estão desativadas pelo Super Administrador. Posso consultar e resumir os dados autorizados.";
+        } else if (/atras|venc|receber|parcela/.test(normalized)) {
+          if (!settings.allowDueDateQueries)
+            factualReply =
+              "A consulta de parcelas e vencimentos foi desativada pelo Super Administrador.";
+          else {
+            category = "due_dates";
+            const stats = await db.getDashboardStats(activeDb.id);
+            const collection = /atras/.test(normalized)
+              ? (stats?.collections.overdue ?? [])
+              : /hoje/.test(normalized)
+                ? (stats?.collections.dueToday ?? [])
+                : (stats?.collections.upcoming ?? []);
+            const heading = /atras/.test(normalized)
+              ? "recebimentos em atraso"
+              : /hoje/.test(normalized)
+                ? "recebimentos de hoje"
+                : "próximos recebimentos";
+            factualReply = collection.length
+              ? `Encontrei ${collection.length} ${heading}:\n${collection
+                  .slice(0, 12)
+                  .map(
+                    item =>
+                      `• ${item.clientName} — ${brl(item.amount)} — ${item.product} — ${new Date(item.dueDate).toLocaleDateString("pt-BR")}`
+                  )
+                  .join("\n")}`
+              : `Não encontrei ${heading} no banco ${activeDb.name}.`;
+          }
+        } else if (/cliente/.test(normalized)) {
+          if (!settings.allowClientQueries)
+            factualReply =
+              "A consulta de clientes foi desativada pelo Super Administrador.";
+          else {
+            category = "clients";
+            const clients = await db.getClientsByDatabase(activeDb.id);
+            const namedClient = clients.find(client =>
+              normalized.includes(client.name.toLocaleLowerCase("pt-BR"))
+            );
+            const matches = namedClient ? [namedClient] : clients;
+            factualReply = matches.length
+              ? `Clientes encontrados (${matches.length}):\n${matches
+                  .slice(0, 15)
+                  .map(
+                    client =>
+                      `• ${client.name}${client.phone ? ` — ${client.phone}` : ""}`
+                  )
+                  .join("\n")}`
+              : "Nenhum cliente correspondente foi encontrado neste banco.";
+          }
+        } else if (/contrato|emprést|emprest|financ/.test(normalized)) {
+          if (!settings.allowContractQueries)
+            factualReply =
+              "A consulta de contratos foi desativada pelo Super Administrador.";
+          else {
+            category = "contracts";
+            const [clients, loans, financings] = await Promise.all([
+              db.getClientsByDatabase(activeDb.id),
+              db.getLoansByDatabase(activeDb.id),
+              db.getVehicleFinancingsByDatabase(activeDb.id),
+            ]);
+            const names = new Map(
+              clients.map(client => [client.id, client.name])
+            );
+            const rows = [
+              ...loans.map(
+                loan =>
+                  `• ${names.get(loan.clientId) ?? "Cliente"} · Empréstimo #${loan.id} — saldo ${brl(loan.remainingBalance)} — ${loan.status}`
+              ),
+              ...financings.map(
+                financing =>
+                  `• ${names.get(financing.clientId) ?? "Cliente"} · Financiamento #${financing.id} — total ${brl(financing.totalAmount)} — ${financing.status}`
+              ),
+            ];
+            factualReply = rows.length
+              ? `Contratos do banco ${activeDb.name}:\n${rows.slice(0, 15).join("\n")}`
+              : "Não há contratos cadastrados neste banco.";
+          }
+        } else if (/pag|resumo|saldo|valor|total/.test(normalized)) {
+          if (!settings.allowSummaries && !settings.allowPaymentQueries)
+            factualReply =
+              "As consultas de pagamentos e resumos foram desativadas pelo Super Administrador.";
+          else {
+            category = "summary";
+            const stats = await db.getDashboardStats(activeDb.id);
+            factualReply = stats
+              ? `Resumo do banco ${activeDb.name}:\n• Total emprestado: ${brl(stats.loanMetrics.totalLent)}\n• Total recebido: ${brl(stats.loanMetrics.totalReceived)}\n• Saldo em aberto: ${brl(stats.loanMetrics.totalOpen)}\n• Em atraso: ${brl(stats.loanMetrics.totalOverdue)}\n• Financiamentos a receber: ${brl(stats.vehicleMetrics.remainingBalance)}\n• Saldo de caixa: ${brl(stats.saldoCaixa)}`
+              : "Não foi possível calcular o resumo deste banco agora.";
+          }
+        } else {
+          factualReply =
+            "Olá! Sou Olivia, assistente do Note Note. Posso consultar clientes, contratos, parcelas, vencimentos, valores pagos, atrasados e a receber no banco atualmente selecionado. O que você deseja consultar?";
+        }
+
+        const reply = await polishOliviaReply(input.message, factualReply);
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.name || ctx.user.username || "Usuário",
+          action: `olivia_${category}`,
+          entity: "olivia",
+          databaseId: activeDb.id,
+          details: JSON.stringify({
+            question: input.message,
+            reply: factualReply.slice(0, 2000),
+          }),
+          status: "success",
+        });
+        return { reply, category, databaseName: activeDb.name };
+      }),
+  }),
+
   auditLogs: router({
     list: adminProcedure
       .input(z.object({ limit: z.number().optional() }))
