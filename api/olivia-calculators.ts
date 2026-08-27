@@ -17,7 +17,9 @@ const parsePtNumber = (raw: string) => {
 };
 
 const firstMoney = (text: string, occurrence = 0) => {
-  const matches = [...text.matchAll(/R\$\s*(-?\d[\d.]*?(?:,\d+)?)(?=\s|$|[.,;])/gi)];
+  const matches = [
+    ...text.matchAll(/R\$\s*(-?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?)/gi),
+  ];
   const raw = matches[occurrence]?.[1];
   return raw ? parsePtNumber(raw) : null;
 };
@@ -37,18 +39,27 @@ const integerNear = (text: string, words: string[]) => {
 };
 
 const fmt = (value: number, digits = 2) =>
-  value.toLocaleString("pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  value.toLocaleString("pt-BR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
 
 const brl = (value: number) =>
   value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-const rateLabel = (rate: number) => `${fmt(rate * 100, 4).replace(/0+$/, "").replace(/,$/, "")}%`;
+const rateLabel = (rate: number) =>
+  `${fmt(rate * 100, 4).replace(/0+$/, "").replace(/,$/, "")}%`;
 
 function ratePeriods(text: string) {
   const normalized = normalize(text);
   const duration =
-    integerNear(normalized, ["mes(?:es)?", "ano(?:s)?", "dia(?:s)?", "semana(?:s)?", "parcela(?:s)?"])
-    ?? null;
+    integerNear(normalized, [
+      "mes(?:es)?",
+      "ano(?:s)?",
+      "dia(?:s)?",
+      "semana(?:s)?",
+      "parcela(?:s)?",
+    ]) ?? null;
   if (!duration) return null;
 
   const durationUnit = /\d+\s*ano/.test(normalized)
@@ -67,7 +78,7 @@ function ratePeriods(text: string) {
         : "month";
 
   const days = { day: 1, week: 7, month: 30, year: 360 } as const;
-  const n = duration * days[durationUnit] / days[rateUnit];
+  const n = (duration * days[durationUnit]) / days[rateUnit];
   return { duration, durationUnit, rateUnit, n };
 }
 
@@ -75,9 +86,15 @@ function financial(text: string): OliviaCalculation | null {
   const nrm = normalize(text);
   const rate = percent(text);
 
-  if (/taxa.*equival|equivale.*taxa|equivale.*%|taxa efetiva/.test(nrm) && rate !== null) {
+  if (
+    /taxa.*equival|equivale.*taxa|equivale.*%|taxa efetiva/.test(nrm) &&
+    rate !== null
+  ) {
     const monthlyToAnnual = /(ao|a) mes/.test(nrm) && /(ao|a) ano/.test(nrm);
-    const annualToMonthly = /(ao|a) ano/.test(nrm) && /(ao|a) mes/.test(nrm) && nrm.indexOf("ano") < nrm.lastIndexOf("mes");
+    const annualToMonthly =
+      /(ao|a) ano/.test(nrm) &&
+      /(ao|a) mes/.test(nrm) &&
+      nrm.indexOf("ano") < nrm.lastIndexOf("mes");
     if (monthlyToAnnual && !annualToMonthly) {
       const equivalent = Math.pow(1 + rate, 12) - 1;
       return {
@@ -104,7 +121,9 @@ function financial(text: string): OliviaCalculation | null {
     const periods = integerNear(nrm, ["ano(?:s)?", "periodo(?:s)?"]);
     if (initial !== null && flow !== null && periods) {
       let pvFlows = 0;
-      for (let t = 1; t <= periods; t += 1) pvFlows += flow / Math.pow(1 + rate, t);
+      for (let t = 1; t <= periods; t += 1) {
+        pvFlows += flow / Math.pow(1 + rate, t);
+      }
       const npv = -initial + pvFlows;
       return {
         category: "financial_math",
@@ -120,7 +139,7 @@ function financial(text: string): OliviaCalculation | null {
     const periods = integerNear(nrm, ["parcela(?:s)?", "mes(?:es)?"]);
     if (principal !== null && periods) {
       const factor = Math.pow(1 + rate, periods);
-      const payment = principal * rate * factor / (factor - 1);
+      const payment = (principal * rate * factor) / (factor - 1);
       return {
         category: "financial_math",
         topic: "price_payment",
@@ -178,7 +197,11 @@ function financial(text: string): OliviaCalculation | null {
 }
 
 function unitNumber(text: string, unitPattern: string, occurrence = 0) {
-  const matches = [...text.matchAll(new RegExp(`(-?\\d+(?:[.,]\\d+)?)\\s*${unitPattern}`, "gi"))];
+  const matches = [
+    ...text.matchAll(
+      new RegExp(`(-?\\d+(?:[.,]\\d+)?)\\s*${unitPattern}`, "gi")
+    ),
+  ];
   const raw = matches[occurrence]?.[1];
   return raw ? parsePtNumber(raw) : null;
 }
@@ -192,7 +215,8 @@ function physics(text: string): OliviaCalculation | null {
     if (resistance !== null && voltage !== null && resistance !== 0) {
       const current = voltage / resistance;
       return {
-        category: "physics", topic: "ohms_law",
+        category: "physics",
+        topic: "ohms_law",
         reply: `Corrente elétrica: **${fmt(current)} A**.\nLei de Ohm: I = V/R = ${fmt(voltage)} V / ${fmt(resistance)} Ω.`,
         result: { current, voltage, resistance },
       };
@@ -207,7 +231,8 @@ function physics(text: string): OliviaCalculation | null {
     if (mass !== null && height !== null) {
       const energy = mass * g * height;
       return {
-        category: "physics", topic: "potential_energy",
+        category: "physics",
+        topic: "potential_energy",
         reply: `Energia potencial gravitacional: **${fmt(energy)} J**.\nFórmula: Eₚ = mgh = ${fmt(mass)} × ${fmt(g)} × ${fmt(height)}.`,
         result: { energy, mass, gravity: g, height },
       };
@@ -216,11 +241,12 @@ function physics(text: string): OliviaCalculation | null {
 
   if (/energia cinet/.test(nrm)) {
     const mass = unitNumber(text, "kg");
-    const velocity = unitNumber(text, "m\\/s");
+    const velocity = unitNumber(text, "m/s");
     if (mass !== null && velocity !== null) {
       const energy = 0.5 * mass * velocity * velocity;
       return {
-        category: "physics", topic: "kinetic_energy",
+        category: "physics",
+        topic: "kinetic_energy",
         reply: `Energia cinética: **${fmt(energy)} J**.\nFórmula: E꜀ = ½mv² = ½ × ${fmt(mass)} × ${fmt(velocity)}².`,
         result: { energy, mass, velocity },
       };
@@ -229,11 +255,12 @@ function physics(text: string): OliviaCalculation | null {
 
   if (/forca resultante|segunda lei|\bf\s*=\s*m/.test(nrm)) {
     const mass = unitNumber(text, "kg");
-    const acceleration = unitNumber(text, "m\\/s(?:²|\^?2)");
+    const acceleration = unitNumber(text, "m/s(?:²|\\^2|2)");
     if (mass !== null && acceleration !== null) {
       const force = mass * acceleration;
       return {
-        category: "physics", topic: "newtons_second_law",
+        category: "physics",
+        topic: "newtons_second_law",
         reply: `Força resultante: **${fmt(force)} N**.\nSegunda lei de Newton: F = ma = ${fmt(mass)} × ${fmt(acceleration)}.`,
         result: { force, mass, acceleration },
       };
@@ -241,14 +268,22 @@ function physics(text: string): OliviaCalculation | null {
   }
 
   if (/aceleracao|aceleração/.test(text.toLowerCase())) {
-    const velocities = [...text.matchAll(/(-?\d+(?:[.,]\d+)?)\s*m\/s(?![²^2])/gi)].map(match => parsePtNumber(match[1]));
+    const velocities = [
+      ...text.matchAll(/(-?\d+(?:[.,]\d+)?)\s*m\/s(?![²^2])/gi),
+    ].map(match => parsePtNumber(match[1]));
     const time = unitNumber(text, "s(?:egundo(?:s)?)?\\b");
     if (velocities.length >= 2 && time !== null && time !== 0) {
       const acceleration = (velocities[1] - velocities[0]) / time;
       return {
-        category: "physics", topic: "acceleration",
+        category: "physics",
+        topic: "acceleration",
         reply: `Aceleração média: **${fmt(acceleration)} m/s²**.\nFórmula: a = Δv/Δt = (${fmt(velocities[1])} − ${fmt(velocities[0])})/${fmt(time)}.`,
-        result: { acceleration, initialVelocity: velocities[0], finalVelocity: velocities[1], time },
+        result: {
+          acceleration,
+          initialVelocity: velocities[0],
+          finalVelocity: velocities[1],
+          time,
+        },
       };
     }
   }
@@ -259,7 +294,8 @@ function physics(text: string): OliviaCalculation | null {
     if (distanceKm !== null && hours !== null && hours !== 0) {
       const speed = distanceKm / hours;
       return {
-        category: "physics", topic: "average_speed",
+        category: "physics",
+        topic: "average_speed",
         reply: `Velocidade média: **${fmt(speed)} km/h**.\nFórmula: v = Δs/Δt = ${fmt(distanceKm)} km / ${fmt(hours)} h.`,
         result: { speed, distanceKm, hours },
       };
@@ -269,7 +305,9 @@ function physics(text: string): OliviaCalculation | null {
   return null;
 }
 
-export function solveOliviaCalculation(question: string): OliviaCalculation | null {
+export function solveOliviaCalculation(
+  question: string
+): OliviaCalculation | null {
   const text = String(question || "").trim();
   if (!text) return null;
   return financial(text) ?? physics(text);
