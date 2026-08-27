@@ -35,10 +35,10 @@ const PHYSICS: TestCase[] = [
   { id: "ohm", question: "Um resistor de 4 ohms está ligado a uma tensão de 12 V. Qual corrente elétrica o atravessa, pela lei de Ohm?" }
 ];
 
-async function ask(question: string, key: string, model: string) {
+async function ask(question: string, token: string, model: string) {
   const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model,
       temperature: 0,
@@ -48,8 +48,9 @@ async function ask(question: string, key: string, model: string) {
       ]
     })
   });
-  if (!response.ok) return { status: response.status, reply: null };
-  const data = await response.json() as any;
+  const raw = await response.text();
+  if (!response.ok) return { status: response.status, reply: null, gatewayError: raw.slice(0, 300) };
+  const data = JSON.parse(raw) as any;
   return { status: response.status, reply: data?.choices?.[0]?.message?.content?.trim() || null };
 }
 
@@ -61,13 +62,18 @@ export default async function handler(req: any, res: any) {
   if (process.env.VERCEL_ENV !== "preview") {
     return res.status(404).json({ error: "Disponível apenas no ambiente de teste" });
   }
-  const key = process.env.AI_GATEWAY_API_KEY;
-  const model = process.env.OLIVIA_AI_MODEL;
-  if (!key || !model) {
+
+  const explicitKey = process.env.AI_GATEWAY_API_KEY;
+  const oidcToken = process.env.VERCEL_OIDC_TOKEN;
+  const token = explicitKey || oidcToken;
+  const model = process.env.OLIVIA_AI_MODEL || "openai/gpt-5.6-sol";
+
+  if (!token) {
     return res.status(503).json({
       error: "Olivia AI não configurada",
-      hasGatewayKey: Boolean(key),
-      hasModel: Boolean(model)
+      hasGatewayKey: false,
+      hasOidcToken: false,
+      model
     });
   }
 
@@ -76,9 +82,14 @@ export default async function handler(req: any, res: any) {
   const results = await Promise.all(cases.map(async item => ({
     id: item.id,
     question: item.question,
-    ...(await ask(item.question, key, model))
+    ...(await ask(item.question, token, model))
   })));
 
   res.setHeader("Cache-Control", "no-store");
-  return res.status(200).json({ group, model, results });
+  return res.status(200).json({
+    group,
+    model,
+    authSource: explicitKey ? "AI_GATEWAY_API_KEY" : "VERCEL_OIDC_TOKEN",
+    results
+  });
 }
