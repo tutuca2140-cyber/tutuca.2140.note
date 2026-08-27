@@ -54,6 +54,16 @@ AUTORIDADE
 - Esta versão é somente de consulta, análise e simulação operacional; não modifique dados.
 `;
 
+const INTENT = {
+  client: /\b(client\w*|cpf|telefon\w*|whatsapp)\b/,
+  payment: /\b(parcel\w*|pagament\w*|recebiment\w*|receber)\b/,
+  dueDate: /\b(venc\w*|atras\w*|inadimpl\w*|hoje|seman\w*)\b/,
+  cash: /\b(caixa|entrad\w*|said\w*|moviment\w*|fluxo\w*)\b/,
+  portfolio: /\b(carteir\w*|risco\w*|problema\w*|pior cliente|maior devedor|concentr\w*|negocio\w*|dashboard|resumo\w*|indicador\w*|total|totais)\b/,
+  contract: /\b(emprestim\w*|contrat\w*|financiament\w*|juro\w*|saldo devedor)\b/,
+  otherModule: /\b(veicul\w*|carro\w*|moto\w*|placa\w*|produt\w*|celular\w*|agent\w*|comiss\w*|venda\w*|vendid\w*)\b/,
+};
+
 function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
@@ -227,10 +237,10 @@ async function client360(databaseId: number, search: string) {
 
 function periodFlags(text: string) {
   return {
-    overdue: /\b(atras|inadimpl|vencid)\b/.test(text),
+    overdue: /\b(atras\w*|inadimpl\w*|vencid\w*)\b/.test(text),
     today: /\bhoje\b/.test(text),
-    week: /\bsemana\b/.test(text),
-    month: /\b(mes|mês)\b/.test(text),
+    week: /\bseman\w*\b/.test(text),
+    month: /\bmes(?:es)?\b/.test(text),
   };
 }
 
@@ -327,16 +337,16 @@ async function moduleLists(databaseId: number, text: string, search: string) {
   const sql = getSql();
   const like = `%${search}%`;
   const data: Record<string, unknown> = {};
-  const wantsSales = /\b(venda|vendas|vendi|vendido|vendidos)\b/.test(text);
-  const wantsVehicles = /\b(veiculo|carro|moto|placa)\b/.test(text);
-  const wantsProducts = /\b(produto|celular|mercadoria|sku)\b/.test(text);
+  const wantsSales = /\b(vend\w*|venda\w*)\b/.test(text);
+  const wantsVehicles = /\b(veicul\w*|carro\w*|moto\w*|placa\w*)\b/.test(text);
+  const wantsProducts = /\b(produt\w*|celular\w*|mercadori\w*|sku)\b/.test(text);
 
-  if (/\b(emprestimo|contrato|juros|saldo devedor)\b/.test(text)) {
+  if (/\b(emprestim\w*|contrat\w*|juro\w*|saldo devedor)\b/.test(text)) {
     data.loans = search
       ? await sql`SELECT l.*,c.name "clientName" FROM loans l JOIN clients c ON c.id=l."clientId" WHERE l."databaseId"=${databaseId} AND (c.name ILIKE ${like} OR c.phone ILIKE ${like} OR c.whatsapp ILIKE ${like} OR c.cpf ILIKE ${like}) ORDER BY l."updatedAt" DESC LIMIT 120`
       : await sql`SELECT l.*,c.name "clientName" FROM loans l JOIN clients c ON c.id=l."clientId" WHERE l."databaseId"=${databaseId} ORDER BY l."updatedAt" DESC LIMIT 120`;
   }
-  if (/\b(financiamento|financiado)\b/.test(text)) {
+  if (/\b(financiament\w*)\b/.test(text)) {
     data.financings = search
       ? await sql`SELECT vf.*,c.name "clientName" FROM "vehicleFinancings" vf LEFT JOIN clients c ON c.id=vf."clientId" WHERE vf."databaseId"=${databaseId} AND (c.name ILIKE ${like} OR c.phone ILIKE ${like} OR c.whatsapp ILIKE ${like} OR c.cpf ILIKE ${like}) ORDER BY vf."updatedAt" DESC LIMIT 120`
       : await sql`SELECT vf.*,c.name "clientName" FROM "vehicleFinancings" vf LEFT JOIN clients c ON c.id=vf."clientId" WHERE vf."databaseId"=${databaseId} ORDER BY vf."updatedAt" DESC LIMIT 120`;
@@ -358,7 +368,7 @@ async function moduleLists(databaseId: number, text: string, search: string) {
     data.soldProducts = await sql`SELECT * FROM products WHERE "databaseId"=${databaseId} AND status='vendido' ORDER BY "updatedAt" DESC LIMIT 120`;
     data.productFinancings = await sql`SELECT vf.*,c.name "clientName",p.name "productName" FROM "vehicleFinancings" vf LEFT JOIN clients c ON c.id=vf."clientId" LEFT JOIN products p ON p.id=vf."productId" WHERE vf."databaseId"=${databaseId} AND vf."assetType"='product' ORDER BY vf."updatedAt" DESC LIMIT 120`;
   }
-  if (/\b(agente|comissao|comissionado)\b/.test(text)) {
+  if (/\b(agent\w*|comiss\w*)\b/.test(text)) {
     data.agents = search
       ? await sql`SELECT * FROM agents WHERE "databaseId"=${databaseId} AND name ILIKE ${like} ORDER BY "updatedAt" DESC LIMIT 100`
       : await sql`SELECT * FROM agents WHERE "databaseId"=${databaseId} ORDER BY "updatedAt" DESC LIMIT 100`;
@@ -390,14 +400,14 @@ export default async function handler(req: any, res: any) {
     const canRead = context.user.role === "super_admin" || (context.user.canView === true && context.user.dashboardOnly !== true);
     const dashboardOnly = context.user.dashboardOnly === true && context.user.canView === true;
 
-    const asksClient = Boolean(search) || /\b(cliente|cpf|telefone|whatsapp)\b/.test(text);
-    const asksPayments = /\b(parcela|pagamento|recebimento|receber)\b/.test(text);
-    const asksDueDates = /\b(vencimento|vence|vencid|atras|inadimpl|hoje|semana)\b/.test(text);
-    const asksCash = /\b(caixa|entrada|saida|movimentacao|fluxo)\b/.test(text);
-    const asksPortfolio = /\b(carteira|risco|problema|pior cliente|maior devedor|concentracao|negocio|dashboard|resumo|indicador|total)\b/.test(text);
-    const asksContracts = /\b(emprestimo|contrato|financiamento|juros|saldo devedor)\b/.test(text);
-    const asksOtherModules = /\b(veiculo|carro|moto|placa|produto|celular|agente|comissao|venda|vendas|vendido|vendidos)\b/.test(text);
-    const hypothetical = /\b(e se|se eu|se ele|se ela|simul|calcule|calcular|quanto ficaria|quanto daria|projec|cenario|hipotet|considerando)\b/.test(text);
+    const asksClient = Boolean(search) || INTENT.client.test(text);
+    const asksPayments = INTENT.payment.test(text);
+    const asksDueDates = INTENT.dueDate.test(text);
+    const asksCash = INTENT.cash.test(text);
+    const asksPortfolio = INTENT.portfolio.test(text);
+    const asksContracts = INTENT.contract.test(text);
+    const asksOtherModules = INTENT.otherModule.test(text);
+    const hypothetical = /\b(e se|se eu|se ele|se ela|simul\w*|calcul\w*|quanto ficaria|quanto daria|proje\w*|cenari\w*|hipotet\w*|considerando)\b/.test(text);
     const asksChange = !hypothetical && (
       /^(crie|cadastre|altere|edite|exclua|apague|registre|lance|marque)\b/.test(text)
       || /\b(quero que|preciso que|pode|por favor)\s+(criar|cadastrar|alterar|editar|excluir|apagar|registrar|lancar|marcar)\b/.test(text)
