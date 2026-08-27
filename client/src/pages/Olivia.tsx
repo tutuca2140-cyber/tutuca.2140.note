@@ -3,6 +3,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useOliviaExpert } from "@/hooks/useOliviaExpert";
+import { useOliviaMemory } from "@/hooks/useOliviaMemory";
 import { useOliviaV2 } from "@/hooks/useOliviaV2";
 import { trpc } from "@/lib/trpc";
 import { Clock3, Send, ShieldCheck, UserRound } from "lucide-react";
@@ -27,23 +29,37 @@ export default function Olivia() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content:
-        "Olá! Sou Olivia, assistente virtual do Note Note. Posso consultar os dados autorizados do banco selecionado. Como posso ajudar?",
+      content: "Oi! Como posso te ajudar?",
     },
   ]);
   const { data: access, isLoading } = trpc.olivia.access.useQuery();
+  const enabled = access?.enabled === true;
   const { data: history = [], refetch: refreshHistory } =
     trpc.olivia.history.useQuery(undefined, {
-      enabled: access?.enabled === true,
+      enabled,
     });
   const chat = trpc.olivia.chat.useMutation();
-  const oliviaV2 = useOliviaV2(access?.enabled === true);
+  const expert = useOliviaExpert(enabled);
+  const memory = useOliviaMemory(enabled);
+  const oliviaV2 = useOliviaV2(enabled);
+  const isPending = chat.isPending || expert.pending;
 
   const send = async (text?: string) => {
     const content = (text ?? message).trim();
-    if (!content || chat.isPending) return;
+    if (!content || isPending) return;
     setMessage("");
     setMessages(current => [...current, { role: "user", content }]);
+
+    const expertReply = await expert.ask(content);
+    if (expertReply) {
+      setMessages(current => [
+        ...current,
+        { role: "assistant", content: expertReply },
+      ]);
+      void memory.remember(content, expertReply);
+      void refreshHistory();
+      return;
+    }
 
     const v2Result = oliviaV2.tryHandle(content);
     if (v2Result) {
@@ -51,6 +67,7 @@ export default function Olivia() {
         ...current,
         { role: "assistant", content: v2Result.reply },
       ]);
+      void memory.remember(content, v2Result.reply);
       return;
     }
 
@@ -60,14 +77,15 @@ export default function Olivia() {
         ...current,
         { role: "assistant", content: result.reply },
       ]);
+      void memory.remember(content, result.reply);
       void refreshHistory();
     } catch (error) {
-      const content =
+      const errorContent =
         error instanceof Error
           ? error.message
           : "Não foi possível falar com a Olivia.";
-      setMessages(current => [...current, { role: "assistant", content }]);
-      toast.error(content);
+      setMessages(current => [...current, { role: "assistant", content: errorContent }]);
+      toast.error(errorContent);
     }
   };
 
@@ -177,7 +195,7 @@ export default function Olivia() {
                     )}
                   </div>
                 ))}
-                {chat.isPending && (
+                {isPending && (
                   <div className="flex items-end gap-2">
                     <img
                       src={OLIVIA_AVATAR}
@@ -205,7 +223,7 @@ export default function Olivia() {
                       size="sm"
                       variant="outline"
                       onClick={() => void send(suggestion)}
-                      disabled={chat.isPending}
+                      disabled={isPending}
                     >
                       {suggestion}
                     </Button>
@@ -220,22 +238,21 @@ export default function Olivia() {
                     onChange={event => setMessage(event.target.value)}
                     placeholder="Fale com a Olivia..."
                     className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-                    maxLength={500}
-                    disabled={chat.isPending}
+                    maxLength={2000}
+                    disabled={isPending}
                   />
                   <Button
                     type="submit"
                     size="icon"
                     className="shrink-0 rounded-full bg-gradient-to-br from-blue-600 to-cyan-500"
-                    disabled={!message.trim() || chat.isPending}
+                    disabled={!message.trim() || isPending}
                     aria-label="Enviar mensagem"
                   >
                     <Send className="h-4 w-4" />
                   </Button>
                 </form>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  A Olivia respeita suas permissões e nunca altera dados sem
-                  confirmação.
+                  A Olivia respeita suas permissões e usa somente o banco ativo.
                 </p>
               </div>
             </CardContent>
