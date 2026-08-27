@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import {
   assertOliviaActionAllowed,
   assertOliviaDatabaseAllowed,
+  assertOliviaEnabled,
   getOliviaCapabilities,
   type OliviaUserContext,
 } from "./authorization";
@@ -11,6 +12,7 @@ const baseUser: OliviaUserContext = {
   id: 10,
   role: "user",
   username: "operador",
+  canUseOlivia: true,
   canView: true,
   canInsert: false,
   canEdit: false,
@@ -21,8 +23,21 @@ const baseUser: OliviaUserContext = {
 };
 
 describe("Olivia authorization", () => {
+  it("blocks users when Super Admin has not granted Olivia access", () => {
+    const disabledUser = { ...baseUser, canUseOlivia: false };
+    expect(() => assertOliviaEnabled(disabledUser)).toThrow(
+      "O acesso à Olivia não foi liberado pelo Super Administrador"
+    );
+  });
+
+  it("always lets Super Admin pass the Olivia access gate", () => {
+    const superAdmin = { ...baseUser, role: "super_admin", canUseOlivia: false };
+    expect(() => assertOliviaEnabled(superAdmin)).not.toThrow();
+  });
+
   it("inherits user permissions and never exposes delete", () => {
     expect(getOliviaCapabilities(baseUser)).toMatchObject({
+      enabled: true,
       canView: true,
       canInsert: false,
       canEdit: false,
