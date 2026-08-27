@@ -1,8 +1,19 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useOliviaMemory } from "@/hooks/useOliviaMemory";
 import { useOliviaV2 } from "@/hooks/useOliviaV2";
+import { useOliviaVoice } from "@/hooks/useOliviaVoice";
 import { trpc } from "@/lib/trpc";
-import { Grip, Send, ShieldCheck, X } from "lucide-react";
+import {
+  Grip,
+  Mic,
+  MicOff,
+  Send,
+  ShieldCheck,
+  Volume2,
+  VolumeX,
+  X,
+} from "lucide-react";
 import {
   FormEvent,
   PointerEvent as ReactPointerEvent,
@@ -40,9 +51,15 @@ export default function OliviaFloatingAssistant() {
     moved: boolean;
   } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const memoryApplied = useRef(false);
   const { data: access } = trpc.olivia.access.useQuery();
   const chat = trpc.olivia.chat.useMutation();
-  const oliviaV2 = useOliviaV2(access?.enabled === true);
+  const enabled = access?.enabled === true;
+  const oliviaV2 = useOliviaV2(enabled);
+  const memory = useOliviaMemory(enabled);
+  const voice = useOliviaVoice(text => {
+    if (enabled) void sendContent(text);
+  });
 
   useEffect(() => {
     const updateViewport = () => {
@@ -88,6 +105,21 @@ export default function OliviaFloatingAssistant() {
       window.clearInterval(interval);
     };
   }, [access?.enabled, open]);
+
+  useEffect(() => {
+    if (!enabled) {
+      memoryApplied.current = false;
+      return;
+    }
+    if (memory.loaded && !memoryApplied.current) {
+      memoryApplied.current = true;
+      if (memory.memory.length) setMessages(memory.memory);
+    }
+  }, [enabled, memory.loaded, memory.memory]);
+
+  useEffect(() => {
+    if (open && enabled) void memory.reload();
+  }, [open, enabled]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -149,9 +181,8 @@ export default function OliviaFloatingAssistant() {
     setOpen(value => !value);
   };
 
-  const send = async (event: FormEvent) => {
-    event.preventDefault();
-    const content = message.trim();
+  async function sendContent(rawContent: string) {
+    const content = rawContent.trim();
     if (!content || chat.isPending) return;
     setMessage("");
     setMessages(current => [...current, { role: "user", content }]);
@@ -162,6 +193,8 @@ export default function OliviaFloatingAssistant() {
         ...current,
         { role: "assistant", content: v2Result.reply },
       ]);
+      void memory.remember(content, v2Result.reply);
+      if (memory.voiceEnabled) voice.speak(v2Result.reply);
       return;
     }
 
@@ -171,6 +204,8 @@ export default function OliviaFloatingAssistant() {
         ...current,
         { role: "assistant", content: result.reply },
       ]);
+      void memory.remember(content, result.reply);
+      if (memory.voiceEnabled) voice.speak(result.reply);
     } catch (error) {
       setMessages(current => [
         ...current,
@@ -183,6 +218,11 @@ export default function OliviaFloatingAssistant() {
         },
       ]);
     }
+  }
+
+  const send = async (event: FormEvent) => {
+    event.preventDefault();
+    await sendContent(message);
   };
 
   return (
@@ -271,15 +311,39 @@ export default function OliviaFloatingAssistant() {
             </div>
 
             <form onSubmit={send} className="border-t bg-background/95 p-3">
-              <div className="flex items-center gap-2 rounded-full border bg-muted/40 p-1.5 pl-4 focus-within:ring-2 focus-within:ring-cyan-500/40">
+              <div className="flex items-center gap-1 rounded-full border bg-muted/40 p-1.5 pl-4 focus-within:ring-2 focus-within:ring-cyan-500/40">
                 <Input
                   value={message}
                   onChange={event => setMessage(event.target.value)}
-                  placeholder="Fale com a Olivia..."
+                  placeholder={voice.listening ? "Ouvindo..." : "Fale com a Olivia..."}
                   className="h-9 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
                   maxLength={500}
                   disabled={chat.isPending}
                 />
+                {memory.voiceEnabled && voice.listeningSupported && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 shrink-0 rounded-full"
+                    onClick={voice.listening ? voice.stopListening : voice.startListening}
+                    aria-label={voice.listening ? "Parar de ouvir" : "Falar com a Olivia"}
+                  >
+                    {voice.listening ? <MicOff className="h-4 w-4 text-rose-500" /> : <Mic className="h-4 w-4" />}
+                  </Button>
+                )}
+                {memory.voiceEnabled && voice.speakingSupported && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 shrink-0 rounded-full"
+                    onClick={() => voice.setVoiceReplies(!voice.voiceReplies)}
+                    aria-label={voice.voiceReplies ? "Desativar respostas por voz" : "Ativar respostas por voz"}
+                  >
+                    {voice.voiceReplies ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                  </Button>
+                )}
                 <Button
                   type="submit"
                   size="icon"
@@ -292,7 +356,7 @@ export default function OliviaFloatingAssistant() {
               </div>
               <p className="mt-2 flex items-center justify-center gap-1 text-[10px] text-muted-foreground">
                 <ShieldCheck className="h-3 w-3" />
-                Dados limitados às suas permissões
+                Dados limitados às suas permissões · continuidade {memory.continuityCoefficient}%
               </p>
             </form>
           </div>
