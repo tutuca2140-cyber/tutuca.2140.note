@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useOliviaV2 } from "@/hooks/useOliviaV2";
 import { trpc } from "@/lib/trpc";
 import { Clock3, Send, ShieldCheck, UserRound } from "lucide-react";
 import { FormEvent, useState } from "react";
@@ -36,12 +37,23 @@ export default function Olivia() {
       enabled: access?.enabled === true,
     });
   const chat = trpc.olivia.chat.useMutation();
+  const oliviaV2 = useOliviaV2(access?.enabled === true);
 
   const send = async (text?: string) => {
     const content = (text ?? message).trim();
     if (!content || chat.isPending) return;
     setMessage("");
     setMessages(current => [...current, { role: "user", content }]);
+
+    const v2Result = oliviaV2.tryHandle(content);
+    if (v2Result) {
+      setMessages(current => [
+        ...current,
+        { role: "assistant", content: v2Result.reply },
+      ]);
+      return;
+    }
+
     try {
       const result = await chat.mutateAsync({ message: content });
       setMessages(current => [
