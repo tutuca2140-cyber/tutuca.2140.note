@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 
 export default function Login() {
   const [, setLocation] = useLocation();
@@ -90,7 +90,7 @@ export default function Login() {
           <CardHeader>
             <CardTitle>Bem-vindo</CardTitle>
             <CardDescription>
-              Entre com seu usuário e senha cadastrados pelo administrador.
+              Entre com seu usuário e senha do Note Note.
             </CardDescription>
           </CardHeader>
 
@@ -190,6 +190,27 @@ export default function Login() {
                 >
                   Esqueci minha senha
                 </Button>
+
+                <div className="relative py-2">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-card px-2 text-muted-foreground">Novo cliente</span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 text-center">
+                  <p className="text-sm font-semibold text-slate-800">Quer assinar o Note Note?</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                    Escolha Basic ou Plus e crie seu cadastro comercial com e-mail, nome de usuário e senha.
+                  </p>
+                  <Link href="/planos">
+                    <a className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-lg border border-blue-200 bg-white px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-100">
+                      Cadastre-se para assinar
+                    </a>
+                  </Link>
+                </div>
               </>
             )}
           </CardContent>
