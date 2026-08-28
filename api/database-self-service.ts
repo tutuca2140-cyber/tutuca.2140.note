@@ -110,6 +110,29 @@ async function assertDatabaseAccess(client: Client, user: SessionUser, databaseI
   return database.rows[0];
 }
 
+async function getOtherAccessCount(client: Client, user: SessionUser, databaseId: number) {
+  if (user.role === "super_admin") return 0;
+  const result = await client.query(
+    `SELECT COUNT(*)::int AS count
+       FROM user_database_access
+      WHERE "databaseId" = $1 AND "userId" <> $2`,
+    [databaseId, user.id]
+  );
+  return Number(result.rows[0]?.count || 0);
+}
+
+async function assertExclusiveDatabase(client: Client, user: SessionUser, databaseId: number) {
+  const otherAccessCount = await getOtherAccessCount(client, user, databaseId);
+  if (otherAccessCount > 0) {
+    throw Object.assign(
+      new Error(
+        "Este banco está compartilhado com outro usuário. Alterações de memória, nome ou exclusão ficam restritas ao Super Admin."
+      ),
+      { statusCode: 409 }
+    );
+  }
+}
+
 async function deleteOperationalMemory(client: Client, databaseId: number) {
   for (const table of DELETE_ORDER) {
     await client.query(
@@ -187,10 +210,15 @@ async function getRecoveryStatus(client: Client, databaseId: number) {
   );
   const backup = result.rows[0];
   const active =
-    backup && backup.status === "active" && new Date(backup.expiresAt).getTime() > Date.now();
+    backup &&
+    backup.status === "active" &&
+    new Date(backup.expiresAt).getTime() > Date.now();
   return {
     canRestore: Boolean(active),
-    canClearAgain: !backup || new Date(backup.createdAt).getTime() + RECOVERY_HOURS * 60 * 60 * 1000 <= Date.now(),
+    canClearAgain:
+      !backup ||
+      new Date(backup.createdAt).getTime() + RECOVERY_HOURS * 60 * 60 * 1000 <=
+        Date.now(),
     createdAt: backup?.createdAt ?? null,
     recoveryUntil: active ? backup.expiresAt : null,
     status: backup?.status ?? null,
@@ -205,7 +233,10 @@ export default async function handler(req: any, res: any) {
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    return sendJson(res, 503, { success: false, message: "Banco principal não configurado." });
+    return sendJson(res, 503, {
+      success: false,
+      message: "Banco principal não configurado.",
+    });
   }
 
   const client = new Client(databaseUrl);
@@ -213,7 +244,10 @@ export default async function handler(req: any, res: any) {
     await client.connect();
     const user = await getSessionUser(client, req);
     if (!user) {
-      return sendJson(res, 401, { success: false, message: "Sessão inválida ou expirada." });
+      return sendJson(res, 401, {
+        success: false,
+        message: "Sessão inválida ou expirada.",
+      });
     }
     if (user.dashboardOnly && user.role !== "super_admin") {
       return sendJson(res, 403, {
@@ -227,26 +261,27 @@ export default async function handler(req: any, res: any) {
     const action = String(body?.action ?? "").trim();
     const databaseId = Number(body?.databaseId);
     if (!Number.isInteger(databaseId) || databaseId <= 0) {
-      return sendJson(res, 400, { success: false, message: "Banco de dados inválido." });
+      return sendJson(res, 400, {
+        success: false,
+        message: "Banco de dados inválido.",
+      });
     }
 
     const database = await assertDatabaseAccess(client, user, databaseId);
+    const otherAccessCount = await getOtherAccessCount(client, user, databaseId);
 
     if (action === "status") {
       const recovery = await getRecoveryStatus(client, databaseId);
-      const otherAccess = await client.query(
-        `SELECT COUNT(*)::int AS count FROM user_database_access WHERE "databaseId" = $1 AND "userId" <> $2`,
-        [databaseId, user.id]
-      );
       return sendJson(res, 200, {
         success: true,
         database,
         recovery,
-        sharedWithOtherUsers: Number(otherAccess.rows[0]?.count || 0) > 0,
+        sharedWithOtherUsers: otherAccessCount > 0,
       });
     }
 
     if (action === "update") {
+      await assertExclusiveDatabase(client, user, databaseId);
       const name = String(body?.name ?? "").trim();
       const description = String(body?.description ?? "").trim();
       if (!name || name.length > 255) {
@@ -256,18 +291,27 @@ export default async function handler(req: any, res: any) {
         });
       }
       const result = await client.query(
-        `UPDATE databases SET name = $1, description = $2, "updatedAt" = NOW() WHERE id = $3 RETURNING *`,
+        `UPDATE databases
+            SET name = $1, description = $2, "updatedAt" = NOW()
+          WHERE id = $3
+          RETURNING *`,
         [name, description || null, databaseId]
       );
       await writeAudit(client, user, "self_update_database", databaseId, {
         previousName: database.name,
         name,
       });
-      return sendJson(res, 200, { success: true, database: result.rows[0] });
+      return sendJson(res, 200, {
+        success: true,
+        database: result.rows[0],
+      });
     }
 
     if (action === "clear") {
-      const confirmation = String(body?.confirmation ?? "").trim().toUpperCase();
+      await assertExclusiveDatabase(client, user, databaseId);
+      const confirmation = String(body?.confirmation ?? "")
+        .trim()
+        .toUpperCase();
       if (confirmation !== "LIMPAR") {
         return sendJson(res, 400, {
           success: false,
@@ -279,7 +323,8 @@ export default async function handler(req: any, res: any) {
       if (!recovery.canClearAgain) {
         return sendJson(res, 429, {
           success: false,
-          message: "A memória deste banco só pode ser redefinida novamente após 48 horas.",
+          message:
+            "A memória deste banco só pode ser redefinida novamente após 48 horas.",
           recovery,
         });
       }
@@ -287,7 +332,9 @@ export default async function handler(req: any, res: any) {
       await client.query("BEGIN");
       try {
         const payload = await readSnapshot(client, databaseId);
-        const expiresAt = new Date(Date.now() + RECOVERY_HOURS * 60 * 60 * 1000);
+        const expiresAt = new Date(
+          Date.now() + RECOVERY_HOURS * 60 * 60 * 1000
+        );
         await client.query(
           `INSERT INTO database_memory_backups
             ("databaseId", "userId", payload, status, "createdAt", "expiresAt")
@@ -295,7 +342,10 @@ export default async function handler(req: any, res: any) {
           [databaseId, user.id, JSON.stringify(payload), expiresAt]
         );
         await deleteOperationalMemory(client, databaseId);
-        await client.query(`UPDATE databases SET "updatedAt" = NOW() WHERE id = $1`, [databaseId]);
+        await client.query(
+          `UPDATE databases SET "updatedAt" = NOW() WHERE id = $1`,
+          [databaseId]
+        );
         await writeAudit(client, user, "clear_database_memory", databaseId, {
           recoveryHours: RECOVERY_HOURS,
           recoveryUntil: expiresAt.toISOString(),
@@ -303,7 +353,8 @@ export default async function handler(req: any, res: any) {
         await client.query("COMMIT");
         return sendJson(res, 200, {
           success: true,
-          message: "Memória limpa. A cópia de segurança pode ser restaurada por até 48 horas.",
+          message:
+            "Memória limpa. A cópia de segurança pode ser restaurada por até 48 horas.",
           recoveryUntil: expiresAt,
         });
       } catch (error) {
@@ -313,10 +364,13 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action === "restore") {
+      await assertExclusiveDatabase(client, user, databaseId);
       const backup = await client.query(
         `SELECT id, payload, "expiresAt"
            FROM database_memory_backups
-          WHERE "databaseId" = $1 AND status = 'active' AND "expiresAt" > NOW()
+          WHERE "databaseId" = $1
+            AND status = 'active'
+            AND "expiresAt" > NOW()
           ORDER BY "createdAt" DESC
           LIMIT 1`,
         [databaseId]
@@ -324,7 +378,8 @@ export default async function handler(req: any, res: any) {
       if (!backup.rows[0]) {
         return sendJson(res, 410, {
           success: false,
-          message: "Não existe uma memória recuperável dentro do prazo de 48 horas.",
+          message:
+            "Não existe uma memória recuperável dentro do prazo de 48 horas.",
         });
       }
 
@@ -334,10 +389,15 @@ export default async function handler(req: any, res: any) {
         const payload = backup.rows[0].payload as SnapshotPayload;
         await restoreSnapshot(client, payload);
         await client.query(
-          `UPDATE database_memory_backups SET status = 'restored', "restoredAt" = NOW() WHERE id = $1`,
+          `UPDATE database_memory_backups
+              SET status = 'restored', "restoredAt" = NOW()
+            WHERE id = $1`,
           [backup.rows[0].id]
         );
-        await client.query(`UPDATE databases SET "updatedAt" = NOW() WHERE id = $1`, [databaseId]);
+        await client.query(
+          `UPDATE databases SET "updatedAt" = NOW() WHERE id = $1`,
+          [databaseId]
+        );
         await writeAudit(client, user, "restore_database_memory", databaseId, {
           backupId: backup.rows[0].id,
         });
@@ -353,33 +413,31 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action === "delete") {
+      await assertExclusiveDatabase(client, user, databaseId);
       const confirmation = String(body?.confirmation ?? "").trim();
       if (confirmation !== String(database.name)) {
         return sendJson(res, 400, {
           success: false,
-          message: "Digite exatamente o nome do banco para confirmar a exclusão.",
+          message:
+            "Digite exatamente o nome do banco para confirmar a exclusão.",
         });
-      }
-
-      if (user.role !== "super_admin") {
-        const otherAccess = await client.query(
-          `SELECT COUNT(*)::int AS count FROM user_database_access WHERE "databaseId" = $1 AND "userId" <> $2`,
-          [databaseId, user.id]
-        );
-        if (Number(otherAccess.rows[0]?.count || 0) > 0) {
-          return sendJson(res, 409, {
-            success: false,
-            message: "Este banco está compartilhado com outro usuário. Somente o Super Admin pode excluí-lo.",
-          });
-        }
       }
 
       await client.query("BEGIN");
       try {
         await deleteOperationalMemory(client, databaseId);
-        await client.query(`DELETE FROM user_database_access WHERE "databaseId" = $1`, [databaseId]);
-        await client.query(`DELETE FROM database_memory_backups WHERE "databaseId" = $1`, [databaseId]);
-        await client.query(`DELETE FROM "auditLogs" WHERE "databaseId" = $1`, [databaseId]);
+        await client.query(
+          `DELETE FROM user_database_access WHERE "databaseId" = $1`,
+          [databaseId]
+        );
+        await client.query(
+          `DELETE FROM database_memory_backups WHERE "databaseId" = $1`,
+          [databaseId]
+        );
+        await client.query(
+          `DELETE FROM "auditLogs" WHERE "databaseId" = $1`,
+          [databaseId]
+        );
         await client.query(`DELETE FROM databases WHERE id = $1`, [databaseId]);
         await writeAudit(client, user, "self_delete_database", null, {
           deletedDatabaseId: databaseId,
@@ -396,7 +454,10 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    return sendJson(res, 400, { success: false, message: "Ação não reconhecida." });
+    return sendJson(res, 400, {
+      success: false,
+      message: "Ação não reconhecida.",
+    });
   } catch (error: any) {
     console.error("[database-self-service]", error);
     if (error?.code === "23505") {
@@ -407,7 +468,10 @@ export default async function handler(req: any, res: any) {
     }
     return sendJson(res, Number(error?.statusCode || 500), {
       success: false,
-      message: error instanceof Error ? error.message : "Não foi possível concluir a operação.",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Não foi possível concluir a operação.",
     });
   } finally {
     try {
