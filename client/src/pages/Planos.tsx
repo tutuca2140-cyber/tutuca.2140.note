@@ -8,7 +8,8 @@ const plans = [
     price: "29,90",
     description: "Para começar a organizar suas vendas, empréstimos e negociações no Note Note.",
     badge: "Plano de entrada",
-    databaseAccess: "1 banco de dados",
+    databaseAccess: "1 banco de dados exclusivo",
+    automaticCreation: "Criado automaticamente após a aprovação da conta como Principal - seu usuário",
     featured: false,
     icon: Sparkles,
   },
@@ -18,7 +19,8 @@ const plans = [
     price: "49,90",
     description: "Para quem precisa separar operações e trabalhar com mais de um banco dentro do Note Note.",
     badge: "Mais completo",
-    databaseAccess: "Até 3 bancos de dados",
+    databaseAccess: "3 bancos de dados exclusivos",
+    automaticCreation: "Criados automaticamente após a aprovação: Principal - seu usuário, #2 e #3",
     featured: true,
     icon: Crown,
   },
@@ -78,7 +80,7 @@ export default function Planos() {
               Escolha o plano ideal para você
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-              O Basic oferece um banco de dados para sua operação. No Plus, você pode trabalhar com até três bancos de dados separados.
+              Você não precisa configurar o banco do zero. Depois da aprovação da assinatura, o Note Note cria automaticamente os bancos incluídos no seu plano e eles já ficam vinculados à sua conta.
             </p>
           </div>
 
@@ -122,17 +124,26 @@ export default function Planos() {
                   </p>
 
                   <div className="mt-7 space-y-3 border-y border-slate-100 py-6 text-sm text-slate-700">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                         <Check className="h-4 w-4" />
                       </span>
-                      <strong>{plan.databaseAccess}</strong>
+                      <div>
+                        <strong>{plan.databaseAccess}</strong>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">{plan.automaticCreation}</p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                         <Check className="h-4 w-4" />
                       </span>
-                      Acesso ao Note Note após assinatura
+                      Bancos editáveis pela área Meu Banco
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                        <Check className="h-4 w-4" />
+                      </span>
+                      Acesso ao Note Note após aprovação da assinatura
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
@@ -165,7 +176,11 @@ export default function Planos() {
             })}
           </div>
 
-          <p className="mx-auto mt-8 max-w-3xl text-center text-sm leading-6 text-slate-500">
+          <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-blue-100 bg-white/80 p-5 text-center text-sm leading-6 text-slate-600 shadow-sm">
+            <strong className="text-slate-900">Criação automática incluída:</strong> o Basic recebe o banco <strong>Principal - seu usuário</strong>. No Plus, o sistema cria também <strong>Principal - seu usuário #2</strong> e <strong>Principal - seu usuário #3</strong>. Depois você pode editar os nomes normalmente.
+          </div>
+
+          <p className="mx-auto mt-6 max-w-3xl text-center text-sm leading-6 text-slate-500">
             A quantidade de bancos é aplicada somente às contas comerciais. Usuários gratuitos e de teste criados diretamente pelo Super Admin continuam separados do fluxo de assinatura.
           </p>
         </section>
