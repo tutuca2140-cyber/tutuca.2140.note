@@ -180,6 +180,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       show: isSuperAdmin,
     },
     {
+      name: "Assinaturas",
+      href: "/admin/assinaturas",
+      icon: CreditCard,
+      show: isSuperAdmin,
+    },
+    {
       name: "Usuários",
       href: "/admin/usuarios",
       icon: Shield,
