@@ -8,6 +8,7 @@ const plans = [
     price: "29,90",
     description: "Para começar a organizar suas vendas, empréstimos e negociações no Note Note.",
     badge: "Plano de entrada",
+    databaseAccess: "1 banco de dados",
     featured: false,
     icon: Sparkles,
   },
@@ -15,8 +16,9 @@ const plans = [
     id: "plus",
     name: "Plus",
     price: "49,90",
-    description: "Para quem quer usar o Note Note no plano mais completo da plataforma.",
+    description: "Para quem precisa separar operações e trabalhar com mais de um banco dentro do Note Note.",
     badge: "Mais completo",
+    databaseAccess: "Até 3 bancos de dados",
     featured: true,
     icon: Crown,
   },
@@ -76,7 +78,7 @@ export default function Planos() {
               Escolha o plano ideal para você
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-              Comece com o Basic ou escolha o Plus. Depois da escolha, você cria seu cadastro comercial para seguir para a assinatura.
+              O Basic oferece um banco de dados para sua operação. No Plus, você pode trabalhar com até três bancos de dados separados.
             </p>
           </div>
 
@@ -124,6 +126,12 @@ export default function Planos() {
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                         <Check className="h-4 w-4" />
                       </span>
+                      <strong>{plan.databaseAccess}</strong>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                        <Check className="h-4 w-4" />
+                      </span>
                       Acesso ao Note Note após assinatura
                     </div>
                     <div className="flex items-center gap-3">
@@ -158,7 +166,7 @@ export default function Planos() {
           </div>
 
           <p className="mx-auto mt-8 max-w-3xl text-center text-sm leading-6 text-slate-500">
-            Usuários gratuitos e de teste criados diretamente pelo Super Admin não passam por este cadastro comercial e continuam separados do fluxo de assinatura.
+            A quantidade de bancos é aplicada somente às contas comerciais. Usuários gratuitos e de teste criados diretamente pelo Super Admin continuam separados do fluxo de assinatura.
           </p>
         </section>
       </main>
