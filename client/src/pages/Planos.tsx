@@ -28,7 +28,7 @@ function choosePlan(planId: "basic" | "plus") {
   } catch {
     // O parâmetro da URL continua preservando a escolha caso o storage esteja indisponível.
   }
-  window.location.href = `/login?plano=${planId}`;
+  window.location.href = `/cadastro?plano=${planId}`;
 }
 
 export default function Planos() {
@@ -76,7 +76,7 @@ export default function Planos() {
               Escolha o plano ideal para você
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-              Comece com o Basic ou escolha o Plus. Os dois planos são cobrados mensalmente e a seleção fica vinculada ao seu próximo acesso.
+              Comece com o Basic ou escolha o Plus. Depois da escolha, você cria seu cadastro comercial para seguir para a assinatura.
             </p>
           </div>
 
@@ -124,7 +124,7 @@ export default function Planos() {
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                         <Check className="h-4 w-4" />
                       </span>
-                      Acesso ao Note Note
+                      Acesso ao Note Note após assinatura
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
@@ -136,7 +136,7 @@ export default function Planos() {
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                         <Check className="h-4 w-4" />
                       </span>
-                      Plano selecionado no acesso
+                      Cadastro com e-mail, usuário e senha
                     </div>
                   </div>
 
@@ -158,7 +158,7 @@ export default function Planos() {
           </div>
 
           <p className="mx-auto mt-8 max-w-3xl text-center text-sm leading-6 text-slate-500">
-            Nesta etapa, a página registra apenas a escolha do plano. A cobrança automática e as diferenças de recursos entre Basic e Plus serão conectadas quando as regras comerciais forem definidas.
+            Usuários gratuitos e de teste criados diretamente pelo Super Admin não passam por este cadastro comercial e continuam separados do fluxo de assinatura.
           </p>
         </section>
       </main>
