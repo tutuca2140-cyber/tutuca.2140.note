@@ -26,13 +26,21 @@ import {
   Package,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import { useEffect, useState } from "react";
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { toast } from "sonner";
 import ThemeToggle from "@/components/ThemeToggle";
 import FinancialSummaryDonut from "@/components/FinancialSummaryDonut";
 
 interface DashboardLayoutProps {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
@@ -203,6 +211,23 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   if (!user) {
     return null;
+  }
+
+  let renderedChildren = children;
+  if (location === "/dashboard" && isValidElement(children)) {
+    const dashboardRoot = children as ReactElement<{ children?: ReactNode }>;
+    const dashboardSections = Children.toArray(dashboardRoot.props.children);
+    renderedChildren = cloneElement(
+      dashboardRoot,
+      undefined,
+      dashboardSections.length
+        ? [
+            dashboardSections[0],
+            <FinancialSummaryDonut key="financial-summary-donut" />,
+            ...dashboardSections.slice(1),
+          ]
+        : [<FinancialSummaryDonut key="financial-summary-donut" />]
+    );
   }
 
   return (
@@ -377,10 +402,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       <div className="lg:pl-64">
         <main className="pt-20 px-4 pb-8 sm:px-6 lg:pt-0 lg:px-8 lg:py-8">
-          <div className="mx-auto w-full max-w-[1600px]">
-            {location === "/dashboard" ? <FinancialSummaryDonut /> : null}
-            {children}
-          </div>
+          <div className="mx-auto w-full max-w-[1600px]">{renderedChildren}</div>
         </main>
       </div>
 
