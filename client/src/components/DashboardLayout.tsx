@@ -114,24 +114,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       show: user?.canView && regularAccess,
     },
     {
-      name: "Pagamentos",
-      href: "/pagamentos",
-      icon: Wallet,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Caixa",
-      href: "/caixa",
-      icon: Wallet,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Agentes",
-      href: "/agentes",
-      icon: Users,
-      show: user?.canView && regularAccess,
-    },
-    {
       name: "Veículos",
       href: "/veiculos",
       icon: Car,
@@ -141,6 +123,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       name: "Produtos",
       href: "/produtos",
       icon: Package,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Pagamentos",
+      href: "/pagamentos",
+      icon: Wallet,
       show: user?.canView && regularAccess,
     },
     {
@@ -156,10 +144,22 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       show: user?.canView && regularAccess,
     },
     {
+      name: "Caixa",
+      href: "/caixa",
+      icon: Wallet,
+      show: user?.canView && regularAccess,
+    },
+    {
       name: "Relatórios",
       href: "/relatorios",
       icon: FileText,
       show: user?.canGenerateReports && regularAccess,
+    },
+    {
+      name: "Agentes",
+      href: "/agentes",
+      icon: Users,
+      show: user?.canView && regularAccess,
     },
   ];
 
