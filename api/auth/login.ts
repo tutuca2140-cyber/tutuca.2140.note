@@ -11,10 +11,7 @@ import { verifyLoginCaptcha } from "../../shared/login-captcha.js";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
-    return sendJson(res, 405, {
-      success: false,
-      message: "Método não permitido",
-    });
+    return sendJson(res, 405, { success: false, message: "Método não permitido" });
   }
 
   try {
@@ -32,10 +29,7 @@ export default async function handler(req: any, res: any) {
       });
     }
     if (!verifyLoginCaptcha(captchaToken, captchaAnswer)) {
-      return sendJson(res, 400, {
-        success: false,
-        message: "Confirme corretamente que você não é um robô.",
-      });
+      return sendJson(res, 400, { success: false, message: "Confirme corretamente que você não é um robô." });
     }
 
     await ensureAuthUserColumns();
@@ -56,8 +50,6 @@ export default async function handler(req: any, res: any) {
         "canGenerateReports",
         "canAccessSettings",
         "dashboardOnly",
-        "oliviaEnabled",
-        "oliviaPlan",
         "failedLoginAttempts",
         "isActive"
       FROM users
@@ -76,25 +68,17 @@ export default async function handler(req: any, res: any) {
 
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) {
-      if (
-        String(user.username).toLowerCase() === "draco" ||
-        user.role === "super_admin"
-      ) {
-        return sendJson(res, 401, {
-          success: false,
-          message: "Usuário ou senha inválidos.",
-        });
+      if (String(user.username).toLowerCase() === "draco" || user.role === "super_admin") {
+        return sendJson(res, 401, { success: false, message: "Usuário ou senha inválidos." });
       }
       const attempts = Number(user.failedLoginAttempts || 0) + 1;
       await sql`UPDATE users SET "failedLoginAttempts" = ${attempts}, "isActive" = ${attempts < 2}, "updatedAt" = NOW() WHERE id = ${user.id}`;
-      if (attempts >= 2)
-        await sql`DELETE FROM local_sessions WHERE "userId" = ${user.id}`;
+      if (attempts >= 2) await sql`DELETE FROM local_sessions WHERE "userId" = ${user.id}`;
       return sendJson(res, 401, {
         success: false,
-        message:
-          attempts >= 2
-            ? "Usuário desativado após duas tentativas incorretas. Solicite a reativação ao Super Admin."
-            : "Usuário ou senha inválidos. Mais uma tentativa incorreta desativará a conta.",
+        message: attempts >= 2
+          ? "Usuário desativado após duas tentativas incorretas. Solicite a reativação ao Super Admin."
+          : "Usuário ou senha inválidos. Mais uma tentativa incorreta desativará a conta.",
       });
     }
 

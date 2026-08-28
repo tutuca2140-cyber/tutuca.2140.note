@@ -35,13 +35,6 @@ export const users = pgTable("users", {
   canGenerateReports: boolean("canGenerateReports").default(false).notNull(),
   canAccessSettings: boolean("canAccessSettings").default(false).notNull(),
   dashboardOnly: boolean("dashboardOnly").default(false).notNull(),
-  oliviaEnabled: boolean("oliviaEnabled").default(false).notNull(),
-  oliviaPlan: varchar("oliviaPlan", {
-    length: 32,
-    enum: ["basic", "basic_plus", "plus"],
-  })
-    .default("basic")
-    .notNull(),
   failedLoginAttempts: integer("failedLoginAttempts").default(0).notNull(),
 
   isActive: boolean("isActive").default(true).notNull(),
@@ -54,23 +47,6 @@ export const users = pgTable("users", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
-
-/** Configuração central da assistente Olivia, administrada pelo Super ADM. */
-export const oliviaSettings = pgTable("olivia_settings", {
-  id: serial("id").primaryKey(),
-  enabled: boolean("enabled").default(true).notNull(),
-  allowClientQueries: boolean("allowClientQueries").default(true).notNull(),
-  allowContractQueries: boolean("allowContractQueries").default(true).notNull(),
-  allowPaymentQueries: boolean("allowPaymentQueries").default(true).notNull(),
-  allowDueDateQueries: boolean("allowDueDateQueries").default(true).notNull(),
-  allowSummaries: boolean("allowSummaries").default(true).notNull(),
-  allowChanges: boolean("allowChanges").default(false).notNull(),
-  requireConfirmation: boolean("requireConfirmation").default(true).notNull(),
-  updatedBy: integer("updatedBy"),
-  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
-
-export type OliviaSettings = typeof oliviaSettings.$inferSelect;
 
 /**
  * Local authentication sessions - para manter sessões de usuários que fazem login com usuário/senha

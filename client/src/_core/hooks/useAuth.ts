@@ -13,8 +13,6 @@ type AuthUser = {
   canGenerateReports?: boolean;
   canAccessSettings?: boolean;
   dashboardOnly?: boolean;
-  oliviaEnabled?: boolean;
-  oliviaPlan?: "basic" | "basic_plus" | "plus";
   isActive?: boolean;
 };
 
@@ -24,8 +22,10 @@ type UseAuthOptions = {
 };
 
 export function useAuth(options?: UseAuthOptions) {
-  const { redirectOnUnauthenticated = false, redirectPath = "/login" } =
-    options ?? {};
+  const {
+    redirectOnUnauthenticated = false,
+    redirectPath = "/login",
+  } = options ?? {};
 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);

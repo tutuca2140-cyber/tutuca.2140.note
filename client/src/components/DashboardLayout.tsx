@@ -1,6 +1,4 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import OliviaFloatingAssistant from "@/components/OliviaFloatingAssistant";
-import ThemeToggle from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -26,11 +24,11 @@ import {
   ClipboardList,
   CalendarDays,
   Package,
-  Bot,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import ThemeToggle from "@/components/ThemeToggle";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -101,12 +99,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       href: "/dashboard",
       icon: LayoutDashboard,
       show: true,
-    },
-    {
-      name: "Olivia",
-      href: "/olivia",
-      icon: Bot,
-      show: user?.role === "super_admin" || user?.oliviaEnabled === true,
     },
     {
       name: "Clientes",
@@ -394,7 +386,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           onClick={() => setSidebarOpen(false)}
         />
       )}
-      <OliviaFloatingAssistant />
     </div>
   );
 }

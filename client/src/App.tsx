@@ -18,7 +18,6 @@ const Veiculos = lazy(() => import("./pages/Veiculos"));
 const Produtos = lazy(() => import("./pages/Produtos"));
 const Financiamentos = lazy(() => import("./pages/Financiamentos"));
 const ContasAReceber = lazy(() => import("./pages/ContasAReceber"));
-const Olivia = lazy(() => import("./pages/Olivia"));
 const Relatorios = lazy(() => import("./pages/Relatorios"));
 const AdminUsuarios = lazy(() => import("./pages/admin/Usuarios"));
 const AdminBancos = lazy(() => import("./pages/admin/Bancos"));
@@ -41,7 +40,6 @@ function Router() {
       <Route path={"/produtos"} component={Produtos} />
       <Route path={"/financiamentos"} component={Financiamentos} />
       <Route path={"/contas-a-receber"} component={ContasAReceber} />
-      <Route path={"/olivia"} component={Olivia} />
       <Route path={"/relatorios"} component={Relatorios} />
       <Route path={"/admin/usuarios"} component={AdminUsuarios} />
       <Route path={"/admin/bancos"} component={AdminBancos} />

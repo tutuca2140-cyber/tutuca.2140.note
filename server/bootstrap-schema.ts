@@ -11,9 +11,6 @@ export function ensurePreviewBusinessSchema() {
     const sql = neon(process.env.DATABASE_URL!);
     await sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
     await sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
-    await sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "oliviaEnabled" boolean DEFAULT false NOT NULL`;
-    await sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "oliviaPlan" varchar(32) DEFAULT 'basic' NOT NULL`;
-    await sql`CREATE TABLE IF NOT EXISTS "olivia_settings" ("id" serial PRIMARY KEY, "enabled" boolean DEFAULT true NOT NULL, "allowClientQueries" boolean DEFAULT true NOT NULL, "allowContractQueries" boolean DEFAULT true NOT NULL, "allowPaymentQueries" boolean DEFAULT true NOT NULL, "allowDueDateQueries" boolean DEFAULT true NOT NULL, "allowSummaries" boolean DEFAULT true NOT NULL, "allowChanges" boolean DEFAULT false NOT NULL, "requireConfirmation" boolean DEFAULT true NOT NULL, "updatedBy" integer, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql`CREATE TABLE IF NOT EXISTS "databases" ("id" serial PRIMARY KEY, "name" varchar(255) NOT NULL UNIQUE, "description" text, "type" varchar(64) NOT NULL, "isActive" boolean DEFAULT false NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql`CREATE TABLE IF NOT EXISTS "user_database_access" ("id" serial PRIMARY KEY, "userId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE, "databaseId" integer NOT NULL REFERENCES "databases"("id") ON DELETE CASCADE, "isActive" boolean DEFAULT false NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS "user_database_access_user_database_unique" ON "user_database_access" ("userId", "databaseId")`;
