@@ -7,6 +7,11 @@ const PLAN_PRICES = {
   plus: 4990,
 } as const;
 
+const PLAN_DATABASE_LIMITS = {
+  basic: 1,
+  plus: 3,
+} as const;
+
 type CommercialPlan = keyof typeof PLAN_PRICES;
 
 function isCommercialPlan(value: string): value is CommercialPlan {
@@ -38,6 +43,69 @@ async function ensureCommercialSubscriptionTable() {
       "createdAt" timestamptz NOT NULL DEFAULT NOW(),
       "updatedAt" timestamptz NOT NULL DEFAULT NOW()
     )
+  `;
+
+  await sql`
+    CREATE OR REPLACE FUNCTION enforce_commercial_database_limit()
+    RETURNS trigger AS $$
+    DECLARE
+      user_method text;
+      user_plan text;
+      allowed_count integer;
+      current_count integer;
+    BEGIN
+      SELECT "loginMethod"
+        INTO user_method
+        FROM users
+       WHERE id = NEW."userId";
+
+      IF COALESCE(user_method, 'local') <> 'commercial_signup' THEN
+        RETURN NEW;
+      END IF;
+
+      SELECT plan
+        INTO user_plan
+        FROM commercial_subscriptions
+       WHERE "userId" = NEW."userId"
+       LIMIT 1;
+
+      allowed_count := CASE
+        WHEN user_plan = 'basic' THEN 1
+        WHEN user_plan = 'plus' THEN 3
+        ELSE 0
+      END;
+
+      IF allowed_count = 0 THEN
+        RAISE EXCEPTION 'Plano comercial não definido para este usuário.'
+          USING ERRCODE = 'P0001';
+      END IF;
+
+      PERFORM pg_advisory_xact_lock(NEW."userId"::bigint);
+
+      SELECT COUNT(*)::integer
+        INTO current_count
+        FROM user_database_access
+       WHERE "userId" = NEW."userId";
+
+      IF current_count >= allowed_count THEN
+        RAISE EXCEPTION 'Limite de bancos excedido para o plano %. Basic permite 1 banco e Plus permite 3 bancos.', user_plan
+          USING ERRCODE = 'P0001';
+      END IF;
+
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+  `;
+
+  await sql`
+    DROP TRIGGER IF EXISTS commercial_database_limit_trigger
+      ON user_database_access
+  `;
+  await sql`
+    CREATE TRIGGER commercial_database_limit_trigger
+    BEFORE INSERT ON user_database_access
+    FOR EACH ROW
+    EXECUTE FUNCTION enforce_commercial_database_limit()
   `;
 }
 
@@ -186,6 +254,7 @@ export default async function handler(req: any, res: any) {
         email: user.email,
         plan,
         priceCents: PLAN_PRICES[plan],
+        databaseLimit: PLAN_DATABASE_LIMITS[plan],
         status: "pending_payment",
       },
       message:
