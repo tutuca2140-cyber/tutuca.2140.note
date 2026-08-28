@@ -7,8 +7,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 
 const plans = {
-  basic: { name: "Basic", price: "R$ 29,90/mês" },
-  plus: { name: "Plus", price: "R$ 49,90/mês" },
+  basic: { name: "Basic", price: "R$ 29,90/mês", databaseAccess: "1 banco de dados" },
+  plus: { name: "Plus", price: "R$ 49,90/mês", databaseAccess: "até 3 bancos de dados" },
 } as const;
 
 type PlanId = keyof typeof plans;
@@ -126,7 +126,7 @@ export default function Cadastro() {
               </div>
               <h1 className="mt-5 text-2xl font-black text-slate-950">Cadastro realizado</h1>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                Sua conta comercial foi criada para o plano <strong>{plans[plan].name}</strong> — {plans[plan].price}.
+                Sua conta comercial foi criada para o plano <strong>{plans[plan].name}</strong> — {plans[plan].price} — com acesso a <strong>{plans[plan].databaseAccess}</strong>.
               </p>
               <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4 text-left text-sm text-blue-950">
                 O acesso ao sistema permanece pendente até a confirmação da assinatura. Isso evita que o cadastro comercial libere o Note Note gratuitamente antes do pagamento.
@@ -165,12 +165,17 @@ export default function Cadastro() {
           </CardHeader>
           <CardContent>
             {plan ? (
-              <div className="mb-6 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 p-4">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Plano escolhido</p>
-                  <p className="mt-1 text-lg font-black text-slate-950">{plans[plan].name}</p>
+              <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Plano escolhido</p>
+                    <p className="mt-1 text-lg font-black text-slate-950">{plans[plan].name}</p>
+                  </div>
+                  <p className="font-extrabold text-blue-700">{plans[plan].price}</p>
                 </div>
-                <p className="font-extrabold text-blue-700">{plans[plan].price}</p>
+                <p className="mt-3 border-t border-blue-200 pt-3 text-sm font-semibold text-blue-950">
+                  Inclui {plans[plan].databaseAccess}.
+                </p>
               </div>
             ) : (
               <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
@@ -290,7 +295,7 @@ export default function Cadastro() {
               <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-xs leading-5 text-slate-600">
                 <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
                 <p>
-                  Este fluxo não altera as regras dos usuários gratuitos ou de teste criados pelo Super Admin. Ele cria somente contas comerciais vinculadas a uma futura assinatura.
+                  Este fluxo não altera as regras dos usuários gratuitos ou de teste criados pelo Super Admin. Ele cria somente contas comerciais vinculadas a uma futura assinatura e respeita o limite de bancos do plano escolhido.
                 </p>
               </div>
 
