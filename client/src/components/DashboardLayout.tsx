@@ -29,6 +29,7 @@ import { Link, useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import ThemeToggle from "@/components/ThemeToggle";
+import FinancialSummaryDonut from "@/components/FinancialSummaryDonut";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -113,24 +114,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       show: user?.canView && regularAccess,
     },
     {
-      name: "Pagamentos",
-      href: "/pagamentos",
-      icon: Wallet,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Caixa",
-      href: "/caixa",
-      icon: Wallet,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Agentes",
-      href: "/agentes",
-      icon: Users,
-      show: user?.canView && regularAccess,
-    },
-    {
       name: "Veículos",
       href: "/veiculos",
       icon: Car,
@@ -140,6 +123,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       name: "Produtos",
       href: "/produtos",
       icon: Package,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Pagamentos",
+      href: "/pagamentos",
+      icon: Wallet,
       show: user?.canView && regularAccess,
     },
     {
@@ -155,10 +144,22 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       show: user?.canView && regularAccess,
     },
     {
+      name: "Caixa",
+      href: "/caixa",
+      icon: Wallet,
+      show: user?.canView && regularAccess,
+    },
+    {
       name: "Relatórios",
       href: "/relatorios",
       icon: FileText,
       show: user?.canGenerateReports && regularAccess,
+    },
+    {
+      name: "Agentes",
+      href: "/agentes",
+      icon: Users,
+      show: user?.canView && regularAccess,
     },
   ];
 
@@ -376,7 +377,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       <div className="lg:pl-64">
         <main className="pt-20 px-4 pb-8 sm:px-6 lg:pt-0 lg:px-8 lg:py-8">
-          <div className="mx-auto w-full max-w-[1600px]">{children}</div>
+          <div className="mx-auto w-full max-w-[1600px]">
+            {location === "/dashboard" ? <FinancialSummaryDonut /> : null}
+            {children}
+          </div>
         </main>
       </div>
 
