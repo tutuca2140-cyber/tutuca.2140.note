@@ -120,14 +120,12 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.canDelete = true;
       values.canGenerateReports = true;
       values.canAccessSettings = true;
-      values.canUseOlivia = true;
       updateSet.canView = true;
       updateSet.canInsert = true;
       updateSet.canEdit = true;
       updateSet.canDelete = true;
       updateSet.canGenerateReports = true;
       updateSet.canAccessSettings = true;
-      updateSet.canUseOlivia = true;
     }
 
     if (!values.lastSignedIn) {
@@ -196,7 +194,6 @@ export async function updateUserPermissions(
     canDelete?: boolean;
     canGenerateReports?: boolean;
     canAccessSettings?: boolean;
-    canUseOlivia?: boolean;
   }
 ) {
   const db = await getDb();
@@ -272,7 +269,6 @@ export async function updateLocalUser(
     canDelete?: boolean;
     canGenerateReports?: boolean;
     canAccessSettings?: boolean;
-    canUseOlivia?: boolean;
     dashboardOnly?: boolean;
   }
 ) {
@@ -327,7 +323,6 @@ export async function ensureDracoIntegrity() {
       canDelete: true,
       canGenerateReports: true,
       canAccessSettings: true,
-      canUseOlivia: true,
       isActive: true,
     })
     .where(eq(users.id, user.id));
@@ -341,7 +336,6 @@ export async function ensureDracoIntegrity() {
     canDelete: true,
     canGenerateReports: true,
     canAccessSettings: true,
-    canUseOlivia: true,
     isActive: true,
   };
 }
@@ -2630,7 +2624,6 @@ export async function createLocalUser(data: {
   canDelete?: boolean;
   canGenerateReports?: boolean;
   canAccessSettings?: boolean;
-  canUseOlivia?: boolean;
   dashboardOnly?: boolean;
 }): Promise<any> {
   const db = await getDb();
@@ -2650,7 +2643,6 @@ export async function createLocalUser(data: {
       canDelete: data.canDelete ?? false,
       canGenerateReports: data.canGenerateReports ?? false,
       canAccessSettings: data.canAccessSettings ?? false,
-      canUseOlivia: data.canUseOlivia ?? false,
       dashboardOnly: data.dashboardOnly ?? false,
       isActive: true,
       emailVerified: false,

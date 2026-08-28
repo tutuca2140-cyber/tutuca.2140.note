@@ -4,13 +4,11 @@ let bootstrapPromise: Promise<void> | null = null;
 
 /** Additive, idempotent bootstrap for the isolated Preview database. */
 export function ensurePreviewBusinessSchema() {
-  if (!process.env.DATABASE_URL) return Promise.resolve();
+  if (process.env.VERCEL_ENV !== "preview" || !process.env.DATABASE_URL)
+    return Promise.resolve();
   if (bootstrapPromise) return bootstrapPromise;
   bootstrapPromise = (async () => {
     const sql = neon(process.env.DATABASE_URL!);
-    // Esta permissão também precisa existir em produção antes da autenticação.
-    await sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "canUseOlivia" boolean DEFAULT false NOT NULL`;
-    if (process.env.VERCEL_ENV !== "preview") return;
     await sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
     await sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
     await sql`CREATE TABLE IF NOT EXISTS "databases" ("id" serial PRIMARY KEY, "name" varchar(255) NOT NULL UNIQUE, "description" text, "type" varchar(64) NOT NULL, "isActive" boolean DEFAULT false NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;

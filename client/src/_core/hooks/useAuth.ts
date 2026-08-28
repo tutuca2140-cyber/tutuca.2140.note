@@ -12,7 +12,6 @@ type AuthUser = {
   canDelete?: boolean;
   canGenerateReports?: boolean;
   canAccessSettings?: boolean;
-  canUseOlivia?: boolean;
   dashboardOnly?: boolean;
   isActive?: boolean;
 };
@@ -23,8 +22,10 @@ type UseAuthOptions = {
 };
 
 export function useAuth(options?: UseAuthOptions) {
-  const { redirectOnUnauthenticated = false, redirectPath = "/login" } =
-    options ?? {};
+  const {
+    redirectOnUnauthenticated = false,
+    redirectPath = "/login",
+  } = options ?? {};
 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
