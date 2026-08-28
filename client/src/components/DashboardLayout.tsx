@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import {
+  Activity,
   LayoutDashboard,
   Users,
   CreditCard,
@@ -172,6 +173,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   ];
 
   const adminNavigation = [
+    {
+      name: "Painel de Controle",
+      href: "/admin/controle",
+      icon: Activity,
+      show: isSuperAdmin,
+    },
     {
       name: "Usuários",
       href: "/admin/usuarios",
