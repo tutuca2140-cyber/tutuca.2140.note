@@ -3,6 +3,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
+import SiteAccessTracker from "./components/SiteAccessTracker";
 import { ThemeProvider } from "./contexts/ThemeContext";
 
 const Home = lazy(() => import("./pages/Home"));
@@ -21,6 +22,7 @@ const Financiamentos = lazy(() => import("./pages/Financiamentos"));
 const ContasAReceber = lazy(() => import("./pages/ContasAReceber"));
 const Relatorios = lazy(() => import("./pages/Relatorios"));
 const MeuBanco = lazy(() => import("./pages/MeuBanco"));
+const AdminControle = lazy(() => import("./pages/admin/Controle"));
 const AdminUsuarios = lazy(() => import("./pages/admin/Usuarios"));
 const AdminBancos = lazy(() => import("./pages/admin/Bancos"));
 const AdminAuditoria = lazy(() => import("./pages/admin/Auditoria"));
@@ -46,6 +48,7 @@ function Router() {
       <Route path={"/contas-a-receber"} component={ContasAReceber} />
       <Route path={"/relatorios"} component={Relatorios} />
       <Route path={"/meu-banco"} component={MeuBanco} />
+      <Route path={"/admin/controle"} component={AdminControle} />
       <Route path={"/admin/usuarios"} component={AdminUsuarios} />
       <Route path={"/admin/bancos"} component={AdminBancos} />
       <Route path={"/admin/auditoria"} component={AdminAuditoria} />
@@ -62,6 +65,7 @@ function App() {
       <ThemeProvider defaultTheme="light" switchable>
         <TooltipProvider>
           <Toaster />
+          <SiteAccessTracker />
           <Suspense
             fallback={
               <div className="min-h-screen grid place-items-center text-muted-foreground">
