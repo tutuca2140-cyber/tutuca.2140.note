@@ -1,5 +1,8 @@
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
+import { Database } from "lucide-react";
 
 const formatCurrency = (value: number | string) =>
   new Intl.NumberFormat("pt-BR", {
@@ -8,6 +11,7 @@ const formatCurrency = (value: number | string) =>
   }).format(Number(value || 0));
 
 export default function FinancialSummaryDonut() {
+  const { user } = useAuth();
   const { data: stats, isLoading } = trpc.dashboard.stats.useQuery();
 
   if (isLoading) {
@@ -34,10 +38,22 @@ export default function FinancialSummaryDonut() {
   return (
     <Card className="mb-6 overflow-hidden border-primary/20">
       <CardHeader className="pb-2">
-        <CardTitle>Resumo financeiro</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Visão da carteira do banco ativo: recebido, valores a receber e vencidos.
-        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle>Resumo financeiro</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Visão da carteira do banco ativo: recebido, valores a receber e vencidos.
+            </p>
+          </div>
+          {!user?.dashboardOnly && (
+            <Button variant="outline" size="sm" asChild>
+              <a href="/meu-banco">
+                <Database className="mr-2 h-4 w-4" />
+                Meu Banco
+              </a>
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         <div className="grid items-center gap-8 lg:grid-cols-[280px_1fr]">
