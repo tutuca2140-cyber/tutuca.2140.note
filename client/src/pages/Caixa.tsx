@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useCommercialContext } from "@/hooks/useCommercialContext";
 import { trpc } from "@/lib/trpc";
 import { ArrowDownCircle, ArrowUpCircle, Plus, Trash2, Wallet } from "lucide-react";
 import { useState } from "react";
@@ -47,17 +48,22 @@ const originLabel = (item: { paymentId: number | null; loanId: number | null; ve
 
 export default function Caixa() {
   const { user } = useAuth();
+  const { data: commercialContext } = useCommercialContext();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [deletingMovement, setDeletingMovement] = useState<{ id: number; description: string } | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
+  const [deletePending, setDeletePending] = useState(false);
   const { data: movements, isLoading } = trpc.cashFlow.list.useQuery();
   const create = trpc.cashFlow.create.useMutation();
-  const deleteMovement = trpc.cashFlow.delete.useMutation();
   const utils = trpc.useUtils();
   const entries = movements ?? [];
   const totalIn = entries.filter((item) => item.type === "ENTRADA").reduce((sum, item) => sum + Number(item.amount), 0);
   const totalOut = entries.filter((item) => item.type === "SAIDA").reduce((sum, item) => sum + Number(item.amount), 0);
+  const canDeleteCash = Boolean(
+    user?.role === "super_admin" ||
+      (commercialContext?.commercial && commercialContext.permissions.canDeleteCashFlow)
+  );
 
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -88,14 +94,24 @@ export default function Caixa() {
     if (!deletingMovement) return;
     const reason = deleteReason.trim();
     if (reason.length < 3) return toast.error("Informe uma observação com pelo menos 3 caracteres.");
+    setDeletePending(true);
     try {
-      const result = await deleteMovement.mutateAsync({ id: deletingMovement.id, reason });
+      const response = await fetch("/api/cash-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ id: deletingMovement.id, reason }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) throw new Error(result?.message || "Não foi possível excluir o lançamento.");
       await refreshFinance();
-      toast.success(result.message);
+      toast.success(result.message || "Lançamento removido do caixa.");
       setDeletingMovement(null);
       setDeleteReason("");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível excluir o lançamento.");
+    } finally {
+      setDeletePending(false);
     }
   };
 
@@ -146,31 +162,28 @@ export default function Caixa() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2"><Wallet className="h-5 w-5 text-primary" />Movimentações recentes</CardTitle>
-              {user?.role === "super_admin" && <p className="text-sm text-muted-foreground">O Super Admin pode excluir qualquer lançamento do caixa mediante observação obrigatória.</p>}
+              {canDeleteCash && <p className="text-sm text-muted-foreground">Sua conta possui permissão para apagar lançamentos do caixa mediante observação obrigatória.</p>}
             </CardHeader>
             <CardContent>
               {entries.length ? (
                 <div className="space-y-2">
-                  {entries.slice(0, 50).map((item) => {
-                    const canDelete = user?.role === "super_admin";
-                    return (
-                      <div key={item.id} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0">
-                          <p className="break-words font-medium">{item.description}</p>
-                          <p className="break-words text-xs text-muted-foreground">{item.category} · {new Date(item.movementDate).toLocaleString("pt-BR")}{item.responsible ? ` · ${item.responsible}` : ""}</p>
-                          <p className="mt-1 text-xs font-medium text-primary">{originLabel(item)}</p>
-                        </div>
-                        <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
-                          <p className={`font-semibold ${item.type === "ENTRADA" ? "text-emerald-600" : "text-red-600"}`}>{item.type === "ENTRADA" ? "+" : "-"} {money(item.amount)}</p>
-                          {canDelete && (
-                            <Button size="icon" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`Excluir ${item.description}`} title="Excluir lançamento do caixa" disabled={deleteMovement.isPending} onClick={() => { setDeletingMovement({ id: item.id, description: item.description }); setDeleteReason(""); }}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
+                  {entries.slice(0, 50).map((item) => (
+                    <div key={item.id} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="break-words font-medium">{item.description}</p>
+                        <p className="break-words text-xs text-muted-foreground">{item.category} · {new Date(item.movementDate).toLocaleString("pt-BR")}{item.responsible ? ` · ${item.responsible}` : ""}</p>
+                        <p className="mt-1 text-xs font-medium text-primary">{originLabel(item)}</p>
                       </div>
-                    );
-                  })}
+                      <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
+                        <p className={`font-semibold ${item.type === "ENTRADA" ? "text-emerald-600" : "text-red-600"}`}>{item.type === "ENTRADA" ? "+" : "-"} {money(item.amount)}</p>
+                        {canDeleteCash && (
+                          <Button size="icon" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`Excluir ${item.description}`} title="Excluir lançamento do caixa" disabled={deletePending} onClick={() => { setDeletingMovement({ id: item.id, description: item.description }); setDeleteReason(""); }}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <p className="py-8 text-center text-muted-foreground">Nenhuma movimentação no banco ativo.</p>
@@ -184,7 +197,7 @@ export default function Caixa() {
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">“{deletingMovement?.description}” será removido do caixa e dos totais do dashboard. A operação de origem não será apagada.</p>
               <div><Label htmlFor="cash-delete-reason">Observação obrigatória</Label><Textarea id="cash-delete-reason" value={deleteReason} onChange={event => setDeleteReason(event.target.value)} maxLength={500} placeholder="Informe o motivo da exclusão" autoFocus /></div>
-              <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setDeletingMovement(null)}>Cancelar</Button><Button type="button" variant="destructive" onClick={handleDelete} disabled={deleteMovement.isPending || deleteReason.trim().length < 3}>{deleteMovement.isPending ? "Excluindo..." : "Confirmar exclusão"}</Button></div>
+              <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setDeletingMovement(null)}>Cancelar</Button><Button type="button" variant="destructive" onClick={handleDelete} disabled={deletePending || deleteReason.trim().length < 3}>{deletePending ? "Excluindo..." : "Confirmar exclusão"}</Button></div>
             </div>
           </DialogContent>
         </Dialog>
