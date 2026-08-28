@@ -7,6 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useCommercialContext } from "@/hooks/useCommercialContext";
 import { trpc } from "@/lib/trpc";
 import {
   Activity,
@@ -25,6 +26,7 @@ import {
   ClipboardList,
   CalendarDays,
   Package,
+  UserRoundCog,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -49,6 +51,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     redirectOnUnauthenticated: true,
     redirectPath: "/login",
   });
+  const { data: commercialContext } = useCommercialContext();
 
   const [location, navigate] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -102,6 +105,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   const isSuperAdmin = user?.role === "super_admin";
   const regularAccess = !user?.dashboardOnly;
+  const commercialAccount = Boolean(commercialContext?.commercial);
+  const canManageOwnDatabases = Boolean(
+    commercialAccount && commercialContext?.permissions.canManageDatabases
+  );
+  const canManageTeam = Boolean(
+    commercialAccount && commercialContext?.permissions.canManageUsers
+  );
 
   const navigation = [
     {
@@ -169,6 +179,18 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       href: "/agentes",
       icon: Users,
       show: user?.canView && regularAccess,
+    },
+    {
+      name: "Meu Banco",
+      href: "/meu-banco",
+      icon: Database,
+      show: canManageOwnDatabases && regularAccess,
+    },
+    {
+      name: "Equipe",
+      href: "/equipe",
+      icon: UserRoundCog,
+      show: canManageTeam && regularAccess,
     },
   ];
 
@@ -304,7 +326,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 <p className="text-xs text-muted-foreground capitalize">
                   {user.role === "super_admin"
                     ? "Super Administrador"
-                    : user.role}
+                    : commercialContext?.commercial
+                      ? commercialContext.isOwner
+                        ? `Contratante ${commercialContext.plan === "plus" ? "Plus" : "Basic"}`
+                        : "Usuário da conta"
+                      : user.role}
                 </p>
               </div>
             </div>
