@@ -215,6 +215,7 @@ export default function Home() {
             <a href="#recursos" className="transition hover:text-blue-600">Recursos</a>
             <a href="#funcionalidades" className="transition hover:text-blue-600">Funcionalidades</a>
             <a href="#sobre" className="transition hover:text-blue-600">Sobre</a>
+            <Link href="/planos"><a className="transition hover:text-blue-600">Planos</a></Link>
             <a href="#suporte" className="transition hover:text-blue-600">Suporte</a>
           </nav>
 
@@ -248,9 +249,9 @@ export default function Home() {
               </p>
 
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <Link href="/login">
+                <Link href="/planos">
                   <a className="inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-blue-600 px-7 text-base font-bold text-white shadow-xl shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700">
-                    Começar agora
+                    Ver planos
                     <ArrowRight className="h-5 w-5" />
                   </a>
                 </Link>
@@ -349,15 +350,15 @@ export default function Home() {
         <section id="suporte" className="scroll-mt-24 px-5 pb-20 lg:px-8">
           <div className="mx-auto max-w-7xl overflow-hidden rounded-[2rem] bg-gradient-to-r from-blue-700 to-blue-600 px-7 py-10 text-white shadow-2xl shadow-blue-700/20 sm:px-10 lg:flex lg:items-center lg:justify-between lg:px-14">
             <div>
-              <p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-100">Comece pelo acesso</p>
-              <h2 className="mt-2 text-3xl font-black">Entre no Note Note e organize seus negócios.</h2>
+              <p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-100">Escolha seu acesso</p>
+              <h2 className="mt-2 text-3xl font-black">Comece com Basic ou Plus.</h2>
               <p className="mt-3 max-w-2xl text-blue-100">
-                O botão abaixo leva você diretamente para a página de login que já existe no sistema.
+                Veja os planos do Note Note e escolha a opção mensal que combina com você.
               </p>
             </div>
-            <Link href="/login">
+            <Link href="/planos">
               <a className="mt-7 inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-white px-7 font-extrabold text-blue-700 shadow-lg transition hover:-translate-y-0.5 lg:mt-0">
-                Fazer login
+                Ver planos
                 <ArrowRight className="h-5 w-5" />
               </a>
             </Link>
