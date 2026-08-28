@@ -15,7 +15,8 @@ import {
   CalendarDays,
   AlertTriangle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 const formatCurrency = (value: number | string) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
@@ -59,6 +60,25 @@ export default function Dashboard() {
   );
   const { data: performance, isLoading: performanceLoading } =
     trpc.dashboard.agentPerformance.useQuery(range);
+
+  const dueTodayCount = stats?.collections?.dueToday?.length ?? 0;
+  useEffect(() => {
+    if (!dueTodayCount) return;
+    const today = new Date().toLocaleDateString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+    });
+    const alertKey = `note-note-receivables-alert:${today}`;
+    if (sessionStorage.getItem(alertKey)) return;
+    const message = `Você tem ${dueTodayCount} recebimento${dueTodayCount === 1 ? "" : "s"} hoje. Acesse Contas a receber.`;
+    toast.info(message, { duration: 10000 });
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("Note Note", {
+        body: message,
+        icon: "/brand/note-note-icon.png",
+      });
+    }
+    sessionStorage.setItem(alertKey, "1");
+  }, [dueTodayCount]);
 
   if (isLoading) {
     return (
@@ -334,23 +354,209 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Card><CardHeader className="flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Carros vendidos</CardTitle><Car className="h-4 w-4 text-primary" /></CardHeader><CardContent><p className="text-2xl font-bold">{stats?.vehicleMetrics?.carsSold ?? 0}</p><p className="text-xs text-muted-foreground">Vendidos ou financiados</p></CardContent></Card>
-          <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Financiamentos</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold">{stats?.vehicleMetrics?.financings ?? 0}</p><p className="text-xs text-muted-foreground">Contratos não cancelados</p></CardContent></Card>
-          <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Parcelas pagas</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-emerald-600">{stats?.vehicleMetrics?.installmentsPaid ?? 0}</p><p className="text-xs text-muted-foreground">Financiamentos de veículos</p></CardContent></Card>
-          <Card className="border-rose-200"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Parcelas em atraso</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-rose-600">{stats?.vehicleMetrics?.installmentsOverdue ?? 0}</p><p className="text-xs text-muted-foreground">Financiamentos vencidos</p></CardContent></Card>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <Card className="border-primary/20">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">
+                Saldo dos financiamentos
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold text-primary">
+                {formatCurrency(stats?.vehicleMetrics?.remainingBalance ?? 0)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Total contratado menos valores pagos
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">
+                Total pago em financiamentos
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold text-emerald-600">
+                {formatCurrency(stats?.vehicleMetrics?.totalPaid ?? 0)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Parcelas e amortizações recebidas
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Carros vendidos
+              </CardTitle>
+              <Car className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold">
+                {stats?.vehicleMetrics?.carsSold ?? 0}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Vendidos ou financiados
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">
+                Financiamentos
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold">
+                {stats?.vehicleMetrics?.financings ?? 0}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Contratos não cancelados
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">
+                Parcelas pagas
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold text-emerald-600">
+                {stats?.vehicleMetrics?.installmentsPaid ?? 0}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Financiamentos de veículos
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-rose-200">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">
+                Parcelas em atraso
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold text-rose-600">
+                {stats?.vehicleMetrics?.installmentsOverdue ?? 0}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Financiamentos vencidos
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="border-amber-200"><CardHeader><CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-amber-600" />Clientes que pagam hoje</CardTitle></CardHeader><CardContent className="space-y-2">
-            {(stats?.collections?.dueToday ?? []).map(item => <div key={`${item.contractType}-${item.clientId}-${item.installmentNumber}`} className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_auto]"><div><p className="font-medium">{item.clientName}</p><p className="text-xs text-muted-foreground">{item.product} · Parcela {item.installmentNumber}</p></div><p className="font-semibold text-amber-700">{formatCurrency(item.amount)}</p></div>)}
-            {!stats?.collections?.dueToday?.length ? <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma cobrança vence hoje.</p> : null}
-          </CardContent></Card>
-          <Card className="border-rose-200"><CardHeader><CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-rose-600" />Clientes em atraso</CardTitle></CardHeader><CardContent className="max-h-96 space-y-2 overflow-y-auto">
-            {(stats?.collections?.overdue ?? []).map(item => <div key={`${item.contractType}-${item.clientId}-${item.installmentNumber}`} className="grid gap-2 rounded-lg border border-rose-100 p-3 sm:grid-cols-[1fr_auto]"><div><p className="font-medium">{item.clientName}</p><p className="text-xs text-muted-foreground">{item.product} · Parcela {item.installmentNumber} · Venceu em {new Date(item.dueDate).toLocaleDateString("pt-BR")}</p></div><p className="font-semibold text-rose-600">{formatCurrency(item.amount)}</p></div>)}
-            {!stats?.collections?.overdue?.length ? <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma cobrança em atraso.</p> : null}
-          </CardContent></Card>
+          <Card className="border-amber-200">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CalendarDays className="h-5 w-5 text-amber-600" />
+                Clientes que pagam hoje
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {(stats?.collections?.dueToday ?? []).map(item => (
+                <div
+                  key={`${item.contractType}-${item.clientId}-${item.installmentNumber}`}
+                  className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_auto]"
+                >
+                  <div>
+                    <p className="font-medium">{item.clientName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {item.product} · Parcela {item.installmentNumber}
+                    </p>
+                  </div>
+                  <p className="font-semibold text-amber-700">
+                    {formatCurrency(item.amount)}
+                  </p>
+                </div>
+              ))}
+              {!stats?.collections?.dueToday?.length ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Nenhuma cobrança vence hoje.
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+          <Card className="border-rose-200">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-rose-600" />
+                Clientes em atraso
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="max-h-96 space-y-2 overflow-y-auto">
+              {(stats?.collections?.overdue ?? []).map(item => (
+                <div
+                  key={`${item.contractType}-${item.clientId}-${item.installmentNumber}`}
+                  className="grid gap-2 rounded-lg border border-rose-100 p-3 sm:grid-cols-[1fr_auto]"
+                >
+                  <div>
+                    <p className="font-medium">{item.clientName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {item.product} · Parcela {item.installmentNumber} · Venceu
+                      em {new Date(item.dueDate).toLocaleDateString("pt-BR")}
+                    </p>
+                  </div>
+                  <p className="font-semibold text-rose-600">
+                    {formatCurrency(item.amount)}
+                  </p>
+                </div>
+              ))}
+              {!stats?.collections?.overdue?.length ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Nenhuma cobrança em atraso.
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
         </div>
+
+        <Card className="border-primary/20">
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle className="flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-primary" />
+              Contas a receber — próximos 2 dias
+            </CardTitle>
+            <a
+              href="/contas-a-receber"
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Ver área completa
+            </a>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {(stats?.collections?.upcoming ?? []).slice(0, 8).map(item => (
+              <div
+                key={`upcoming-${item.contractType}-${item.clientId}-${item.installmentNumber}`}
+                className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[110px_1fr_auto] sm:items-center"
+              >
+                <p className="text-sm font-medium">
+                  {new Date(item.dueDate).toLocaleDateString("pt-BR", {
+                    timeZone: "America/Sao_Paulo",
+                  })}
+                </p>
+                <div>
+                  <p className="font-medium">{item.clientName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {item.product} · Parcela {item.installmentNumber}
+                  </p>
+                </div>
+                <p className="font-semibold text-primary">
+                  {formatCurrency(item.amount)}
+                </p>
+              </div>
+            ))}
+            {!stats?.collections?.upcoming?.length ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Nenhum recebimento previsto para hoje ou para os próximos dois
+                dias.
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
 
         <Card className="border-primary/20">
           <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

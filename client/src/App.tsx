@@ -4,6 +4,7 @@ import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import ThemeToggle from "./components/ThemeToggle";
 
 const Home = lazy(() => import("./pages/Home"));
 const Login = lazy(() => import("./pages/Login"));
@@ -14,7 +15,9 @@ const Pagamentos = lazy(() => import("./pages/Pagamentos"));
 const Caixa = lazy(() => import("./pages/Caixa"));
 const Agentes = lazy(() => import("./pages/Agentes"));
 const Veiculos = lazy(() => import("./pages/Veiculos"));
+const Produtos = lazy(() => import("./pages/Produtos"));
 const Financiamentos = lazy(() => import("./pages/Financiamentos"));
+const ContasAReceber = lazy(() => import("./pages/ContasAReceber"));
 const Relatorios = lazy(() => import("./pages/Relatorios"));
 const AdminUsuarios = lazy(() => import("./pages/admin/Usuarios"));
 const AdminBancos = lazy(() => import("./pages/admin/Bancos"));
@@ -34,7 +37,9 @@ function Router() {
       <Route path={"/caixa"} component={Caixa} />
       <Route path={"/agentes"} component={Agentes} />
       <Route path={"/veiculos"} component={Veiculos} />
+      <Route path={"/produtos"} component={Produtos} />
       <Route path={"/financiamentos"} component={Financiamentos} />
+      <Route path={"/contas-a-receber"} component={ContasAReceber} />
       <Route path={"/relatorios"} component={Relatorios} />
       <Route path={"/admin/usuarios"} component={AdminUsuarios} />
       <Route path={"/admin/bancos"} component={AdminBancos} />
@@ -49,10 +54,17 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="light">
+      <ThemeProvider defaultTheme="light" switchable>
+        <ThemeToggle />
         <TooltipProvider>
           <Toaster />
-          <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Carregando...</div>}>
+          <Suspense
+            fallback={
+              <div className="min-h-screen grid place-items-center text-muted-foreground">
+                Carregando...
+              </div>
+            }
+          >
             <Router />
           </Suspense>
         </TooltipProvider>

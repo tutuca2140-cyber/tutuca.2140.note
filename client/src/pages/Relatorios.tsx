@@ -6,6 +6,7 @@ import { Download, FileText, Printer, RefreshCw } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { loanContractName } from "@/lib/contract-name";
 import { toast } from "sonner";
 
 const money = (value: unknown) =>
@@ -120,7 +121,7 @@ export default function Relatorios() {
         "Parcelas",
       ],
       filteredLoans.map(loan => [
-        loan.id,
+        loanContractName(clientMap.get(loan.clientId), loan.id),
         clientMap.get(loan.clientId) ?? "Não informado",
         loan.status,
         money(loan.amount),
@@ -312,9 +313,10 @@ export default function Relatorios() {
                       >
                         <div>
                           <p className="font-medium">
-                            #{loan.id} ·{" "}
-                            {clientMap.get(loan.clientId) ??
-                              "Cliente não informado"}
+                            {loanContractName(
+                              clientMap.get(loan.clientId),
+                              loan.id
+                            )}
                           </p>
                           <p className="text-xs capitalize text-muted-foreground">
                             {loan.status} · {loan.installments} parcelas

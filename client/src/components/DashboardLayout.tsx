@@ -22,10 +22,13 @@ import {
   Menu,
   X,
   ClipboardList,
+  CalendarDays,
+  Package,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import ThemeToggle from "@/components/ThemeToggle";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -97,7 +100,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       icon: LayoutDashboard,
       show: true,
     },
-    { name: "Clientes", href: "/clientes", icon: Users, show: user?.canView && regularAccess },
+    {
+      name: "Clientes",
+      href: "/clientes",
+      icon: Users,
+      show: user?.canView && regularAccess,
+    },
     {
       name: "Empréstimos",
       href: "/emprestimos",
@@ -110,13 +118,40 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       icon: Wallet,
       show: user?.canView && regularAccess,
     },
-    { name: "Caixa", href: "/caixa", icon: Wallet, show: user?.canView && regularAccess },
-    { name: "Agentes", href: "/agentes", icon: Users, show: user?.canView && regularAccess },
-    { name: "Veículos", href: "/veiculos", icon: Car, show: user?.canView && regularAccess },
+    {
+      name: "Caixa",
+      href: "/caixa",
+      icon: Wallet,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Agentes",
+      href: "/agentes",
+      icon: Users,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Veículos",
+      href: "/veiculos",
+      icon: Car,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Produtos",
+      href: "/produtos",
+      icon: Package,
+      show: user?.canView && regularAccess,
+    },
     {
       name: "Financiamentos",
       href: "/financiamentos",
       icon: ClipboardList,
+      show: user?.canView && regularAccess,
+    },
+    {
+      name: "Contas a receber",
+      href: "/contas-a-receber",
+      icon: CalendarDays,
       show: user?.canView && regularAccess,
     },
     {
@@ -185,9 +220,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             )}
           </Button>
           <img
-            src="/note-note-logo.webp"
+            src="/brand/note-note-logo-official.png"
             alt="Note Note"
-            className="h-10 w-24 rounded-md object-cover object-center"
+            className="h-10 w-32 object-contain object-left"
           />
         </div>
       </div>
@@ -203,9 +238,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <div className="flex flex-col h-full">
           <div className="px-4 py-4 border-b border-border">
             <img
-              src="/note-note-logo.webp"
+              src="/brand/note-note-logo-official.png"
               alt="Note Note"
-              className="h-auto w-full rounded-xl border border-border object-contain shadow-sm"
+              className="h-auto w-full object-contain"
             />
             <p className="text-xs text-muted-foreground mt-1 tracking-wide">
               Sistema de Gestão
@@ -234,6 +269,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 </p>
               </div>
             </div>
+            <ThemeToggle />
             {availableDatabases.length > 0 && (
               <div className="mt-3">
                 <p className="mb-1.5 text-xs font-medium text-muted-foreground">
