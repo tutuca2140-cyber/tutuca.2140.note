@@ -1,6 +1,7 @@
 import { Client, neonConfig } from "@neondatabase/serverless";
 import WebSocket from "ws";
 import {
+  ensureAuthUserColumns,
   readCookie,
   readJsonBody,
   sendJson,
@@ -41,6 +42,9 @@ type SessionUser = {
   username: string | null;
   email: string | null;
   role: string;
+  loginMethod: string | null;
+  accountOwnerId: number | null;
+  canManageDatabases: boolean;
   isActive: boolean;
   dashboardOnly: boolean;
 };
@@ -48,6 +52,21 @@ type SessionUser = {
 type SnapshotPayload = Record<string, Array<Record<string, unknown>>>;
 
 const quoteIdent = (value: string) => `"${value.replace(/"/g, '""')}"`;
+
+function commercialOwnerId(user: SessionUser) {
+  if (user.loginMethod === "commercial_signup") return user.id;
+  if (user.loginMethod === "commercial_subuser" && Number(user.accountOwnerId) > 0) {
+    return Number(user.accountOwnerId);
+  }
+  return null;
+}
+
+function canManageDatabase(user: SessionUser) {
+  if (user.role === "super_admin") return true;
+  if (user.loginMethod === "commercial_signup") return true;
+  if (user.loginMethod === "commercial_subuser") return Boolean(user.canManageDatabases);
+  return true;
+}
 
 async function ensureBackupTable(client: Client) {
   await client.query(`
@@ -66,37 +85,33 @@ async function ensureBackupTable(client: Client) {
     CREATE INDEX IF NOT EXISTS database_memory_backups_database_idx
       ON database_memory_backups ("databaseId", "createdAt" DESC)
   `);
-  await client.query(
-    `DELETE FROM database_memory_backups WHERE "expiresAt" <= NOW()`
-  );
+  await client.query(`DELETE FROM database_memory_backups WHERE "expiresAt" <= NOW()`);
 }
 
 async function getSessionUser(client: Client, req: any): Promise<SessionUser | null> {
   const token = readCookie(req, SESSION_COOKIE_NAME);
   if (!token) return null;
   const result = await client.query(
-    `SELECT u.id, u.username, u.email, u.role, u."isActive", u."dashboardOnly"
-       FROM local_sessions s
-       JOIN users u ON u.id = s."userId"
-      WHERE s.token = $1 AND s."expiresAt" > NOW()
-      LIMIT 1`,
+    `SELECT
+       u.id, u.username, u.email, u.role, u."loginMethod", u."accountOwnerId",
+       u."canManageDatabases", u."isActive", u."dashboardOnly"
+     FROM local_sessions s
+     JOIN users u ON u.id = s."userId"
+     WHERE s.token = $1 AND s."expiresAt" > NOW()
+     LIMIT 1`,
     [token]
   );
   const user = result.rows[0] as SessionUser | undefined;
-  if (!user?.isActive) return null;
-  return user;
+  return user?.isActive ? user : null;
 }
 
 async function assertDatabaseAccess(client: Client, user: SessionUser, databaseId: number) {
-  const database = await client.query(
-    `SELECT * FROM databases WHERE id = $1 LIMIT 1`,
-    [databaseId]
-  );
-  if (!database.rows[0]) {
+  const databaseResult = await client.query(`SELECT * FROM databases WHERE id = $1 LIMIT 1`, [databaseId]);
+  const database = databaseResult.rows[0] as any;
+  if (!database) {
     throw Object.assign(new Error("Banco de dados não encontrado."), { statusCode: 404 });
   }
-
-  if (user.role === "super_admin") return database.rows[0];
+  if (user.role === "super_admin") return database;
 
   const access = await client.query(
     `SELECT id FROM user_database_access WHERE "userId" = $1 AND "databaseId" = $2 LIMIT 1`,
@@ -107,26 +122,54 @@ async function assertDatabaseAccess(client: Client, user: SessionUser, databaseI
       statusCode: 403,
     });
   }
-  return database.rows[0];
+
+  const ownerId = commercialOwnerId(user);
+  if (ownerId && Number(database.createdBy) !== ownerId) {
+    throw Object.assign(
+      new Error("Usuários comerciais só podem administrar bancos pertencentes ao próprio contratante."),
+      { statusCode: 403 }
+    );
+  }
+  return database;
 }
 
-async function getOtherAccessCount(client: Client, user: SessionUser, databaseId: number) {
+async function outsideAccountAccessCount(client: Client, user: SessionUser, databaseId: number) {
   if (user.role === "super_admin") return 0;
+  const ownerId = commercialOwnerId(user);
+  if (ownerId) {
+    const result = await client.query(
+      `SELECT COUNT(*)::int AS count
+       FROM user_database_access uda
+       JOIN users u ON u.id = uda."userId"
+       WHERE uda."databaseId" = $1
+         AND u.id <> $2
+         AND COALESCE(u."accountOwnerId", 0) <> $2`,
+      [databaseId, ownerId]
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
   const result = await client.query(
     `SELECT COUNT(*)::int AS count
-       FROM user_database_access
-      WHERE "databaseId" = $1 AND "userId" <> $2`,
+     FROM user_database_access
+     WHERE "databaseId" = $1 AND "userId" <> $2`,
     [databaseId, user.id]
   );
   return Number(result.rows[0]?.count || 0);
 }
 
-async function assertExclusiveDatabase(client: Client, user: SessionUser, databaseId: number) {
-  const otherAccessCount = await getOtherAccessCount(client, user, databaseId);
-  if (otherAccessCount > 0) {
+async function assertMutationAllowed(client: Client, user: SessionUser, databaseId: number) {
+  if (!canManageDatabase(user)) {
+    throw Object.assign(
+      new Error("O contratante não liberou permissão para editar, limpar ou excluir bancos de dados."),
+      { statusCode: 403 }
+    );
+  }
+  const outside = await outsideAccountAccessCount(client, user, databaseId);
+  if (outside > 0) {
     throw Object.assign(
       new Error(
-        "Este banco está compartilhado com outro usuário. Alterações de memória, nome ou exclusão ficam restritas ao Super Admin."
+        "Este banco está compartilhado fora da conta do contratante. Alterações administrativas ficam bloqueadas para proteger outros acessos."
       ),
       { statusCode: 409 }
     );
@@ -135,10 +178,7 @@ async function assertExclusiveDatabase(client: Client, user: SessionUser, databa
 
 async function deleteOperationalMemory(client: Client, databaseId: number) {
   for (const table of DELETE_ORDER) {
-    await client.query(
-      `DELETE FROM ${quoteIdent(table)} WHERE "databaseId" = $1`,
-      [databaseId]
-    );
+    await client.query(`DELETE FROM ${quoteIdent(table)} WHERE "databaseId" = $1`, [databaseId]);
   }
 }
 
@@ -154,11 +194,7 @@ async function readSnapshot(client: Client, databaseId: number): Promise<Snapsho
   return payload;
 }
 
-async function insertSnapshotRow(
-  client: Client,
-  table: string,
-  row: Record<string, unknown>
-) {
+async function insertSnapshotRow(client: Client, table: string, row: Record<string, unknown>) {
   const entries = Object.entries(row);
   if (!entries.length) return;
   const columns = entries.map(([key]) => quoteIdent(key)).join(", ");
@@ -187,8 +223,8 @@ async function writeAudit(
 ) {
   await client.query(
     `INSERT INTO "auditLogs"
-      ("userId", username, action, entity, "entityId", "databaseId", details, status)
-     VALUES ($1, $2, $3, 'databases', $4, $4, $5, 'success')`,
+      ("userId", username, action, entity, "entityId", "databaseId", details, status, "createdAt")
+     VALUES ($1, $2, $3, 'databases', $4, $4, $5, 'success', NOW())`,
     [
       user.id,
       user.username || user.email || "Usuário",
@@ -202,23 +238,20 @@ async function writeAudit(
 async function getRecoveryStatus(client: Client, databaseId: number) {
   const result = await client.query(
     `SELECT id, status, "createdAt", "expiresAt", "restoredAt"
-       FROM database_memory_backups
-      WHERE "databaseId" = $1
-      ORDER BY "createdAt" DESC
-      LIMIT 1`,
+     FROM database_memory_backups
+     WHERE "databaseId" = $1
+     ORDER BY "createdAt" DESC
+     LIMIT 1`,
     [databaseId]
   );
-  const backup = result.rows[0];
+  const backup = result.rows[0] as any;
   const active =
-    backup &&
-    backup.status === "active" &&
-    new Date(backup.expiresAt).getTime() > Date.now();
+    backup && backup.status === "active" && new Date(backup.expiresAt).getTime() > Date.now();
   return {
     canRestore: Boolean(active),
     canClearAgain:
       !backup ||
-      new Date(backup.createdAt).getTime() + RECOVERY_HOURS * 60 * 60 * 1000 <=
-        Date.now(),
+      new Date(backup.createdAt).getTime() + RECOVERY_HOURS * 60 * 60 * 1000 <= Date.now(),
     createdAt: backup?.createdAt ?? null,
     recoveryUntil: active ? backup.expiresAt : null,
     status: backup?.status ?? null,
@@ -233,21 +266,16 @@ export default async function handler(req: any, res: any) {
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    return sendJson(res, 503, {
-      success: false,
-      message: "Banco principal não configurado.",
-    });
+    return sendJson(res, 503, { success: false, message: "Banco principal não configurado." });
   }
 
   const client = new Client(databaseUrl);
   try {
+    await ensureAuthUserColumns();
     await client.connect();
     const user = await getSessionUser(client, req);
     if (!user) {
-      return sendJson(res, 401, {
-        success: false,
-        message: "Sessão inválida ou expirada.",
-      });
+      return sendJson(res, 401, { success: false, message: "Sessão inválida ou expirada." });
     }
     if (user.dashboardOnly && user.role !== "super_admin") {
       return sendJson(res, 403, {
@@ -261,27 +289,27 @@ export default async function handler(req: any, res: any) {
     const action = String(body?.action ?? "").trim();
     const databaseId = Number(body?.databaseId);
     if (!Number.isInteger(databaseId) || databaseId <= 0) {
-      return sendJson(res, 400, {
-        success: false,
-        message: "Banco de dados inválido.",
-      });
+      return sendJson(res, 400, { success: false, message: "Banco de dados inválido." });
     }
 
     const database = await assertDatabaseAccess(client, user, databaseId);
-    const otherAccessCount = await getOtherAccessCount(client, user, databaseId);
+    const outside = await outsideAccountAccessCount(client, user, databaseId);
+    const canManage = canManageDatabase(user) && outside === 0;
 
     if (action === "status") {
-      const recovery = await getRecoveryStatus(client, databaseId);
       return sendJson(res, 200, {
         success: true,
         database,
-        recovery,
-        sharedWithOtherUsers: otherAccessCount > 0,
+        recovery: await getRecoveryStatus(client, databaseId),
+        sharedWithOtherUsers: outside > 0,
+        canManageDatabase: canManage,
+        managedByAccount: commercialOwnerId(user) !== null,
       });
     }
 
+    await assertMutationAllowed(client, user, databaseId);
+
     if (action === "update") {
-      await assertExclusiveDatabase(client, user, databaseId);
       const name = String(body?.name ?? "").trim();
       const description = String(body?.description ?? "").trim();
       if (!name || name.length > 255) {
@@ -290,41 +318,38 @@ export default async function handler(req: any, res: any) {
           message: "Informe um nome válido com até 255 caracteres.",
         });
       }
-      const result = await client.query(
-        `UPDATE databases
-            SET name = $1, description = $2, "updatedAt" = NOW()
-          WHERE id = $3
-          RETURNING *`,
-        [name, description || null, databaseId]
-      );
-      await writeAudit(client, user, "self_update_database", databaseId, {
-        previousName: database.name,
-        name,
-      });
-      return sendJson(res, 200, {
-        success: true,
-        database: result.rows[0],
-      });
+      try {
+        const result = await client.query(
+          `UPDATE databases SET name = $1, description = $2, "updatedAt" = NOW()
+           WHERE id = $3 RETURNING *`,
+          [name, description || null, databaseId]
+        );
+        await writeAudit(client, user, "self_update_database", databaseId, {
+          previousName: database.name,
+          name,
+        });
+        return sendJson(res, 200, { success: true, database: result.rows[0] });
+      } catch (error: any) {
+        if (error?.code === "23505") {
+          return sendJson(res, 409, { success: false, message: "Já existe um banco com esse nome." });
+        }
+        throw error;
+      }
     }
 
     if (action === "clear") {
-      await assertExclusiveDatabase(client, user, databaseId);
-      const confirmation = String(body?.confirmation ?? "")
-        .trim()
-        .toUpperCase();
+      const confirmation = String(body?.confirmation ?? "").trim().toUpperCase();
       if (confirmation !== "LIMPAR") {
         return sendJson(res, 400, {
           success: false,
           message: "Digite LIMPAR para confirmar a redefinição da memória.",
         });
       }
-
       const recovery = await getRecoveryStatus(client, databaseId);
       if (!recovery.canClearAgain) {
         return sendJson(res, 429, {
           success: false,
-          message:
-            "A memória deste banco só pode ser redefinida novamente após 48 horas.",
+          message: "A memória deste banco só pode ser redefinida novamente após 48 horas.",
           recovery,
         });
       }
@@ -332,9 +357,7 @@ export default async function handler(req: any, res: any) {
       await client.query("BEGIN");
       try {
         const payload = await readSnapshot(client, databaseId);
-        const expiresAt = new Date(
-          Date.now() + RECOVERY_HOURS * 60 * 60 * 1000
-        );
+        const expiresAt = new Date(Date.now() + RECOVERY_HOURS * 60 * 60 * 1000);
         await client.query(
           `INSERT INTO database_memory_backups
             ("databaseId", "userId", payload, status, "createdAt", "expiresAt")
@@ -342,10 +365,7 @@ export default async function handler(req: any, res: any) {
           [databaseId, user.id, JSON.stringify(payload), expiresAt]
         );
         await deleteOperationalMemory(client, databaseId);
-        await client.query(
-          `UPDATE databases SET "updatedAt" = NOW() WHERE id = $1`,
-          [databaseId]
-        );
+        await client.query(`UPDATE databases SET "updatedAt" = NOW() WHERE id = $1`, [databaseId]);
         await writeAudit(client, user, "clear_database_memory", databaseId, {
           recoveryHours: RECOVERY_HOURS,
           recoveryUntil: expiresAt.toISOString(),
@@ -353,8 +373,7 @@ export default async function handler(req: any, res: any) {
         await client.query("COMMIT");
         return sendJson(res, 200, {
           success: true,
-          message:
-            "Memória limpa. A cópia de segurança pode ser restaurada por até 48 horas.",
+          message: "Memória limpa. A cópia de segurança pode ser restaurada por até 48 horas.",
           recoveryUntil: expiresAt,
         });
       } catch (error) {
@@ -364,48 +383,33 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action === "restore") {
-      await assertExclusiveDatabase(client, user, databaseId);
       const backup = await client.query(
         `SELECT id, payload, "expiresAt"
-           FROM database_memory_backups
-          WHERE "databaseId" = $1
-            AND status = 'active'
-            AND "expiresAt" > NOW()
-          ORDER BY "createdAt" DESC
-          LIMIT 1`,
+         FROM database_memory_backups
+         WHERE "databaseId" = $1 AND status = 'active' AND "expiresAt" > NOW()
+         ORDER BY "createdAt" DESC LIMIT 1`,
         [databaseId]
       );
       if (!backup.rows[0]) {
         return sendJson(res, 410, {
           success: false,
-          message:
-            "Não existe uma memória recuperável dentro do prazo de 48 horas.",
+          message: "Não existe uma memória recuperável dentro do prazo de 48 horas.",
         });
       }
-
       await client.query("BEGIN");
       try {
         await deleteOperationalMemory(client, databaseId);
-        const payload = backup.rows[0].payload as SnapshotPayload;
-        await restoreSnapshot(client, payload);
+        await restoreSnapshot(client, backup.rows[0].payload as SnapshotPayload);
         await client.query(
-          `UPDATE database_memory_backups
-              SET status = 'restored', "restoredAt" = NOW()
-            WHERE id = $1`,
+          `UPDATE database_memory_backups SET status = 'restored', "restoredAt" = NOW() WHERE id = $1`,
           [backup.rows[0].id]
         );
-        await client.query(
-          `UPDATE databases SET "updatedAt" = NOW() WHERE id = $1`,
-          [databaseId]
-        );
+        await client.query(`UPDATE databases SET "updatedAt" = NOW() WHERE id = $1`, [databaseId]);
         await writeAudit(client, user, "restore_database_memory", databaseId, {
           backupId: backup.rows[0].id,
         });
         await client.query("COMMIT");
-        return sendJson(res, 200, {
-          success: true,
-          message: "Memória anterior restaurada com sucesso.",
-        });
+        return sendJson(res, 200, { success: true, message: "Memória anterior restaurada com sucesso." });
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
@@ -413,31 +417,19 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action === "delete") {
-      await assertExclusiveDatabase(client, user, databaseId);
       const confirmation = String(body?.confirmation ?? "").trim();
       if (confirmation !== String(database.name)) {
         return sendJson(res, 400, {
           success: false,
-          message:
-            "Digite exatamente o nome do banco para confirmar a exclusão.",
+          message: "Digite exatamente o nome do banco para confirmar a exclusão.",
         });
       }
-
       await client.query("BEGIN");
       try {
         await deleteOperationalMemory(client, databaseId);
-        await client.query(
-          `DELETE FROM user_database_access WHERE "databaseId" = $1`,
-          [databaseId]
-        );
-        await client.query(
-          `DELETE FROM database_memory_backups WHERE "databaseId" = $1`,
-          [databaseId]
-        );
-        await client.query(
-          `DELETE FROM "auditLogs" WHERE "databaseId" = $1`,
-          [databaseId]
-        );
+        await client.query(`DELETE FROM user_database_access WHERE "databaseId" = $1`, [databaseId]);
+        await client.query(`DELETE FROM database_memory_backups WHERE "databaseId" = $1`, [databaseId]);
+        await client.query(`DELETE FROM "auditLogs" WHERE "databaseId" = $1`, [databaseId]);
         await client.query(`DELETE FROM databases WHERE id = $1`, [databaseId]);
         await writeAudit(client, user, "self_delete_database", null, {
           deletedDatabaseId: databaseId,
@@ -454,24 +446,12 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    return sendJson(res, 400, {
-      success: false,
-      message: "Ação não reconhecida.",
-    });
+    return sendJson(res, 400, { success: false, message: "Ação não reconhecida." });
   } catch (error: any) {
     console.error("[database-self-service]", error);
-    if (error?.code === "23505") {
-      return sendJson(res, 409, {
-        success: false,
-        message: "Já existe um banco de dados com esse nome.",
-      });
-    }
     return sendJson(res, Number(error?.statusCode || 500), {
       success: false,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Não foi possível concluir a operação.",
+      message: error instanceof Error ? error.message : "Não foi possível concluir a operação.",
     });
   } finally {
     try {
