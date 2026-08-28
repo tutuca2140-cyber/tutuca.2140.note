@@ -78,15 +78,52 @@ const permissionOptions: Array<{
   description: string;
   sensitive?: boolean;
 }> = [
-  { key: "canView", title: "Visualizar", description: "Consultar clientes, contratos, produtos, veículos e demais informações." },
-  { key: "canInsert", title: "Fazer lançamentos e cadastros", description: "Cadastrar clientes, empréstimos, produtos, veículos, pagamentos e movimentações permitidas." },
-  { key: "canEdit", title: "Editar registros", description: "Alterar informações operacionais já cadastradas." },
-  { key: "canDelete", title: "Excluir registros operacionais", description: "Excluir registros quando a área correspondente permitir." },
-  { key: "canGenerateReports", title: "Gerar relatórios", description: "Acessar e gerar relatórios dos bancos liberados." },
-  { key: "canManageUsers", title: "Administrar usuários da conta", description: "Criar e editar usuários da própria conta Plus, respeitando o limite do plano.", sensitive: true },
-  { key: "canManageDatabases", title: "Editar ou apagar bancos", description: "Renomear, limpar memória, restaurar ou excluir bancos do contratante.", sensitive: true },
-  { key: "canDeleteCashFlow", title: "Apagar lançamentos do caixa", description: "Excluir movimentações do fluxo de caixa com registro em auditoria.", sensitive: true },
+  {
+    key: "canView",
+    title: "Visualizar",
+    description: "Consultar clientes, contratos, produtos, veículos e demais informações.",
+  },
+  {
+    key: "canInsert",
+    title: "Fazer lançamentos e cadastros",
+    description: "Cadastrar clientes, empréstimos, produtos, veículos, pagamentos e movimentações permitidas.",
+  },
+  {
+    key: "canEdit",
+    title: "Editar registros",
+    description: "Alterar informações operacionais já cadastradas.",
+  },
+  {
+    key: "canDelete",
+    title: "Excluir registros operacionais",
+    description: "Excluir registros quando a área correspondente permitir.",
+  },
+  {
+    key: "canGenerateReports",
+    title: "Gerar relatórios",
+    description: "Acessar e gerar relatórios dos bancos liberados.",
+  },
+  {
+    key: "canManageUsers",
+    title: "Administrar usuários da conta",
+    description: "Criar e editar usuários da própria conta Plus, respeitando o limite do plano.",
+    sensitive: true,
+  },
+  {
+    key: "canManageDatabases",
+    title: "Editar ou apagar bancos",
+    description: "Renomear, limpar memória, restaurar ou excluir bancos do contratante.",
+    sensitive: true,
+  },
+  {
+    key: "canDeleteCashFlow",
+    title: "Apagar lançamentos do caixa",
+    description: "Excluir movimentações do fluxo de caixa com registro em auditoria.",
+    sensitive: true,
+  },
 ];
+
+const TEAM_ENDPOINT = "/api/commercial-account?scope=team";
 
 export default function Equipe() {
   const [data, setData] = useState<TeamData | null>(null);
@@ -98,12 +135,14 @@ export default function Equipe() {
   const load = async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/commercial-team", {
+      const response = await fetch(TEAM_ENDPOINT, {
         credentials: "include",
         cache: "no-store",
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result?.success) throw new Error(result?.message || "Não foi possível carregar os usuários da conta.");
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Não foi possível carregar os usuários da conta.");
+      }
       setData(result);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível carregar a equipe.");
@@ -135,7 +174,10 @@ export default function Equipe() {
       password: "",
       databaseIds: member.databases.map(database => database.id),
       permissions: Object.fromEntries(
-        Object.keys(defaultPermissions).map(key => [key, Boolean(member[key as keyof Permissions])])
+        Object.keys(defaultPermissions).map(key => [
+          key,
+          Boolean(member[key as keyof Permissions]),
+        ])
       ) as Permissions,
     });
     setOpen(true);
@@ -164,9 +206,10 @@ export default function Equipe() {
       toast.error("Informe uma senha para o novo usuário.");
       return;
     }
+
     setSaving(true);
     try {
-      const response = await fetch("/api/commercial-team", {
+      const response = await fetch(TEAM_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -182,7 +225,9 @@ export default function Equipe() {
         }),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result?.success) throw new Error(result?.message || "Não foi possível salvar o usuário.");
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Não foi possível salvar o usuário.");
+      }
       toast.success(result.message || "Usuário salvo.");
       setOpen(false);
       setForm(emptyForm());
@@ -196,14 +241,20 @@ export default function Equipe() {
 
   const toggleActive = async (member: Member) => {
     try {
-      const response = await fetch("/api/commercial-team", {
+      const response = await fetch(TEAM_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ action: "toggle", userId: member.id, isActive: !member.isActive }),
+        body: JSON.stringify({
+          action: "toggle",
+          userId: member.id,
+          isActive: !member.isActive,
+        }),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result?.success) throw new Error(result?.message || "Não foi possível alterar o usuário.");
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Não foi possível alterar o usuário.");
+      }
       toast.success(result.message);
       await load();
     } catch (error) {
@@ -214,14 +265,16 @@ export default function Equipe() {
   const removeMember = async (member: Member) => {
     if (!window.confirm(`Excluir o usuário “${member.username}” da sua conta?`)) return;
     try {
-      const response = await fetch("/api/commercial-team", {
+      const response = await fetch(TEAM_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ action: "delete", userId: member.id }),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result?.success) throw new Error(result?.message || "Não foi possível excluir o usuário.");
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Não foi possível excluir o usuário.");
+      }
       toast.success(result.message);
       await load();
     } catch (error) {
@@ -252,7 +305,12 @@ export default function Equipe() {
         </div>
 
         {loading ? (
-          <Card><CardContent className="flex items-center justify-center py-14 text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Carregando equipe...</CardContent></Card>
+          <Card>
+            <CardContent className="flex items-center justify-center py-14 text-muted-foreground">
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              Carregando equipe...
+            </CardContent>
+          </Card>
         ) : data?.plan === "basic" ? (
           <Card className="border-blue-200 bg-blue-50/50">
             <CardContent className="p-6">
@@ -265,9 +323,28 @@ export default function Equipe() {
         ) : data ? (
           <>
             <div className="grid gap-4 sm:grid-cols-3">
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Usuários cadastrados</p><p className="mt-1 text-3xl font-black">{data.members.length}/{data.teamLimit}</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Vagas disponíveis</p><p className="mt-1 text-3xl font-black">{remaining}</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Bancos disponíveis para compartilhar</p><p className="mt-1 text-3xl font-black">{data.databases.length}</p></CardContent></Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground">Usuários cadastrados</p>
+                  <p className="mt-1 text-3xl font-black">
+                    {data.members.length}/{data.teamLimit}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground">Vagas disponíveis</p>
+                  <p className="mt-1 text-3xl font-black">{remaining}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground">
+                    Bancos disponíveis para compartilhar
+                  </p>
+                  <p className="mt-1 text-3xl font-black">{data.databases.length}</p>
+                </CardContent>
+              </Card>
             </div>
 
             {!data.canManageTeam && (
@@ -286,7 +363,9 @@ export default function Equipe() {
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between gap-3">
                       <span className="truncate">{member.name || member.username}</span>
-                      <Badge variant={member.isActive ? "default" : "secondary"}>{member.isActive ? "Ativo" : "Inativo"}</Badge>
+                      <Badge variant={member.isActive ? "default" : "secondary"}>
+                        {member.isActive ? "Ativo" : "Inativo"}
+                      </Badge>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -295,31 +374,61 @@ export default function Equipe() {
                       <p>{member.email}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Bancos liberados</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Bancos liberados
+                      </p>
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {member.databases.length ? member.databases.map(database => <Badge key={database.id} variant="outline">{database.name}</Badge>) : <span className="text-sm text-muted-foreground">Nenhum banco liberado</span>}
+                        {member.databases.length ? (
+                          member.databases.map(database => (
+                            <Badge key={database.id} variant="outline">
+                              {database.name}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            Nenhum banco liberado
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
-                      {permissionOptions.filter(option => member[option.key]).map(option => (
-                        <div key={option.key} className="flex items-center gap-2 text-xs">
-                          <UserCheck className="h-3.5 w-3.5 text-emerald-600" />
-                          {option.title}
-                        </div>
-                      ))}
+                      {permissionOptions
+                        .filter(option => member[option.key])
+                        .map(option => (
+                          <div key={option.key} className="flex items-center gap-2 text-xs">
+                            <UserCheck className="h-3.5 w-3.5 text-emerald-600" />
+                            {option.title}
+                          </div>
+                        ))}
                     </div>
                     {data.canManageTeam && (
                       <div className="flex flex-wrap gap-2 border-t pt-4">
-                        <Button size="sm" variant="outline" onClick={() => openEdit(member)}><Edit3 className="mr-2 h-4 w-4" />Editar</Button>
-                        <Button size="sm" variant="outline" onClick={() => toggleActive(member)}>{member.isActive ? "Desativar" : "Ativar"}</Button>
-                        <Button size="sm" variant="destructive" onClick={() => removeMember(member)}><Trash2 className="mr-2 h-4 w-4" />Excluir</Button>
+                        <Button size="sm" variant="outline" onClick={() => openEdit(member)}>
+                          <Edit3 className="mr-2 h-4 w-4" />
+                          Editar
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => toggleActive(member)}>
+                          {member.isActive ? "Desativar" : "Ativar"}
+                        </Button>
+                        <Button size="sm" variant="destructive" onClick={() => removeMember(member)}>
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Excluir
+                        </Button>
                       </div>
                     )}
                   </CardContent>
                 </Card>
               ))}
               {!data.members.length && (
-                <Card className="lg:col-span-2"><CardContent className="flex flex-col items-center justify-center py-12 text-center"><Users className="mb-3 h-10 w-10 text-muted-foreground" /><p className="font-semibold">Nenhum usuário adicional cadastrado.</p><p className="mt-1 text-sm text-muted-foreground">Você pode cadastrar até cinco pessoas no plano Plus.</p></CardContent></Card>
+                <Card className="lg:col-span-2">
+                  <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                    <Users className="mb-3 h-10 w-10 text-muted-foreground" />
+                    <p className="font-semibold">Nenhum usuário adicional cadastrado.</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Você pode cadastrar até cinco pessoas no plano Plus.
+                    </p>
+                  </CardContent>
+                </Card>
               )}
             </div>
           </>
@@ -329,23 +438,74 @@ export default function Equipe() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{form.id ? "Editar usuário e permissões" : "Cadastrar usuário da conta"}</DialogTitle>
+            <DialogTitle>
+              {form.id ? "Editar usuário e permissões" : "Cadastrar usuário da conta"}
+            </DialogTitle>
           </DialogHeader>
           <form onSubmit={save} className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2">
-              <div><Label>Nome *</Label><Input value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))} required /></div>
-              <div><Label>Nome de usuário *</Label><Input value={form.username} onChange={event => setForm(current => ({ ...current, username: event.target.value }))} required /></div>
-              <div><Label>E-mail *</Label><Input type="email" value={form.email} onChange={event => setForm(current => ({ ...current, email: event.target.value }))} required /></div>
-              <div><Label>{form.id ? "Nova senha (opcional)" : "Senha *"}</Label><Input type="password" value={form.password} onChange={event => setForm(current => ({ ...current, password: event.target.value }))} required={!form.id} placeholder="8+ caracteres, maiúscula e número" /></div>
+              <div>
+                <Label>Nome *</Label>
+                <Input
+                  value={form.name}
+                  onChange={event =>
+                    setForm(current => ({ ...current, name: event.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div>
+                <Label>Nome de usuário *</Label>
+                <Input
+                  value={form.username}
+                  onChange={event =>
+                    setForm(current => ({ ...current, username: event.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div>
+                <Label>E-mail *</Label>
+                <Input
+                  type="email"
+                  value={form.email}
+                  onChange={event =>
+                    setForm(current => ({ ...current, email: event.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div>
+                <Label>{form.id ? "Nova senha (opcional)" : "Senha *"}</Label>
+                <Input
+                  type="password"
+                  value={form.password}
+                  onChange={event =>
+                    setForm(current => ({ ...current, password: event.target.value }))
+                  }
+                  required={!form.id}
+                  placeholder="8+ caracteres, maiúscula e número"
+                />
+              </div>
             </div>
 
             <div>
               <p className="font-semibold">Bancos liberados</p>
-              <p className="mt-1 text-sm text-muted-foreground">O usuário só poderá operar nos bancos marcados abaixo.</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                O usuário só poderá operar nos bancos marcados abaixo.
+              </p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {(data?.databases ?? []).map(database => (
-                  <label key={database.id} className="flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm">
-                    <input type="checkbox" checked={form.databaseIds.includes(database.id)} onChange={() => toggleDatabase(database.id)} className="h-4 w-4" />
+                  <label
+                    key={database.id}
+                    className="flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.databaseIds.includes(database.id)}
+                      onChange={() => toggleDatabase(database.id)}
+                      className="h-4 w-4"
+                    />
                     <span>{database.name}</span>
                   </label>
                 ))}
@@ -354,12 +514,20 @@ export default function Equipe() {
 
             <div>
               <p className="font-semibold">Permissões</p>
-              <p className="mt-1 text-sm text-muted-foreground">As três permissões sensíveis ficam desligadas por padrão.</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                As três permissões sensíveis ficam desligadas por padrão.
+              </p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 {permissionOptions.map(option => {
-                  const viewerCanGrant = data?.isOwner || Boolean(data?.viewerPermissions?.[option.key]);
+                  const viewerCanGrant =
+                    data?.isOwner || Boolean(data?.viewerPermissions?.[option.key]);
                   return (
-                    <label key={option.key} className={`flex items-start gap-3 rounded-xl border p-4 ${option.sensitive ? "border-amber-200 bg-amber-50/40" : ""}`}>
+                    <label
+                      key={option.key}
+                      className={`flex items-start gap-3 rounded-xl border p-4 ${
+                        option.sensitive ? "border-amber-200 bg-amber-50/40" : ""
+                      }`}
+                    >
                       <input
                         type="checkbox"
                         className="mt-1 h-4 w-4"
@@ -369,7 +537,9 @@ export default function Equipe() {
                       />
                       <span>
                         <span className="block text-sm font-semibold">{option.title}</span>
-                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{option.description}</span>
+                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                          {option.description}
+                        </span>
                       </span>
                     </label>
                   );
@@ -378,8 +548,18 @@ export default function Equipe() {
             </div>
 
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={saving}>Cancelar</Button>
-              <Button type="submit" disabled={saving}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{form.id ? "Salvar permissões" : "Criar usuário"}</Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpen(false)}
+                disabled={saving}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {form.id ? "Salvar permissões" : "Criar usuário"}
+              </Button>
             </div>
           </form>
         </DialogContent>
