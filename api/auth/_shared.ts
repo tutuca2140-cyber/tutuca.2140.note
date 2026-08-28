@@ -18,6 +18,11 @@ export function ensureAuthUserColumns() {
   authColumnsPromise = (async () => {
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "accountOwnerId" integer`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canManageUsers" boolean DEFAULT false NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canManageDatabases" boolean DEFAULT false NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canDeleteCashFlow" boolean DEFAULT false NOT NULL`;
+    await sql`CREATE INDEX IF NOT EXISTS users_account_owner_idx ON users ("accountOwnerId")`;
   })().catch((error) => {
     authColumnsPromise = null;
     throw error;
