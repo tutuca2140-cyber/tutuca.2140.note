@@ -29,6 +29,7 @@ import { Link, useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import ThemeToggle from "@/components/ThemeToggle";
+import OliviaAssistant from "@/components/OliviaAssistant";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -386,6 +387,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           onClick={() => setSidebarOpen(false)}
         />
       )}
+      {user.canUseOlivia && <OliviaAssistant />}
     </div>
   );
 }

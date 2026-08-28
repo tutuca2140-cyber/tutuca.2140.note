@@ -39,7 +39,8 @@ type PermissionKey =
   | "canEdit"
   | "canDelete"
   | "canGenerateReports"
-  | "canAccessSettings";
+  | "canAccessSettings"
+  | "canUseOlivia";
 type Permissions = Record<PermissionKey, boolean>;
 type Draft = Permissions & {
   id?: number;
@@ -87,6 +88,12 @@ const permissionOptions: Array<{
     label: "Acessar configurações",
     description: "Consultar e alterar configurações administrativas.",
   },
+  {
+    key: "canUseOlivia",
+    label: "Usar a Olivia",
+    description:
+      "Conversar com a assistente e consultar os dados dos bancos autorizados.",
+  },
 ];
 
 const permissionsForRole = (role: Draft["role"]): Permissions =>
@@ -98,6 +105,7 @@ const permissionsForRole = (role: Draft["role"]): Permissions =>
         canDelete: true,
         canGenerateReports: true,
         canAccessSettings: true,
+        canUseOlivia: true,
       }
     : {
         canView: true,
@@ -106,6 +114,7 @@ const permissionsForRole = (role: Draft["role"]): Permissions =>
         canDelete: false,
         canGenerateReports: false,
         canAccessSettings: false,
+        canUseOlivia: false,
       };
 
 const makeEmptyDraft = (): Draft => ({
@@ -172,6 +181,7 @@ export default function AdminUsuarios() {
       canDelete: user.canDelete,
       canGenerateReports: user.canGenerateReports,
       canAccessSettings: user.canAccessSettings,
+      canUseOlivia: user.canUseOlivia,
       databaseIds: user.databaseIds ?? [],
       dashboardOnly: user.dashboardOnly,
     });
@@ -416,6 +426,7 @@ export default function AdminUsuarios() {
                         canDelete: false,
                         canGenerateReports: false,
                         canAccessSettings: false,
+                        canUseOlivia: false,
                       }))
                     }
                     className={`w-full rounded-xl border p-4 text-left transition-colors ${draft.dashboardOnly ? "border-primary bg-primary/10" : "bg-card hover:bg-muted/40"}`}
@@ -508,9 +519,9 @@ export default function AdminUsuarios() {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div>
-              <Badge>
-                {user.dashboardOnly ? "Somente Dashboard" : user.role}
-              </Badge>
+                      <Badge>
+                        {user.dashboardOnly ? "Somente Dashboard" : user.role}
+                      </Badge>
                       <Badge
                         variant="outline"
                         className={`ml-2 ${user.isActive ? "text-green-700" : "text-red-700"}`}

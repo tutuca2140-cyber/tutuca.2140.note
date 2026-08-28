@@ -24,6 +24,7 @@ import {
   createLoginCaptcha,
   verifyLoginCaptcha,
 } from "../shared/login-captcha";
+import { askOlivia } from "./olivia";
 
 const optionalText = z.string().optional();
 const optionalEmail = z.union([z.string().email(), z.literal("")]).optional();
@@ -65,6 +66,7 @@ const stripLegacyCpf = <T extends { cpf?: unknown }>(
 const protectedProcedure = baseProtectedProcedure.use(({ ctx, next, path }) => {
   const dashboardAllowed =
     path.startsWith("dashboard.") ||
+    (path.startsWith("olivia.") && ctx.user.canUseOlivia) ||
     ["databases.list", "databases.getActive", "databases.setActive"].includes(
       path
     );
@@ -104,6 +106,77 @@ const superAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
 
 export const appRouter = router({
   system: systemRouter,
+
+  olivia: router({
+    chat: protectedProcedure
+      .input(
+        z.object({
+          prompt: z.string().trim().min(1).max(2_000),
+          messages: z
+            .array(
+              z.object({
+                role: z.enum(["user", "assistant"]),
+                content: z.string().max(2_000),
+              })
+            )
+            .max(10)
+            .default([]),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user.canUseOlivia) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message:
+              "O Super Admin ainda não liberou a Olivia para este usuário.",
+          });
+        }
+        const activeDatabase = await db.getActiveDatabase();
+        if (!activeDatabase) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "Selecione um banco de dados antes de conversar com a Olivia.",
+          });
+        }
+        try {
+          const result = await askOlivia({
+            prompt: input.prompt,
+            messages: input.messages,
+            user: ctx.user,
+            database: activeDatabase,
+          });
+          await db.createAuditLog({
+            userId: ctx.user.id,
+            username: ctx.user.username || ctx.user.email || "Usuário",
+            action: "olivia_query",
+            entity: "olivia",
+            databaseId: activeDatabase.id,
+            details: "Consulta somente leitura realizada pela Olivia.",
+            status: "success",
+          });
+          return result;
+        } catch (error) {
+          await db.createAuditLog({
+            userId: ctx.user.id,
+            username: ctx.user.username || ctx.user.email || "Usuário",
+            action: "olivia_query",
+            entity: "olivia",
+            databaseId: activeDatabase.id,
+            details:
+              error instanceof Error ? error.message : "Falha desconhecida",
+            status: "failed",
+          });
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              error instanceof Error
+                ? error.message
+                : "A Olivia não conseguiu responder agora.",
+          });
+        }
+      }),
+  }),
 
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
@@ -353,6 +426,7 @@ export const appRouter = router({
           canDelete: z.boolean().default(false),
           canGenerateReports: z.boolean().default(false),
           canAccessSettings: z.boolean().default(false),
+          canUseOlivia: z.boolean().default(false),
           dashboardOnly: z.boolean().default(false),
           databaseIds: z.array(z.number().int().positive()).max(3).default([]),
         })
@@ -399,6 +473,7 @@ export const appRouter = router({
               canDelete: input.canDelete,
               canGenerateReports: input.canGenerateReports,
               canAccessSettings: input.canAccessSettings,
+              canUseOlivia: input.canUseOlivia,
             },
             databaseIds,
           }),
@@ -421,6 +496,7 @@ export const appRouter = router({
           canDelete: z.boolean(),
           canGenerateReports: z.boolean(),
           canAccessSettings: z.boolean(),
+          canUseOlivia: z.boolean(),
           dashboardOnly: z.boolean(),
           databaseIds: z.array(z.number().int().positive()).max(3),
         })
@@ -474,6 +550,7 @@ export const appRouter = router({
           canDelete: z.boolean().optional(),
           canGenerateReports: z.boolean().optional(),
           canAccessSettings: z.boolean().optional(),
+          canUseOlivia: z.boolean().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
