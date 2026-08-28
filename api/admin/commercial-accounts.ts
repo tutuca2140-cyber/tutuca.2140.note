@@ -92,10 +92,14 @@ async function listCommercialAccounts() {
       u."createdAt" DESC
   `;
 
-  const accounts = rows.map((row: any) => ({
-    ...row,
-    databaseLimit: isPlan(row.plan) ? PLAN_CONFIG[row.plan].limit : 0,
-  }));
+  const accounts = rows.map((row: any) => {
+    const planValue = String(row.plan || "");
+    const plan: PlanId | null = isPlan(planValue) ? planValue : null;
+    return {
+      ...row,
+      databaseLimit: plan ? PLAN_CONFIG[plan].limit : 0,
+    };
+  });
 
   return {
     accounts,
@@ -149,13 +153,15 @@ async function approveCommercialAccount(userId: number, admin: any) {
         statusCode: 404,
       });
     }
-    if (!isPlan(target.plan)) {
+    const planValue = String(target.plan || "");
+    if (!isPlan(planValue)) {
       throw Object.assign(new Error("Plano comercial inválido para esta conta."), {
         statusCode: 409,
       });
     }
 
-    const config = PLAN_CONFIG[target.plan];
+    const plan: PlanId = planValue;
+    const config = PLAN_CONFIG[plan];
     const username = String(target.username || target.name || `usuario-${target.id}`).trim();
 
     const existingAccess = await client.query(
@@ -266,7 +272,7 @@ async function approveCommercialAccount(userId: number, admin: any) {
         admin.username || admin.email || "Super Admin",
         userId,
         JSON.stringify({
-          plan: target.plan,
+          plan,
           databaseLimit: config.limit,
           createdDatabases,
           databaseNames: allAccess.rows.map((row: any) => row.name),
@@ -278,7 +284,7 @@ async function approveCommercialAccount(userId: number, admin: any) {
     inTransaction = false;
 
     return {
-      plan: target.plan,
+      plan,
       planLabel: config.label,
       databaseLimit: config.limit,
       createdDatabases,
