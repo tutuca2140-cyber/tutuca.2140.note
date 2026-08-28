@@ -6,10 +6,12 @@ const plans = [
     id: "basic",
     name: "Basic",
     price: "29,90",
-    description: "Para começar a organizar suas vendas, empréstimos e negociações no Note Note.",
-    badge: "Plano de entrada",
+    description: "Para quem quer organizar sua própria operação no Note Note com acesso individual.",
+    badge: "Plano individual",
     databaseAccess: "1 banco de dados exclusivo",
     automaticCreation: "Criado automaticamente após a aprovação da conta como Principal - seu usuário",
+    userAccess: "Uso individual: somente o próprio contratante",
+    permissionBenefit: "Ideal para quem não precisa dividir o sistema com outra pessoa",
     featured: false,
     icon: Sparkles,
   },
@@ -17,10 +19,12 @@ const plans = [
     id: "plus",
     name: "Plus",
     price: "49,90",
-    description: "Para quem precisa separar operações e trabalhar com mais de um banco dentro do Note Note.",
+    description: "Para quem precisa separar operações e também dividir o trabalho com uma equipe de confiança.",
     badge: "Mais completo",
     databaseAccess: "3 bancos de dados exclusivos",
     automaticCreation: "Criados automaticamente após a aprovação: Principal - seu usuário, #2 e #3",
+    userAccess: "Até 5 usuários adicionais cadastrados pelo contratante",
+    permissionBenefit: "Defina bancos e permissões diferentes para cada usuário",
     featured: true,
     icon: Crown,
   },
@@ -77,10 +81,10 @@ export default function Planos() {
               Planos Note Note
             </span>
             <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">
-              Escolha o plano ideal para você
+              Escolha o plano ideal para sua operação
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-              Você não precisa configurar o banco do zero. Depois da aprovação da assinatura, o Note Note cria automaticamente os bancos incluídos no seu plano e eles já ficam vinculados à sua conta.
+              O Basic é individual. No Plus, além de três bancos separados, você pode cadastrar até cinco usuários adicionais e escolher exatamente o que cada pessoa pode fazer.
             </p>
           </div>
 
@@ -133,12 +137,43 @@ export default function Planos() {
                         <p className="mt-1 text-xs leading-5 text-slate-500">{plan.automaticCreation}</p>
                       </div>
                     </div>
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                        <Check className="h-4 w-4" />
+                      </span>
+                      <div>
+                        <strong>{plan.userAccess}</strong>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">{plan.permissionBenefit}</p>
+                      </div>
+                    </div>
                     <div className="flex items-center gap-3">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                         <Check className="h-4 w-4" />
                       </span>
                       Bancos editáveis pela área Meu Banco
                     </div>
+                    {plan.id === "plus" && (
+                      <>
+                        <div className="flex items-start gap-3">
+                          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                            <Check className="h-4 w-4" />
+                          </span>
+                          <span>Libere para cada usuário somente os bancos que ele poderá acessar.</span>
+                        </div>
+                        <div className="flex items-start gap-3">
+                          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                            <Check className="h-4 w-4" />
+                          </span>
+                          <span>Controle permissões para visualizar, fazer lançamentos, cadastrar empréstimos, produtos, veículos, pagamentos, editar e excluir registros.</span>
+                        </div>
+                        <div className="flex items-start gap-3">
+                          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                            <Check className="h-4 w-4" />
+                          </span>
+                          <span>Administrar usuários, editar/apagar bancos e apagar caixa ficam bloqueados por padrão e só funcionam quando o contratante autorizar.</span>
+                        </div>
+                      </>
+                    )}
                     <div className="flex items-center gap-3">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                         <Check className="h-4 w-4" />
@@ -177,11 +212,11 @@ export default function Planos() {
           </div>
 
           <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-blue-100 bg-white/80 p-5 text-center text-sm leading-6 text-slate-600 shadow-sm">
-            <strong className="text-slate-900">Criação automática incluída:</strong> o Basic recebe o banco <strong>Principal - seu usuário</strong>. No Plus, o sistema cria também <strong>Principal - seu usuário #2</strong> e <strong>Principal - seu usuário #3</strong>. Depois você pode editar os nomes normalmente.
+            <strong className="text-slate-900">No Plus, o controle continua com você:</strong> os usuários adicionais trabalham somente nos seus bancos e apenas com as permissões que o contratante liberar. As funções sensíveis de administrar usuários, apagar/editar bancos e apagar o fluxo de caixa ficam desativadas por padrão.
           </div>
 
           <p className="mx-auto mt-6 max-w-3xl text-center text-sm leading-6 text-slate-500">
-            A quantidade de bancos é aplicada somente às contas comerciais. Usuários gratuitos e de teste criados diretamente pelo Super Admin continuam separados do fluxo de assinatura.
+            Essas regras são aplicadas às contas comerciais. Usuários gratuitos e de teste criados diretamente pelo Super Admin continuam separados do fluxo de assinatura.
           </p>
         </section>
       </main>
