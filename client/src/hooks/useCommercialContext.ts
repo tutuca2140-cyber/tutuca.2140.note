@@ -9,7 +9,7 @@ export type CommercialContext = {
   status: string | null;
   ownerId: number | null;
   teamLimit?: number | null;
-  databaseLimit?: number;
+  databaseLimit?: number | null;
   permissions: {
     canManageUsers: boolean;
     canManageDatabases: boolean;
@@ -25,7 +25,7 @@ export function useCommercialContext() {
     let active = true;
     const load = async () => {
       try {
-        const response = await fetch("/api/commercial-context", {
+        const response = await fetch("/api/commercial-account?scope=context", {
           credentials: "include",
           cache: "no-store",
         });
