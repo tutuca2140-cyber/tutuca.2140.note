@@ -316,8 +316,10 @@ export default function MeuBanco() {
 
                     {shared && (
                       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                        Este banco também está vinculado a outro usuário. A exclusão
-                        definitiva fica bloqueada para proteger os demais acessos.
+                        Este banco também está vinculado a outro usuário. Editar,
+                        limpar, restaurar ou excluir ficam bloqueados nesta área para
+                        proteger os demais acessos. O Super Admin continua podendo
+                        administrá-lo.
                       </div>
                     )}
 
@@ -334,7 +336,7 @@ export default function MeuBanco() {
                           size="sm"
                           variant="outline"
                           onClick={() => restoreMemory(database as DatabaseRecord)}
-                          disabled={pending}
+                          disabled={pending || shared}
                         >
                           <RotateCcw className="mr-2 h-4 w-4" />
                           Restaurar memória
@@ -344,8 +346,8 @@ export default function MeuBanco() {
 
                     {!recovery?.canClearAgain && recovery?.createdAt && (
                       <p className="text-xs text-muted-foreground">
-                        Próxima redefinição de memória disponível 48 horas após
-                        {" "}{formatDateTime(recovery.createdAt)}.
+                        Próxima redefinição de memória disponível 48 horas após{" "}
+                        {formatDateTime(recovery.createdAt)}.
                       </p>
                     )}
 
@@ -353,6 +355,7 @@ export default function MeuBanco() {
                       <Button
                         variant="outline"
                         onClick={() => openEdit(database as DatabaseRecord)}
+                        disabled={pending || shared}
                       >
                         <Pencil className="mr-2 h-4 w-4" />
                         Editar nome
@@ -363,7 +366,9 @@ export default function MeuBanco() {
                           setClearTarget(database as DatabaseRecord);
                           setClearConfirmation("");
                         }}
-                        disabled={pending || recovery?.canClearAgain === false}
+                        disabled={
+                          pending || shared || recovery?.canClearAgain === false
+                        }
                       >
                         <RotateCcw className="mr-2 h-4 w-4" />
                         Limpar memória
