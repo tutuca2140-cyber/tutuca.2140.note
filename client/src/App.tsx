@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
+import CommercialPaymentGate from "./components/CommercialPaymentGate";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SiteAccessTracker from "./components/SiteAccessTracker";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -31,6 +32,19 @@ const AdminAuditoria = lazy(() => import("./pages/admin/Auditoria"));
 const AdminConfiguracoes = lazy(() => import("./pages/admin/Configuracoes"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
+const PaidClientes = () => <CommercialPaymentGate><Clientes /></CommercialPaymentGate>;
+const PaidEmprestimos = () => <CommercialPaymentGate><Emprestimos /></CommercialPaymentGate>;
+const PaidPagamentos = () => <CommercialPaymentGate><Pagamentos /></CommercialPaymentGate>;
+const PaidCaixa = () => <CommercialPaymentGate><Caixa /></CommercialPaymentGate>;
+const PaidAgentes = () => <CommercialPaymentGate><Agentes /></CommercialPaymentGate>;
+const PaidVeiculos = () => <CommercialPaymentGate><Veiculos /></CommercialPaymentGate>;
+const PaidProdutos = () => <CommercialPaymentGate><Produtos /></CommercialPaymentGate>;
+const PaidFinanciamentos = () => <CommercialPaymentGate><Financiamentos /></CommercialPaymentGate>;
+const PaidContasAReceber = () => <CommercialPaymentGate><ContasAReceber /></CommercialPaymentGate>;
+const PaidRelatorios = () => <CommercialPaymentGate><Relatorios /></CommercialPaymentGate>;
+const PaidMeuBanco = () => <CommercialPaymentGate><MeuBanco /></CommercialPaymentGate>;
+const PaidEquipe = () => <CommercialPaymentGate><Equipe /></CommercialPaymentGate>;
+
 function Router() {
   return (
     <Switch>
@@ -39,18 +53,18 @@ function Router() {
       <Route path={"/cadastro"} component={Cadastro} />
       <Route path={"/"} component={Home} />
       <Route path={"/dashboard"} component={Dashboard} />
-      <Route path={"/clientes"} component={Clientes} />
-      <Route path={"/emprestimos"} component={Emprestimos} />
-      <Route path={"/pagamentos"} component={Pagamentos} />
-      <Route path={"/caixa"} component={Caixa} />
-      <Route path={"/agentes"} component={Agentes} />
-      <Route path={"/veiculos"} component={Veiculos} />
-      <Route path={"/produtos"} component={Produtos} />
-      <Route path={"/financiamentos"} component={Financiamentos} />
-      <Route path={"/contas-a-receber"} component={ContasAReceber} />
-      <Route path={"/relatorios"} component={Relatorios} />
-      <Route path={"/meu-banco"} component={MeuBanco} />
-      <Route path={"/equipe"} component={Equipe} />
+      <Route path={"/clientes"} component={PaidClientes} />
+      <Route path={"/emprestimos"} component={PaidEmprestimos} />
+      <Route path={"/pagamentos"} component={PaidPagamentos} />
+      <Route path={"/caixa"} component={PaidCaixa} />
+      <Route path={"/agentes"} component={PaidAgentes} />
+      <Route path={"/veiculos"} component={PaidVeiculos} />
+      <Route path={"/produtos"} component={PaidProdutos} />
+      <Route path={"/financiamentos"} component={PaidFinanciamentos} />
+      <Route path={"/contas-a-receber"} component={PaidContasAReceber} />
+      <Route path={"/relatorios"} component={PaidRelatorios} />
+      <Route path={"/meu-banco"} component={PaidMeuBanco} />
+      <Route path={"/equipe"} component={PaidEquipe} />
       <Route path={"/admin/controle"} component={AdminControle} />
       <Route path={"/admin/assinaturas"} component={AdminAssinaturas} />
       <Route path={"/admin/usuarios"} component={AdminUsuarios} />
