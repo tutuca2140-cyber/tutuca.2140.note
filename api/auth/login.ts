@@ -24,10 +24,195 @@ function isPlan(value: unknown): value is PlanId {
   return value === "basic" || value === "plus";
 }
 
+function isValidCommercialPassword(value: string) {
+  return value.length >= 8 && /[A-Z]/.test(value) && /[0-9]/.test(value);
+}
+
 function databaseName(username: string, position: number) {
   return position === 1
     ? `Principal - ${username}`
     : `Principal - ${username} #${position}`;
+}
+
+function requestOrigin(req: any) {
+  const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "https")
+    .split(",")[0]
+    .trim();
+  const forwardedHost = String(req?.headers?.["x-forwarded-host"] || req?.headers?.host || "notenote.com.br")
+    .split(",")[0]
+    .trim();
+  return `${forwardedProto}://${forwardedHost}`;
+}
+
+async function sendCommercialPasswordResetEmail(params: {
+  to: string;
+  name?: string | null;
+  resetUrl: string;
+}) {
+  const apiKey = String(process.env.RESEND_API_KEY || "").trim();
+  const from = String(
+    process.env.PASSWORD_RESET_FROM_EMAIL || "Note Note <no-reply@notenote.com.br>"
+  ).trim();
+
+  if (!apiKey) {
+    throw Object.assign(
+      new Error(
+        "O envio de recuperação por e-mail ainda precisa da configuração do serviço de e-mail do Note Note."
+      ),
+      { statusCode: 503 }
+    );
+  }
+
+  const firstName = String(params.name || "").trim().split(/\s+/)[0] || "cliente";
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to: [params.to],
+      subject: "Recuperação de senha — Note Note",
+      text: [
+        `Olá, ${firstName}.`,
+        "",
+        "Recebemos uma solicitação para redefinir sua senha do Note Note.",
+        "Use o link abaixo em até 30 minutos:",
+        params.resetUrl,
+        "",
+        "Se você não solicitou essa alteração, ignore este e-mail.",
+      ].join("\n"),
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    console.error("[auth/login] Falha ao enviar recuperação:", detail);
+    throw Object.assign(
+      new Error("Não foi possível enviar o e-mail de recuperação agora."),
+      { statusCode: 502 }
+    );
+  }
+}
+
+async function handlePasswordResetRequest(req: any, res: any, body: any) {
+  const email = String(body?.email ?? "").trim().toLowerCase();
+  const captchaToken = String(body?.captchaToken ?? "");
+  const captchaAnswer = String(body?.captchaAnswer ?? "");
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return sendJson(res, 400, { success: false, message: "Informe seu e-mail cadastrado." });
+  }
+  if (!verifyLoginCaptcha(captchaToken, captchaAnswer)) {
+    return sendJson(res, 400, {
+      success: false,
+      message: "Confirme corretamente que você não é um robô.",
+    });
+  }
+
+  await ensureAuthUserColumns();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, username, name, email, "loginMethod", "passwordHash"
+      FROM users
+     WHERE lower(email) = lower(${email})
+     LIMIT 1
+  `;
+  const user = rows[0] as any;
+
+  // Resposta uniforme para não revelar se um endereço está cadastrado.
+  if (!user || user.loginMethod !== "commercial_signup" || !user.passwordHash) {
+    return sendJson(res, 200, {
+      success: true,
+      message: "Se este e-mail estiver vinculado a uma conta comercial, enviaremos as instruções de recuperação.",
+    });
+  }
+
+  const token = makeSessionToken();
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+  await sql`
+    UPDATE password_reset_tokens
+       SET "usedAt" = NOW()
+     WHERE "userId" = ${user.id} AND "usedAt" IS NULL
+  `;
+  await sql`
+    INSERT INTO password_reset_tokens ("userId", token, "expiresAt", "createdAt")
+    VALUES (${user.id}, ${token}, ${expiresAt}, NOW())
+  `;
+
+  const resetUrl = `${requestOrigin(req)}/login?reset=${encodeURIComponent(token)}`;
+  try {
+    await sendCommercialPasswordResetEmail({
+      to: String(user.email),
+      name: user.name,
+      resetUrl,
+    });
+  } catch (error) {
+    await sql`
+      UPDATE password_reset_tokens SET "usedAt" = NOW()
+       WHERE token = ${token}
+    `;
+    throw error;
+  }
+
+  return sendJson(res, 200, {
+    success: true,
+    message: "Enviamos um link de recuperação para o e-mail cadastrado. Ele é válido por 30 minutos.",
+  });
+}
+
+async function handlePasswordReset(res: any, body: any) {
+  const token = String(body?.token ?? "").trim();
+  const password = String(body?.password ?? "");
+
+  if (!token) {
+    return sendJson(res, 400, { success: false, message: "Link de recuperação inválido." });
+  }
+  if (!isValidCommercialPassword(password)) {
+    return sendJson(res, 400, {
+      success: false,
+      message: "A nova senha deve ter no mínimo 8 caracteres, uma letra maiúscula e um número.",
+    });
+  }
+
+  await ensureAuthUserColumns();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT prt.id, prt."userId", u.username, u.email, u."loginMethod"
+      FROM password_reset_tokens prt
+      JOIN users u ON u.id = prt."userId"
+     WHERE prt.token = ${token}
+       AND prt."usedAt" IS NULL
+       AND prt."expiresAt" > NOW()
+     LIMIT 1
+  `;
+  const reset = rows[0] as any;
+
+  if (!reset || reset.loginMethod !== "commercial_signup") {
+    return sendJson(res, 400, {
+      success: false,
+      message: "Este link de recuperação é inválido ou expirou.",
+    });
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12);
+  await sql`
+    UPDATE users
+       SET "passwordHash" = ${passwordHash},
+           "failedLoginAttempts" = 0,
+           "updatedAt" = NOW()
+     WHERE id = ${reset.userId}
+  `;
+  await sql`
+    UPDATE password_reset_tokens SET "usedAt" = NOW() WHERE id = ${reset.id}
+  `;
+  await sql`DELETE FROM local_sessions WHERE "userId" = ${reset.userId}`;
+
+  return sendJson(res, 200, {
+    success: true,
+    message: "Senha alterada com sucesso. Entre novamente com a nova senha.",
+  });
 }
 
 async function provisionCommercialDatabasesOnFirstLogin(userId: number) {
@@ -271,6 +456,18 @@ export default async function handler(req: any, res: any) {
 
   try {
     const body = await readJsonBody(req);
+    const action = String(body?.action ?? "login").trim().toLowerCase();
+
+    if (action === "request_reset") {
+      return await handlePasswordResetRequest(req, res, body);
+    }
+    if (action === "reset_password") {
+      return await handlePasswordReset(res, body);
+    }
+    if (action !== "login") {
+      return sendJson(res, 400, { success: false, message: "Ação de autenticação inválida." });
+    }
+
     const username = String(body?.username ?? "").trim();
     const password = String(body?.password ?? "");
     const rememberMe = Boolean(body?.rememberMe);
@@ -329,7 +526,8 @@ export default async function handler(req: any, res: any) {
     if (!ok) {
       if (
         String(user.username).toLowerCase() === "draco" ||
-        user.role === "super_admin"
+        user.role === "super_admin" ||
+        user.loginMethod === "commercial_signup"
       ) {
         return sendJson(res, 401, {
           success: false,
@@ -427,7 +625,7 @@ export default async function handler(req: any, res: any) {
       message:
         error instanceof Error
           ? error.message
-          : "Não foi possível realizar o login.",
+          : "Não foi possível realizar a operação de autenticação.",
     });
   }
 }
