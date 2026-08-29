@@ -34,7 +34,9 @@ export default async function handler(req: any, res: any) {
         u."canGenerateReports",
         u."canAccessSettings",
         u."dashboardOnly",
-        u."isActive"
+        u."isActive",
+        u."loginCount",
+        u."feedbackSubmitted"
       FROM local_sessions s
       INNER JOIN users u ON u.id = s."userId"
       WHERE s.token = ${token}
@@ -50,7 +52,13 @@ export default async function handler(req: any, res: any) {
 
     return sendJson(res, 200, {
       authenticated: true,
-      user,
+      user: {
+        ...user,
+        shouldShowFeedback:
+          user.role !== "super_admin" &&
+          Number(user.loginCount || 0) >= 3 &&
+          !user.feedbackSubmitted,
+      },
     });
   } catch (error) {
     console.error("[auth/me]", error);
