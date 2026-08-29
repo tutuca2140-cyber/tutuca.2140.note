@@ -333,9 +333,11 @@ async function handleTeam(req: any, res: any, viewer: any) {
     return sendJson(res, 403, {
       success: false,
       message:
-        account.plan === "basic"
-          ? "O plano Basic permite somente o próprio contratante. Usuários adicionais estão disponíveis no Plus."
-          : "O contratante não liberou a permissão de administrar usuários para esta conta.",
+        !account.active
+          ? "Sistema aguardando pagamento. Regularize sua assinatura para administrar usuários."
+          : account.plan === "basic"
+            ? "O plano Basic permite somente o próprio contratante. Usuários adicionais estão disponíveis no Plus."
+            : "O contratante não liberou a permissão de administrar usuários para esta conta.",
     });
   }
 
@@ -601,6 +603,17 @@ async function handleCashDelete(req: any, res: any, viewer: any) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return sendJson(res, 405, { success: false, message: "Método não permitido." });
+  }
+
+  if (viewer.role !== "super_admin") {
+    const account = await getAccountContext(viewer);
+    if (account && !account.active) {
+      return sendJson(res, 402, {
+        success: false,
+        message:
+          "Sistema aguardando pagamento. Regularize sua assinatura para voltar a realizar ações no caixa.",
+      });
+    }
   }
 
   const body = await readJsonBody(req);
