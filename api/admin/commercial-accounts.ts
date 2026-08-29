@@ -1,5 +1,3 @@
-import { Client, neonConfig } from "@neondatabase/serverless";
-import WebSocket from "ws";
 import {
   getSql,
   readCookie,
@@ -7,8 +5,6 @@ import {
   sendJson,
   SESSION_COOKIE_NAME,
 } from "../auth/_shared.js";
-
-neonConfig.webSocketConstructor = WebSocket;
 
 const PLAN_CONFIG = {
   basic: { label: "Basic", limit: 1, priceCents: 2990 },
@@ -21,12 +17,6 @@ function isPlan(value: unknown): value is PlanId {
   return value === "basic" || value === "plus";
 }
 
-function databaseName(username: string, position: number) {
-  return position === 1
-    ? `Principal - ${username}`
-    : `Principal - ${username} #${position}`;
-}
-
 async function ensureTables() {
   const sql = getSql();
   await sql`
@@ -37,9 +27,14 @@ async function ensureTables() {
       "priceCents" integer NOT NULL,
       status varchar(30) NOT NULL DEFAULT 'pending_payment',
       source varchar(40) NOT NULL DEFAULT 'commercial_signup',
+      "provisionedAt" timestamptz,
       "createdAt" timestamptz NOT NULL DEFAULT NOW(),
       "updatedAt" timestamptz NOT NULL DEFAULT NOW()
     )
+  `;
+  await sql`
+    ALTER TABLE commercial_subscriptions
+    ADD COLUMN IF NOT EXISTS "provisionedAt" timestamptz
   `;
 }
 
@@ -73,6 +68,7 @@ async function listCommercialAccounts() {
       cs.plan,
       cs."priceCents",
       cs.status,
+      cs."provisionedAt",
       cs."updatedAt" AS "subscriptionUpdatedAt",
       COUNT(uda.id)::int AS "databaseCount",
       COALESCE(
@@ -86,7 +82,7 @@ async function listCommercialAccounts() {
     WHERE u."loginMethod" = 'commercial_signup'
     GROUP BY
       u.id, u.username, u.name, u.email, u."isActive", u."createdAt",
-      cs.plan, cs."priceCents", cs.status, cs."updatedAt"
+      cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt"
     ORDER BY
       CASE WHEN cs.status = 'pending_payment' THEN 0 ELSE 1 END,
       u."createdAt" DESC
@@ -115,200 +111,73 @@ async function listCommercialAccounts() {
 }
 
 async function approveCommercialAccount(userId: number, admin: any) {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw Object.assign(new Error("Banco principal não configurado."), {
-      statusCode: 503,
+  const sql = getSql();
+  const targetRows = await sql`
+    SELECT
+      u.id, u.username, u.name, u.email, u."loginMethod", u."isActive",
+      cs.plan, cs."priceCents", cs.status, cs."provisionedAt"
+    FROM users u
+    JOIN commercial_subscriptions cs ON cs."userId" = u.id
+    WHERE u.id = ${userId}
+    LIMIT 1
+  `;
+  const target = targetRows[0] as any;
+
+  if (!target || target.loginMethod !== "commercial_signup") {
+    throw Object.assign(new Error("Conta comercial não encontrada."), {
+      statusCode: 404,
     });
   }
 
-  const client = new Client(databaseUrl);
-  let inTransaction = false;
-  try {
-    await client.connect();
-    await client.query("BEGIN");
-    inTransaction = true;
-
-    const targetResult = await client.query(
-      `SELECT
-         u.id,
-         u.username,
-         u.name,
-         u.email,
-         u."loginMethod",
-         u."isActive",
-         cs.plan,
-         cs."priceCents",
-         cs.status
-       FROM users u
-       JOIN commercial_subscriptions cs ON cs."userId" = u.id
-       WHERE u.id = $1
-       FOR UPDATE OF u, cs`,
-      [userId]
-    );
-    const target = targetResult.rows[0] as any;
-
-    if (!target || target.loginMethod !== "commercial_signup") {
-      throw Object.assign(new Error("Conta comercial não encontrada."), {
-        statusCode: 404,
-      });
-    }
-    const planValue = String(target.plan || "");
-    if (!isPlan(planValue)) {
-      throw Object.assign(new Error("Plano comercial inválido para esta conta."), {
-        statusCode: 409,
-      });
-    }
-
-    const plan: PlanId = planValue;
-    const config = PLAN_CONFIG[plan];
-    const username = String(target.username || target.name || `usuario-${target.id}`).trim();
-
-    const existingAccess = await client.query(
-      `SELECT uda.id, uda."databaseId", uda."isActive", d.name
-         FROM user_database_access uda
-         JOIN databases d ON d.id = uda."databaseId"
-        WHERE uda."userId" = $1
-        ORDER BY uda."createdAt", uda.id`,
-      [userId]
-    );
-
-    if (existingAccess.rows.length > config.limit) {
-      throw Object.assign(
-        new Error(
-          `Esta conta já possui ${existingAccess.rows.length} bancos, acima do limite do plano ${config.label}. Corrija os vínculos antes de aprovar.`
-        ),
-        { statusCode: 409 }
-      );
-    }
-
-    const createdDatabases: Array<{ id: number; name: string }> = [];
-    for (let position = existingAccess.rows.length + 1; position <= config.limit; position++) {
-      const name = databaseName(username, position);
-      const collision = await client.query(
-        `SELECT id FROM databases WHERE lower(name) = lower($1) LIMIT 1`,
-        [name]
-      );
-      if (collision.rows[0]) {
-        throw Object.assign(
-          new Error(
-            `Já existe um banco chamado “${name}”. Renomeie esse banco antes de aprovar esta conta para preservar a criação automática.`
-          ),
-          { statusCode: 409 }
-        );
-      }
-
-      const created = await client.query(
-        `INSERT INTO databases
-          (name, description, type, "isActive", "createdBy", "createdAt", "updatedAt")
-         VALUES ($1, $2, 'novo', false, $3, NOW(), NOW())
-         RETURNING id, name`,
-        [
-          name,
-          `Banco criado automaticamente pelo plano ${config.label} do usuário ${username}.`,
-          userId,
-        ]
-      );
-      const database = created.rows[0] as any;
-      const shouldBeActive =
-        existingAccess.rows.length === 0 && createdDatabases.length === 0;
-      await client.query(
-        `INSERT INTO user_database_access
-          ("userId", "databaseId", "isActive", "createdAt")
-         VALUES ($1, $2, $3, NOW())`,
-        [userId, database.id, shouldBeActive]
-      );
-      createdDatabases.push({ id: Number(database.id), name: database.name });
-    }
-
-    const allAccess = await client.query(
-      `SELECT uda.id, uda."databaseId", uda."isActive", d.name
-         FROM user_database_access uda
-         JOIN databases d ON d.id = uda."databaseId"
-        WHERE uda."userId" = $1
-        ORDER BY uda."createdAt", uda.id`,
-      [userId]
-    );
-
-    if (allAccess.rows.length !== config.limit) {
-      throw Object.assign(
-        new Error(
-          `Não foi possível provisionar os ${config.limit} bancos previstos pelo plano ${config.label}.`
-        ),
-        { statusCode: 500 }
-      );
-    }
-
-    if (!allAccess.rows.some((row: any) => row.isActive)) {
-      await client.query(
-        `UPDATE user_database_access
-            SET "isActive" = true
-          WHERE id = $1`,
-        [allAccess.rows[0].id]
-      );
-    }
-
-    await client.query(
-      `UPDATE users
-          SET "isActive" = true,
-              "failedLoginAttempts" = 0,
-              "updatedAt" = NOW()
-        WHERE id = $1`,
-      [userId]
-    );
-    await client.query(
-      `UPDATE commercial_subscriptions
-          SET status = 'active', "updatedAt" = NOW()
-        WHERE "userId" = $1`,
-      [userId]
-    );
-
-    await client.query(
-      `INSERT INTO "auditLogs"
-        ("userId", username, action, entity, "entityId", details, status, "createdAt")
-       VALUES ($1, $2, 'approve_commercial_account', 'users', $3, $4, 'success', NOW())`,
-      [
-        admin.id,
-        admin.username || admin.email || "Super Admin",
-        userId,
-        JSON.stringify({
-          plan,
-          databaseLimit: config.limit,
-          createdDatabases,
-          databaseNames: allAccess.rows.map((row: any) => row.name),
-        }),
-      ]
-    );
-
-    await client.query("COMMIT");
-    inTransaction = false;
-
-    return {
-      plan,
-      planLabel: config.label,
-      databaseLimit: config.limit,
-      createdDatabases,
-      databases: allAccess.rows.map((row: any) => ({
-        id: Number(row.databaseId),
-        name: row.name,
-      })),
-    };
-  } catch (error) {
-    if (inTransaction) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        // mantém o erro original
-      }
-    }
-    throw error;
-  } finally {
-    try {
-      await client.end();
-    } catch {
-      // conexão já encerrada
-    }
+  const planValue = String(target.plan || "");
+  if (!isPlan(planValue)) {
+    throw Object.assign(new Error("Plano comercial inválido para esta conta."), {
+      statusCode: 409,
+    });
   }
+
+  const plan: PlanId = planValue;
+  const config = PLAN_CONFIG[plan];
+
+  await sql`
+    UPDATE users
+       SET "isActive" = true,
+           "failedLoginAttempts" = 0,
+           "updatedAt" = NOW()
+     WHERE id = ${userId}
+  `;
+  await sql`
+    UPDATE commercial_subscriptions
+       SET status = 'active', "updatedAt" = NOW()
+     WHERE "userId" = ${userId}
+  `;
+
+  await sql`
+    INSERT INTO "auditLogs"
+      ("userId", username, action, entity, "entityId", details, status, "createdAt")
+    VALUES (
+      ${admin.id},
+      ${admin.username || admin.email || "Super Admin"},
+      'approve_commercial_account',
+      'users',
+      ${userId},
+      ${JSON.stringify({
+        plan,
+        databaseLimit: config.limit,
+        provisioning: "first_login",
+        alreadyProvisioned: Boolean(target.provisionedAt),
+      })},
+      'success',
+      NOW()
+    )
+  `;
+
+  return {
+    plan,
+    planLabel: config.label,
+    databaseLimit: config.limit,
+    alreadyProvisioned: Boolean(target.provisionedAt),
+  };
 }
 
 export default async function handler(req: any, res: any) {
@@ -356,10 +225,9 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 200, {
       success: true,
       approval,
-      message:
-        approval.createdDatabases.length > 0
-          ? `Conta aprovada. ${approval.createdDatabases.length} banco(s) criado(s) automaticamente pelo plano ${approval.planLabel}.`
-          : `Conta aprovada. Os bancos previstos pelo plano ${approval.planLabel} já estavam provisionados.`,
+      message: approval.alreadyProvisioned
+        ? `Conta ${approval.planLabel} aprovada e ativa. Os bancos já estavam provisionados.`
+        : `Conta ${approval.planLabel} aprovada e ativa. Os ${approval.databaseLimit} banco(s) do plano serão criados automaticamente no primeiro login do contratante.`,
     });
   } catch (error: any) {
     console.error("[admin/commercial-accounts]", error);
