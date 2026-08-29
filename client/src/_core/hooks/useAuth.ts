@@ -14,6 +14,9 @@ type AuthUser = {
   canAccessSettings?: boolean;
   dashboardOnly?: boolean;
   isActive?: boolean;
+  loginCount?: number;
+  feedbackSubmitted?: boolean;
+  shouldShowFeedback?: boolean;
 };
 
 type UseAuthOptions = {
