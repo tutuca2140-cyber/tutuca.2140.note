@@ -36,6 +36,21 @@ async function ensureTables() {
     ALTER TABLE commercial_subscriptions
     ADD COLUMN IF NOT EXISTS "provisionedAt" timestamptz
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS site_access_logs (
+      id bigserial PRIMARY KEY,
+      "userId" integer REFERENCES users(id) ON DELETE SET NULL,
+      path varchar(500) NOT NULL,
+      referrer varchar(1000),
+      "ipAddress" varchar(120),
+      "userAgent" text,
+      "createdAt" timestamptz NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS site_access_logs_user_idx
+    ON site_access_logs ("userId", "createdAt" DESC)
+  `;
 }
 
 async function getSuperAdmin(req: any) {
@@ -58,6 +73,29 @@ async function getSuperAdmin(req: any) {
 async function listCommercialAccounts() {
   const sql = getSql();
   const rows = await sql`
+    WITH account_users AS (
+      SELECT id AS "userId", id AS "ownerId"
+        FROM users
+       WHERE "loginMethod" = 'commercial_signup'
+      UNION ALL
+      SELECT id AS "userId", "accountOwnerId" AS "ownerId"
+        FROM users
+       WHERE "loginMethod" = 'commercial_subuser'
+         AND "accountOwnerId" IS NOT NULL
+    ), usage_summary AS (
+      SELECT
+        au."ownerId",
+        MAX(sal."createdAt") AS "lastAccessAt",
+        COUNT(
+          DISTINCT (
+            sal."userId"::text || ':' ||
+            FLOOR(EXTRACT(EPOCH FROM sal."createdAt") / 300)::bigint::text
+          )
+        )::int AS "usageBuckets"
+      FROM account_users au
+      JOIN site_access_logs sal ON sal."userId" = au."userId"
+      GROUP BY au."ownerId"
+    )
     SELECT
       u.id,
       u.username,
@@ -66,6 +104,7 @@ async function listCommercialAccounts() {
       u.whatsapp,
       u."isActive",
       u."createdAt",
+      u."lastSignedIn",
       cs.plan,
       cs."priceCents",
       cs.status,
@@ -75,15 +114,19 @@ async function listCommercialAccounts() {
       COALESCE(
         string_agg(d.name, ', ' ORDER BY uda."createdAt", d.id),
         ''
-      ) AS "databaseNames"
+      ) AS "databaseNames",
+      usage."lastAccessAt",
+      COALESCE(usage."usageBuckets", 0)::int * 5 AS "usageMinutes"
     FROM users u
     JOIN commercial_subscriptions cs ON cs."userId" = u.id
     LEFT JOIN user_database_access uda ON uda."userId" = u.id
     LEFT JOIN databases d ON d.id = uda."databaseId"
+    LEFT JOIN usage_summary usage ON usage."ownerId" = u.id
     WHERE u."loginMethod" = 'commercial_signup'
     GROUP BY
-      u.id, u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt",
-      cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt"
+      u.id, u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt", u."lastSignedIn",
+      cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt",
+      usage."lastAccessAt", usage."usageBuckets"
     ORDER BY
       CASE
         WHEN cs.status = 'pending_payment' THEN 0
@@ -96,9 +139,18 @@ async function listCommercialAccounts() {
   const accounts = rows.map((row: any) => {
     const planValue = String(row.plan || "");
     const plan: PlanId | null = isPlan(planValue) ? planValue : null;
+    const usageMinutes = Number(row.usageMinutes || 0);
     return {
       ...row,
+      usageMinutes,
+      usageHours: Number((usageMinutes / 60).toFixed(2)),
       databaseLimit: plan ? PLAN_CONFIG[plan].limit : 0,
+      paymentState:
+        row.status === "active" || row.status === "paid"
+          ? "paid"
+          : row.status === "past_due"
+            ? "unpaid"
+            : "pending",
     };
   });
 
@@ -112,6 +164,10 @@ async function listCommercialAccounts() {
       monthlyActiveCents: accounts
         .filter((item: any) => item.status === "active" || item.status === "paid")
         .reduce((sum: number, item: any) => sum + Number(item.priceCents || 0), 0),
+      totalUsageMinutes: accounts.reduce(
+        (sum: number, item: any) => sum + Number(item.usageMinutes || 0),
+        0
+      ),
     },
   };
 }
@@ -206,7 +262,6 @@ async function setPaymentStatus(userId: number, admin: any, status: "active" | "
     });
   }
 
-  // Falta de pagamento não desativa o login. O bloqueio é de uso e mantém somente o Dashboard.
   await sql`
     UPDATE users
        SET "isActive" = true,
