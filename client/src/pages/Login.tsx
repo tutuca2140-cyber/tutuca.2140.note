@@ -8,30 +8,58 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CheckCircle2, Loader2, Mail, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
 
 export default function Login() {
   const [, setLocation] = useLocation();
+  const resetToken = new URLSearchParams(window.location.search).get("reset")?.trim() || "";
   const [isLoading, setIsLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoverySent, setRecoverySent] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [resetDone, setResetDone] = useState(false);
   const [notRobot, setNotRobot] = useState(false);
   const [captcha, setCaptcha] = useState({ question: "", token: "" });
   const [captchaAnswer, setCaptchaAnswer] = useState("");
 
   const refreshCaptcha = useCallback(async () => {
-    const response = await fetch("/api/auth/captcha", { cache: "no-store" });
-    const result = await response.json();
-    if (response.ok && result?.success) setCaptcha({ question: result.question, token: result.token });
+    try {
+      const response = await fetch("/api/auth/captcha", { cache: "no-store" });
+      const result = await response.json();
+      if (response.ok && result?.success) {
+        setCaptcha({ question: result.question, token: result.token });
+      }
+    } catch {
+      // A tentativa exibirá o erro caso o serviço de verificação esteja indisponível.
+    }
   }, []);
 
   useEffect(() => {
     void refreshCaptcha();
   }, [refreshCaptcha]);
+
+  const resetRules = {
+    length: newPassword.length >= 8,
+    uppercase: /[A-Z]/.test(newPassword),
+    number: /[0-9]/.test(newPassword),
+  };
+  const resetPasswordValid = Object.values(resetRules).every(Boolean);
+  const resetPasswordsMatch =
+    newPassword.length > 0 && newPassword === confirmNewPassword;
+
+  const resetCaptcha = () => {
+    setNotRobot(false);
+    setCaptchaAnswer("");
+    void refreshCaptcha();
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,11 +72,10 @@ export default function Login() {
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
+          action: "login",
           username,
           password,
           rememberMe,
@@ -58,7 +85,6 @@ export default function Login() {
       });
 
       const result = await response.json();
-
       if (!response.ok || !result?.success) {
         throw new Error(result?.message || "Usuário ou senha inválidos.");
       }
@@ -67,12 +93,107 @@ export default function Login() {
       setLocation("/dashboard");
     } catch (error: any) {
       toast.error(error?.message || "Não foi possível realizar o login.");
-      setCaptchaAnswer("");
-      void refreshCaptcha();
+      resetCaptcha();
     } finally {
       setIsLoading(false);
     }
   };
+
+  const requestRecovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!notRobot || !captchaAnswer.trim()) {
+      toast.error("Marque “Não sou um robô” e resolva a verificação.");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "request_reset",
+          email: recoveryEmail,
+          captchaToken: captcha.token,
+          captchaAnswer,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Não foi possível solicitar a recuperação.");
+      }
+      setRecoverySent(true);
+      toast.success(result.message || "Verifique seu e-mail.");
+    } catch (error: any) {
+      toast.error(error?.message || "Não foi possível solicitar a recuperação.");
+      resetCaptcha();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetCommercialPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPasswordValid) {
+      toast.error("A nova senha ainda não atende aos requisitos.");
+      return;
+    }
+    if (!resetPasswordsMatch) {
+      toast.error("As duas senhas precisam ser iguais.");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reset_password",
+          token: resetToken,
+          password: newPassword,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Não foi possível alterar a senha.");
+      }
+      setResetDone(true);
+      toast.success(result.message || "Senha alterada com sucesso.");
+    } catch (error: any) {
+      toast.error(error?.message || "Não foi possível alterar a senha.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const captchaBox = (
+    <div className="space-y-3 rounded-xl border bg-slate-50 p-4">
+      <label className="flex items-center gap-3 text-sm font-medium">
+        <input
+          type="checkbox"
+          checked={notRobot}
+          onChange={e => setNotRobot(e.target.checked)}
+          disabled={isLoading}
+          className="h-5 w-5"
+        />
+        Não sou um robô
+      </label>
+      {notRobot ? (
+        <div>
+          <Label htmlFor="captcha">Verificação: {captcha.question}</Label>
+          <Input
+            id="captcha"
+            inputMode="numeric"
+            autoComplete="off"
+            value={captchaAnswer}
+            onChange={e => setCaptchaAnswer(e.target.value)}
+            disabled={isLoading}
+            className="mt-2"
+            required
+          />
+        </div>
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -88,30 +209,131 @@ export default function Login() {
 
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle>Bem-vindo</CardTitle>
+            <CardTitle>
+              {resetToken ? "Criar nova senha" : showRecovery ? "Recuperar senha" : "Bem-vindo"}
+            </CardTitle>
             <CardDescription>
-              Entre com seu usuário e senha do Note Note.
+              {resetToken
+                ? "Defina uma nova senha para sua conta comercial do Note Note."
+                : showRecovery
+                  ? "Clientes que contrataram pelo site podem recuperar a senha pelo e-mail cadastrado."
+                  : "Entre com seu usuário e senha do Note Note."}
             </CardDescription>
           </CardHeader>
 
           <CardContent className="space-y-4">
-            {showRecovery ? (
-              <div className="space-y-4">
-                <div className="rounded-md border bg-slate-50 p-4 text-sm text-slate-700">
-                  A recuperação de senha será conectada ao novo sistema de
-                  autenticação na próxima etapa. Enquanto isso, a senha dos
-                  usuários pode ser redefinida pelo super administrador.
+            {resetToken ? (
+              resetDone ? (
+                <div className="space-y-5 text-center">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                    <CheckCircle2 className="h-7 w-7" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-900">Senha alterada</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Sua nova senha já pode ser usada para entrar no Note Note.</p>
+                  </div>
+                  <Button className="w-full" onClick={() => setLocation("/login")}>Ir para o login</Button>
                 </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setShowRecovery(false)}
-                >
-                  Voltar para login
-                </Button>
-              </div>
+              ) : (
+                <form onSubmit={resetCommercialPassword} className="space-y-4">
+                  <div>
+                    <Label htmlFor="new-password">Nova senha</Label>
+                    <Input
+                      id="new-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      disabled={isLoading}
+                      required
+                      className="mt-2"
+                    />
+                    <div className="mt-3 grid gap-1 text-xs">
+                      <span className={resetRules.length ? "text-emerald-700" : "text-slate-500"}>✓ Mínimo 8 caracteres</span>
+                      <span className={resetRules.uppercase ? "text-emerald-700" : "text-slate-500"}>✓ Pelo menos 1 letra maiúscula</span>
+                      <span className={resetRules.number ? "text-emerald-700" : "text-slate-500"}>✓ Pelo menos 1 número</span>
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="confirm-new-password">Confirmar nova senha</Label>
+                    <Input
+                      id="confirm-new-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={confirmNewPassword}
+                      onChange={e => setConfirmNewPassword(e.target.value)}
+                      disabled={isLoading}
+                      required
+                      className="mt-2"
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" disabled={isLoading}>
+                    {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Salvando...</> : "Alterar senha"}
+                  </Button>
+                </form>
+              )
+            ) : showRecovery ? (
+              recoverySent ? (
+                <div className="space-y-5 text-center">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+                    <Mail className="h-7 w-7" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-900">Confira seu e-mail</p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      Se o endereço estiver vinculado a uma conta comercial, você receberá um link válido por 30 minutos para criar uma nova senha.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setShowRecovery(false);
+                      setRecoverySent(false);
+                      resetCaptcha();
+                    }}
+                  >
+                    Voltar para login
+                  </Button>
+                </div>
+              ) : (
+                <form onSubmit={requestRecovery} className="space-y-4">
+                  <div>
+                    <Label htmlFor="recovery-email">E-mail cadastrado</Label>
+                    <Input
+                      id="recovery-email"
+                      type="email"
+                      autoComplete="email"
+                      value={recoveryEmail}
+                      onChange={e => setRecoveryEmail(e.target.value)}
+                      placeholder="voce@email.com"
+                      disabled={isLoading}
+                      required
+                      className="mt-2"
+                    />
+                  </div>
+                  {captchaBox}
+                  <div className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4 text-xs leading-5 text-blue-950">
+                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>A recuperação por e-mail é destinada às contas contratadas pelo site. O link expira em 30 minutos e só pode ser usado uma vez.</span>
+                  </div>
+                  <Button type="submit" className="w-full" disabled={isLoading}>
+                    {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enviando...</> : "Enviar link de recuperação"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setShowRecovery(false);
+                      resetCaptcha();
+                    }}
+                  >
+                    Voltar para login
+                  </Button>
+                </form>
+              )
             ) : (
               <>
                 <form onSubmit={handleLogin} className="space-y-4">
@@ -121,7 +343,7 @@ export default function Login() {
                       id="username"
                       autoComplete="username"
                       value={username}
-                      onChange={(e) => setUsername(e.target.value)}
+                      onChange={e => setUsername(e.target.value)}
                       required
                       disabled={isLoading}
                     />
@@ -134,7 +356,7 @@ export default function Login() {
                       type="password"
                       autoComplete="current-password"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={e => setPassword(e.target.value)}
                       required
                       disabled={isLoading}
                     />
@@ -144,38 +366,12 @@ export default function Login() {
                     <input
                       type="checkbox"
                       checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
+                      onChange={e => setRememberMe(e.target.checked)}
                     />
                     Lembrar-me neste dispositivo por 30 dias
                   </label>
 
-                  <div className="space-y-3 rounded-xl border bg-slate-50 p-4">
-                    <label className="flex items-center gap-3 text-sm font-medium">
-                      <input
-                        type="checkbox"
-                        checked={notRobot}
-                        onChange={e => setNotRobot(e.target.checked)}
-                        disabled={isLoading}
-                        className="h-5 w-5"
-                      />
-                      Não sou um robô
-                    </label>
-                    {notRobot ? (
-                      <div>
-                        <Label htmlFor="captcha">Verificação: {captcha.question}</Label>
-                        <Input
-                          id="captcha"
-                          inputMode="numeric"
-                          autoComplete="off"
-                          value={captchaAnswer}
-                          onChange={e => setCaptchaAnswer(e.target.value)}
-                          disabled={isLoading}
-                          className="mt-2"
-                          required
-                        />
-                      </div>
-                    ) : null}
-                  </div>
+                  {captchaBox}
 
                   <Button type="submit" className="w-full" disabled={isLoading}>
                     {isLoading ? "Entrando..." : "Entrar"}
@@ -186,24 +382,23 @@ export default function Login() {
                   type="button"
                   variant="link"
                   className="w-full text-blue-600"
-                  onClick={() => setShowRecovery(true)}
+                  onClick={() => {
+                    setShowRecovery(true);
+                    resetCaptcha();
+                  }}
                 >
                   Esqueci minha senha
                 </Button>
 
                 <div className="relative py-2">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-card px-2 text-muted-foreground">Novo cliente</span>
-                  </div>
+                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t" /></div>
+                  <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">Novo cliente</span></div>
                 </div>
 
                 <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 text-center">
                   <p className="text-sm font-semibold text-slate-800">Quer assinar o Note Note?</p>
                   <p className="mt-1 text-xs leading-5 text-slate-600">
-                    Escolha Basic ou Plus e crie seu cadastro comercial com e-mail, nome de usuário e senha.
+                    Escolha Basic ou Plus e crie seu cadastro comercial com seus dados de acesso.
                   </p>
                   <Link href="/planos">
                     <a className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-lg border border-blue-200 bg-white px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-100">
