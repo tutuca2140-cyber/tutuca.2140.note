@@ -1,50 +1,30 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import FinancialSummaryDonut from "@/components/FinancialSummaryDonut";
+import ThemeToggle from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCommercialContext } from "@/hooks/useCommercialContext";
 import { trpc } from "@/lib/trpc";
 import {
-  Activity,
-  LayoutDashboard,
-  Users,
-  CreditCard,
-  Wallet,
-  Car,
-  FileText,
-  Settings,
-  LogOut,
-  Database,
-  Shield,
-  Menu,
-  X,
-  ClipboardList,
-  CalendarDays,
-  Package,
-  UserRoundCog,
+  Activity, CalendarDays, Car, ChevronRight, ClipboardList, CreditCard, Database,
+  FileText, LayoutDashboard, LogOut, Menu, Package, Settings, Shield, UserRoundCog,
+  Users, Wallet, X,
 } from "lucide-react";
-import { Link, useLocation } from "wouter";
 import {
-  Children,
-  cloneElement,
-  isValidElement,
-  useEffect,
-  useState,
-  type ReactElement,
-  type ReactNode,
+  Children, cloneElement, isValidElement, useEffect, useState,
+  type ReactElement, type ReactNode,
 } from "react";
 import { toast } from "sonner";
-import ThemeToggle from "@/components/ThemeToggle";
-import FinancialSummaryDonut from "@/components/FinancialSummaryDonut";
+import { Link, useLocation } from "wouter";
 
-interface DashboardLayoutProps {
-  children: ReactNode;
-}
+interface DashboardLayoutProps { children: ReactNode }
+
+type NavItem = {
+  name: string;
+  href: string;
+  icon: typeof LayoutDashboard;
+  show?: boolean;
+};
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const { user, loading, logout } = useAuth({
@@ -52,40 +32,26 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     redirectPath: "/login",
   });
   const { data: commercialContext } = useCommercialContext();
-
   const [location, navigate] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const utils = trpc.useUtils();
-  const { data: availableDatabases = [] } = trpc.databases.list.useQuery(
-    undefined,
-    { enabled: Boolean(user) }
-  );
-  const { data: activeDatabase } = trpc.databases.getActive.useQuery(
-    undefined,
-    { enabled: Boolean(user) }
-  );
+  const { data: availableDatabases = [] } = trpc.databases.list.useQuery(undefined, { enabled: Boolean(user) });
+  const { data: activeDatabase } = trpc.databases.getActive.useQuery(undefined, { enabled: Boolean(user) });
   const setActiveDatabase = trpc.databases.setActive.useMutation();
 
   useEffect(() => {
-    if (user?.dashboardOnly && location !== "/dashboard") {
-      navigate("/dashboard", { replace: true });
-    }
+    if (user?.dashboardOnly && location !== "/dashboard") navigate("/dashboard", { replace: true });
   }, [location, navigate, user?.dashboardOnly]);
+
+  const isActive = (path: string) => location === path || location.startsWith(path + "/");
 
   const handleDatabaseChange = async (value: string) => {
     try {
       await setActiveDatabase.mutateAsync({ id: Number(value) });
-      await Promise.all([
-        utils.databases.getActive.invalidate(),
-        utils.invalidate(),
-      ]);
+      await Promise.all([utils.databases.getActive.invalidate(), utils.invalidate()]);
       toast.success("Banco de dados alterado.");
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível alterar o banco."
-      );
+      toast.error(error instanceof Error ? error.message : "Não foi possível alterar o banco.");
     }
   };
 
@@ -98,342 +64,137 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   };
 
-  const isActive = (path: string) => {
-    return location === path || location.startsWith(path + "/");
-  };
-
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   const isSuperAdmin = user?.role === "super_admin";
   const regularAccess = !user?.dashboardOnly;
   const commercialAccount = Boolean(commercialContext?.commercial);
-  const canManageOwnDatabases = Boolean(
-    commercialAccount && commercialContext?.permissions.canManageDatabases
-  );
-  const canManageTeam = Boolean(
-    commercialAccount && commercialContext?.permissions.canManageUsers
-  );
+  const canManageOwnDatabases = Boolean(commercialAccount && commercialContext?.permissions.canManageDatabases);
+  const canManageTeam = Boolean(commercialAccount && commercialContext?.permissions.canManageUsers);
 
-  const navigation = [
-    {
-      name: "Dashboard",
-      href: "/dashboard",
-      icon: LayoutDashboard,
-      show: true,
-    },
-    {
-      name: "Clientes",
-      href: "/clientes",
-      icon: Users,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Empréstimos",
-      href: "/emprestimos",
-      icon: CreditCard,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Veículos",
-      href: "/veiculos",
-      icon: Car,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Produtos",
-      href: "/produtos",
-      icon: Package,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Pagamentos",
-      href: "/pagamentos",
-      icon: Wallet,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Financiamentos",
-      href: "/financiamentos",
-      icon: ClipboardList,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Contas a receber",
-      href: "/contas-a-receber",
-      icon: CalendarDays,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Caixa",
-      href: "/caixa",
-      icon: Wallet,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Relatórios",
-      href: "/relatorios",
-      icon: FileText,
-      show: user?.canGenerateReports && regularAccess,
-    },
-    {
-      name: "Agentes",
-      href: "/agentes",
-      icon: Users,
-      show: user?.canView && regularAccess,
-    },
-    {
-      name: "Meu Banco",
-      href: "/meu-banco",
-      icon: Database,
-      show: canManageOwnDatabases && regularAccess,
-    },
-    {
-      name: "Equipe",
-      href: "/equipe",
-      icon: UserRoundCog,
-      show: canManageTeam && regularAccess,
-    },
+  const navigation: NavItem[] = [
+    { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, show: true },
+    { name: "Clientes", href: "/clientes", icon: Users, show: Boolean(user?.canView && regularAccess) },
+    { name: "Empréstimos", href: "/emprestimos", icon: CreditCard, show: Boolean(user?.canView && regularAccess) },
+    { name: "Veículos", href: "/veiculos", icon: Car, show: Boolean(user?.canView && regularAccess) },
+    { name: "Produtos", href: "/produtos", icon: Package, show: Boolean(user?.canView && regularAccess) },
+    { name: "Pagamentos", href: "/pagamentos", icon: Wallet, show: Boolean(user?.canView && regularAccess) },
+    { name: "Financiamentos", href: "/financiamentos", icon: ClipboardList, show: Boolean(user?.canView && regularAccess) },
+    { name: "Contas a receber", href: "/contas-a-receber", icon: CalendarDays, show: Boolean(user?.canView && regularAccess) },
+    { name: "Caixa", href: "/caixa", icon: Wallet, show: Boolean(user?.canView && regularAccess) },
+    { name: "Relatórios", href: "/relatorios", icon: FileText, show: Boolean(user?.canGenerateReports && regularAccess) },
+    { name: "Agentes", href: "/agentes", icon: Users, show: Boolean(user?.canView && regularAccess) },
+    { name: "Meu Banco", href: "/meu-banco", icon: Database, show: Boolean(canManageOwnDatabases && regularAccess) },
+    { name: "Equipe", href: "/equipe", icon: UserRoundCog, show: Boolean(canManageTeam && regularAccess) },
   ];
 
-  const adminNavigation = [
-    {
-      name: "Painel de Controle",
-      href: "/admin/controle",
-      icon: Activity,
-      show: isSuperAdmin,
-    },
-    {
-      name: "Assinaturas",
-      href: "/admin/assinaturas",
-      icon: CreditCard,
-      show: isSuperAdmin,
-    },
-    {
-      name: "Usuários",
-      href: "/admin/usuarios",
-      icon: Shield,
-      show: isSuperAdmin,
-    },
-    {
-      name: "Bancos de Dados",
-      href: "/admin/bancos",
-      icon: Database,
-      show: isAdmin,
-    },
-    {
-      name: "Auditoria",
-      href: "/admin/auditoria",
-      icon: FileText,
-      show: isAdmin,
-    },
-    {
-      name: "Configurações",
-      href: "/admin/configuracoes",
-      icon: Settings,
-      show: user?.canAccessSettings,
-    },
+  const adminNavigation: NavItem[] = [
+    { name: "Painel de Controle", href: "/admin/controle", icon: Activity, show: isSuperAdmin },
+    { name: "Assinaturas", href: "/admin/assinaturas", icon: CreditCard, show: isSuperAdmin },
+    { name: "Usuários", href: "/admin/usuarios", icon: Shield, show: isSuperAdmin },
+    { name: "Bancos de Dados", href: "/admin/bancos", icon: Database, show: Boolean(isAdmin) },
+    { name: "Auditoria", href: "/admin/auditoria", icon: FileText, show: Boolean(isAdmin) },
+    { name: "Configurações", href: "/admin/configuracoes", icon: Settings, show: Boolean(user?.canAccessSettings) },
   ];
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto" />
-          <p className="mt-4 text-muted-foreground">Carregando...</p>
-        </div>
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center"><div className="text-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto" /><p className="mt-4 text-muted-foreground">Carregando...</p></div></div>;
   }
-
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   let renderedChildren = children;
   if (location === "/dashboard" && isValidElement(children)) {
-    const dashboardRoot = children as ReactElement<{ children?: ReactNode }>;
-    const dashboardSections = Children.toArray(dashboardRoot.props.children);
-    renderedChildren = cloneElement(
-      dashboardRoot,
-      undefined,
-      dashboardSections.length
-        ? [
-            dashboardSections[0],
-            <FinancialSummaryDonut key="financial-summary-donut" />,
-            ...dashboardSections.slice(1),
-          ]
-        : [<FinancialSummaryDonut key="financial-summary-donut" />]
-    );
+    const root = children as ReactElement<{ children?: ReactNode }>;
+    const sections = Children.toArray(root.props.children);
+    renderedChildren = cloneElement(root, undefined, sections.length
+      ? [sections[0], <FinancialSummaryDonut key="financial-summary-donut" />, ...sections.slice(1)]
+      : [<FinancialSummaryDonut key="financial-summary-donut" />]);
   }
+
+  const renderNavItem = (item: NavItem) => {
+    const Icon = item.icon;
+    const active = isActive(item.href);
+    return (
+      <Link key={item.name} href={item.href}>
+        <a
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+          onClick={() => setSidebarOpen(false)}
+        >
+          <Icon className="h-5 w-5" />{item.name}
+        </a>
+      </Link>
+    );
+  };
+
+  const accountLabel = user.role === "super_admin"
+    ? "Super Administrador"
+    : commercialContext?.commercial
+      ? commercialContext.isOwner
+        ? `Contratante ${commercialContext.plan === "plus" ? "Plus" : "Basic"}`
+        : "Usuário da conta"
+      : user.role;
 
   return (
     <div className="min-h-screen bg-muted/30">
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur border-b border-border px-4 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-          >
-            {sidebarOpen ? (
-              <X className="h-5 w-5" />
-            ) : (
-              <Menu className="h-5 w-5" />
-            )}
+          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)}>
+            {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
-          <img
-            src="/brand/note-note-logo-official.png"
-            alt="Note Note"
-            className="h-10 w-32 object-contain object-left"
-          />
+          <img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-10 w-32 object-contain object-left" />
         </div>
       </div>
 
-      <aside
-        className={`
-          fixed top-0 left-0 z-40 h-screen w-64 bg-background border-r border-border
-          transition-transform duration-300 ease-in-out
-          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
-          lg:translate-x-0
-        `}
-      >
+      <aside className={`fixed top-0 left-0 z-40 h-screen w-64 bg-background border-r border-border transition-transform duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}>
         <div className="flex flex-col h-full">
           <div className="px-4 py-4 border-b border-border">
-            <img
-              src="/brand/note-note-logo-official.png"
-              alt="Note Note"
-              className="h-auto w-full object-contain"
-            />
-            <p className="text-xs text-muted-foreground mt-1 tracking-wide">
-              Sistema de Gestão
-            </p>
+            <img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-auto w-full object-contain" />
+            <p className="text-xs text-muted-foreground mt-1 tracking-wide">Sistema de Gestão</p>
           </div>
 
           <div className="p-4 border-b border-border bg-muted/30">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="text-primary font-semibold">
-                  {user.name?.[0]?.toUpperCase() ||
-                    user.username?.[0]?.toUpperCase() ||
-                    user.email?.[0]?.toUpperCase() ||
-                    "U"}
-                </span>
-              </div>
+            <Link href="/perfil">
+              <a
+                className={`group flex items-center gap-3 rounded-xl border p-2.5 transition-colors ${isActive("/perfil") ? "border-primary bg-primary/10" : "border-transparent hover:border-border hover:bg-background"}`}
+                onClick={() => setSidebarOpen(false)}
+                aria-label="Abrir meu perfil"
+              >
+                <div className="w-10 h-10 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
+                  <span className="text-primary font-semibold">{user.name?.[0]?.toUpperCase() || user.username?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "U"}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{user.name || user.username || user.email}</p>
+                  <p className="text-xs text-muted-foreground capitalize truncate">{accountLabel}</p>
+                  <p className="mt-0.5 text-[11px] font-semibold text-primary">Meu perfil</p>
+                </div>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+              </a>
+            </Link>
 
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">
-                  {user.name || user.username || user.email}
-                </p>
-                <p className="text-xs text-muted-foreground capitalize">
-                  {user.role === "super_admin"
-                    ? "Super Administrador"
-                    : commercialContext?.commercial
-                      ? commercialContext.isOwner
-                        ? `Contratante ${commercialContext.plan === "plus" ? "Plus" : "Basic"}`
-                        : "Usuário da conta"
-                      : user.role}
-                </p>
-              </div>
-            </div>
             <ThemeToggle />
             {availableDatabases.length > 0 && (
               <div className="mt-3">
-                <p className="mb-1.5 text-xs font-medium text-muted-foreground">
-                  Banco em operação
-                </p>
-                <Select
-                  value={activeDatabase ? String(activeDatabase.id) : undefined}
-                  onValueChange={handleDatabaseChange}
-                  disabled={setActiveDatabase.isPending}
-                >
-                  <SelectTrigger className="bg-background">
-                    <SelectValue placeholder="Selecionar banco" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableDatabases.map(database => (
-                      <SelectItem key={database.id} value={String(database.id)}>
-                        {database.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">Banco em operação</p>
+                <Select value={activeDatabase ? String(activeDatabase.id) : undefined} onValueChange={handleDatabaseChange} disabled={setActiveDatabase.isPending}>
+                  <SelectTrigger className="bg-background"><SelectValue placeholder="Selecionar banco" /></SelectTrigger>
+                  <SelectContent>{availableDatabases.map(database => <SelectItem key={database.id} value={String(database.id)}>{database.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             )}
           </div>
 
           <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-            {navigation
-              .filter(item => item.show)
-              .map(item => {
-                const Icon = item.icon;
-                const active = isActive(item.href);
-
-                return (
-                  <Link key={item.name} href={item.href}>
-                    <a
-                      className={`
-                        flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-                        transition-colors
-                        ${
-                          active
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                        }
-                      `}
-                      onClick={() => setSidebarOpen(false)}
-                    >
-                      <Icon className="h-5 w-5" />
-                      {item.name}
-                    </a>
-                  </Link>
-                );
-              })}
-
+            {navigation.filter(item => item.show).map(renderNavItem)}
             {(isAdmin || user?.canAccessSettings) && (
               <>
-                <div className="pt-4 pb-2">
-                  <p className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Administração
-                  </p>
-                </div>
-
-                {adminNavigation
-                  .filter(item => item.show)
-                  .map(item => {
-                    const Icon = item.icon;
-                    const active = isActive(item.href);
-
-                    return (
-                      <Link key={item.name} href={item.href}>
-                        <a
-                          className={`
-                            flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-                            transition-colors
-                            ${
-                              active
-                                ? "bg-primary text-primary-foreground"
-                                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                            }
-                          `}
-                          onClick={() => setSidebarOpen(false)}
-                        >
-                          <Icon className="h-5 w-5" />
-                          {item.name}
-                        </a>
-                      </Link>
-                    );
-                  })}
+                <div className="pt-4 pb-2"><p className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Administração</p></div>
+                {adminNavigation.filter(item => item.show).map(renderNavItem)}
               </>
             )}
           </nav>
 
           <div className="p-4 border-t border-border">
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={handleLogout}
-            >
-              <LogOut className="h-5 w-5 mr-3" />
-              Sair
+            <Button variant="ghost" className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10" onClick={handleLogout}>
+              <LogOut className="h-5 w-5 mr-3" />Sair
             </Button>
           </div>
         </div>
@@ -445,12 +206,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </main>
       </div>
 
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-30 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+      {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />}
     </div>
   );
 }
