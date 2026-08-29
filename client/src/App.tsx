@@ -5,7 +5,7 @@ import { Route, Switch } from "wouter";
 import CommercialPaymentGate from "./components/CommercialPaymentGate";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SiteAccessTracker from "./components/SiteAccessTracker";
-import SystemGuideAssistant from "./components/SystemGuideAssistant";
+import SystemGuideAssistant from "./components/SystemGuideAssistantV2";
 import { ThemeProvider } from "./contexts/ThemeContext";
 
 const Home = lazy(() => import("./pages/Home"));
