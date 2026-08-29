@@ -25,10 +25,28 @@ function readSelectedPlan(): PlanId | null {
   return null;
 }
 
+function formatWhatsapp(value: string) {
+  const digits = value.replace(/\D/g, "").replace(/^55(?=\d{11}$)/, "").slice(0, 11);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
+function validFullName(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).length >= 2;
+}
+
+function validWhatsapp(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits.length === 11 && digits[2] === "9" && digits[0] !== "0";
+}
+
 export default function Cadastro() {
   const plan = useMemo(readSelectedPlan, []);
+  const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -62,6 +80,8 @@ export default function Cadastro() {
   };
   const passwordValid = Object.values(passwordRules).every(Boolean);
   const passwordsMatch = password.length > 0 && password === confirmPassword;
+  const fullNameValid = validFullName(name);
+  const whatsappValid = validWhatsapp(whatsapp);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -69,6 +89,14 @@ export default function Cadastro() {
 
     if (!plan) {
       setError("Escolha um plano antes de criar o cadastro.");
+      return;
+    }
+    if (!fullNameValid) {
+      setError("Informe seu nome e sobrenome completos.");
+      return;
+    }
+    if (!whatsappValid) {
+      setError("Informe um WhatsApp brasileiro válido com DDD e número iniciado por 9.");
       return;
     }
     if (!passwordValid) {
@@ -90,8 +118,10 @@ export default function Cadastro() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username,
-          email,
+          name: name.trim(),
+          username: username.trim(),
+          email: email.trim(),
+          whatsapp,
           password,
           plan,
           captchaToken: captcha.token,
@@ -126,14 +156,14 @@ export default function Cadastro() {
               </div>
               <h1 className="mt-5 text-2xl font-black text-slate-950">Cadastro realizado</h1>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                Sua conta comercial foi criada para o plano <strong>{plans[plan].name}</strong> — {plans[plan].price} — com acesso a <strong>{plans[plan].databaseAccess}</strong>.
+                <strong>{name.trim()}</strong>, sua conta foi criada para o plano <strong>{plans[plan].name}</strong> — {plans[plan].price} — com acesso a <strong>{plans[plan].databaseAccess}</strong>.
               </p>
               <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4 text-left text-sm text-blue-950">
-                O acesso ao sistema permanece pendente até a confirmação da assinatura. Isso evita que o cadastro comercial libere o Note Note gratuitamente antes do pagamento.
+                O acesso ao sistema permanece pendente até a confirmação da assinatura. Depois da aprovação, os bancos do plano serão preparados no seu primeiro login.
               </div>
-              <Link href="/planos">
+              <Link href="/login">
                 <a className="mt-6 inline-flex h-11 items-center justify-center rounded-xl border border-blue-200 px-5 font-bold text-blue-700 transition hover:bg-blue-50">
-                  Voltar aos planos
+                  Ir para o login
                 </a>
               </Link>
             </CardContent>
@@ -160,7 +190,7 @@ export default function Cadastro() {
           <CardHeader>
             <CardTitle className="text-2xl">Criar cadastro para assinar</CardTitle>
             <CardDescription>
-              Este cadastro é exclusivo para novos clientes que vão contratar um plano do Note Note.
+              Informe seus dados. O nome de usuário e a senha abaixo serão usados para entrar no Note Note.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -185,6 +215,24 @@ export default function Cadastro() {
 
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
+                <Label htmlFor="signup-name">Nome e Sobrenome</Label>
+                <Input
+                  id="signup-name"
+                  value={name}
+                  onChange={event => setName(event.target.value)}
+                  autoComplete="name"
+                  placeholder="ex.: João da Silva"
+                  maxLength={200}
+                  required
+                  disabled={loading}
+                  className="mt-2"
+                />
+                {name && !fullNameValid ? (
+                  <p className="mt-1 text-xs text-rose-600">Informe pelo menos nome e sobrenome.</p>
+                ) : null}
+              </div>
+
+              <div>
                 <Label htmlFor="signup-username">Nome de usuário</Label>
                 <Input
                   id="signup-username"
@@ -198,7 +246,7 @@ export default function Cadastro() {
                   disabled={loading}
                   className="mt-2"
                 />
-                <p className="mt-1 text-xs text-muted-foreground">De 3 a 40 caracteres. Letras, números, ponto, hífen ou _.</p>
+                <p className="mt-1 text-xs text-muted-foreground">Este será o usuário usado para entrar no sistema. De 3 a 40 caracteres: letras, números, ponto, hífen ou _.</p>
               </div>
 
               <div>
@@ -214,6 +262,26 @@ export default function Cadastro() {
                   disabled={loading}
                   className="mt-2"
                 />
+                <p className="mt-1 text-xs text-muted-foreground">Este e-mail também será usado para recuperação de senha.</p>
+              </div>
+
+              <div>
+                <Label htmlFor="signup-whatsapp">WhatsApp</Label>
+                <Input
+                  id="signup-whatsapp"
+                  type="tel"
+                  inputMode="tel"
+                  value={whatsapp}
+                  onChange={event => setWhatsapp(formatWhatsapp(event.target.value))}
+                  autoComplete="tel"
+                  placeholder="(24) 99999-9999"
+                  required
+                  disabled={loading}
+                  className="mt-2"
+                />
+                <p className={`mt-1 text-xs ${whatsapp && !whatsappValid ? "text-rose-600" : "text-muted-foreground"}`}>
+                  Use DDD + celular brasileiro iniciado por 9. Ex.: (24) 99999-9999.
+                </p>
               </div>
 
               <div>
@@ -295,7 +363,7 @@ export default function Cadastro() {
               <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-xs leading-5 text-slate-600">
                 <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
                 <p>
-                  Este fluxo não altera as regras dos usuários gratuitos ou de teste criados pelo Super Admin. Ele cria somente contas comerciais vinculadas a uma futura assinatura e respeita o limite de bancos do plano escolhido.
+                  Este cadastro é exclusivo para clientes de assinatura. Usuários gratuitos ou de teste criados pelo Super Admin continuam separados deste fluxo.
                 </p>
               </div>
 
