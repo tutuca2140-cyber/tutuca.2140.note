@@ -22,7 +22,19 @@ export function ensureAuthUserColumns() {
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canManageUsers" boolean DEFAULT false NOT NULL`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canManageDatabases" boolean DEFAULT false NOT NULL`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canDeleteCashFlow" boolean DEFAULT false NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp varchar(20)`;
     await sql`CREATE INDEX IF NOT EXISTS users_account_owner_idx ON users ("accountOwnerId")`;
+    await sql`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id serial PRIMARY KEY,
+        "userId" integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token varchar(128) NOT NULL UNIQUE,
+        "expiresAt" timestamptz NOT NULL,
+        "usedAt" timestamptz,
+        "createdAt" timestamptz NOT NULL DEFAULT NOW()
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS password_reset_tokens_user_idx ON password_reset_tokens ("userId")`;
   })().catch((error) => {
     authColumnsPromise = null;
     throw error;
