@@ -7,8 +7,8 @@ import { useCommercialContext } from "@/hooks/useCommercialContext";
 import { trpc } from "@/lib/trpc";
 import {
   Activity, CalendarDays, Car, ChevronRight, ClipboardList, CreditCard, Database,
-  FileText, LayoutDashboard, LogOut, Menu, Package, Settings, Shield, UserRoundCog,
-  Users, Wallet, X,
+  FileText, LayoutDashboard, LogOut, Menu, MoreHorizontal, Package, Settings, Shield,
+  UserRound, UserRoundCog, Users, Wallet, X,
 } from "lucide-react";
 import {
   Children, cloneElement, isValidElement, useEffect, useState,
@@ -42,6 +42,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   useEffect(() => {
     if (user?.dashboardOnly && location !== "/dashboard") navigate("/dashboard", { replace: true });
   }, [location, navigate, user?.dashboardOnly]);
+
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location]);
 
   const isActive = (path: string) => location === path || location.startsWith(path + "/");
 
@@ -116,10 +120,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     return (
       <Link key={item.name} href={item.href}>
         <a
-          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-[0.98] ${active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
           onClick={() => setSidebarOpen(false)}
         >
-          <Icon className="h-5 w-5" />{item.name}
+          <Icon className="h-5 w-5 shrink-0" />{item.name}
         </a>
       </Link>
     );
@@ -133,67 +137,88 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         : "Usuário da conta"
       : user.role;
 
-  return (
-    <div className="min-h-screen bg-muted/30">
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur border-b border-border px-4 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)}>
-            {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </Button>
-          <img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-10 w-32 object-contain object-left" />
-        </div>
-      </div>
+  const visibleNavigation = navigation.filter(item => item.show);
+  const mobileQuickHrefs = ["/dashboard", "/clientes", "/pagamentos", "/caixa"];
+  const mobileQuickNavigation = mobileQuickHrefs
+    .map(href => visibleNavigation.find(item => item.href === href))
+    .filter((item): item is NavItem => Boolean(item));
 
-      <aside className={`fixed top-0 left-0 z-40 h-screen w-64 bg-background border-r border-border transition-transform duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}>
-        <div className="flex flex-col h-full">
-          <div className="px-4 py-4 border-b border-border">
+  return (
+    <div className="app-shell min-h-screen bg-muted/30">
+      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 h-14 border-b border-border/70 bg-background/90 backdrop-blur-xl supports-[backdrop-filter]:bg-background/75">
+        <div className="flex h-full items-center justify-between px-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 rounded-xl" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Abrir menu">
+              {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </Button>
+            <img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-8 w-24 object-contain object-left" />
+            {activeDatabase && (
+              <span className="hidden min-[390px]:block max-w-28 truncate rounded-full bg-primary/10 px-2 py-1 text-[10px] font-bold text-primary">
+                {activeDatabase.name}
+              </span>
+            )}
+          </div>
+          <Link href="/perfil">
+            <a className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary ring-1 ring-primary/10" aria-label="Meu perfil">
+              {user.name?.[0]?.toUpperCase() || user.username?.[0]?.toUpperCase() || <UserRound className="h-4 w-4" />}
+            </a>
+          </Link>
+        </div>
+      </header>
+
+      <aside className={`fixed top-0 left-0 z-[60] h-[100dvh] w-[min(86vw,320px)] bg-background border-r border-border shadow-2xl transition-transform duration-200 ease-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:z-40 lg:h-screen lg:w-64 lg:translate-x-0 lg:shadow-none`}>
+        <div className="flex h-full flex-col">
+          <div className="hidden px-4 py-4 border-b border-border lg:block">
             <img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-auto w-full object-contain" />
             <p className="text-xs text-muted-foreground mt-1 tracking-wide">Sistema de Gestão</p>
           </div>
 
-          <div className="p-4 border-b border-border bg-muted/30">
+          <div className="border-b border-border bg-muted/20 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:p-4">
+            <div className="mb-2 flex items-center justify-between lg:hidden">
+              <img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-8 w-24 object-contain object-left" />
+              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X className="h-5 w-5" /></Button>
+            </div>
             <Link href="/perfil">
               <a
                 className={`group flex items-center gap-3 rounded-xl border p-2.5 transition-colors ${isActive("/perfil") ? "border-primary bg-primary/10" : "border-transparent hover:border-border hover:bg-background"}`}
                 onClick={() => setSidebarOpen(false)}
                 aria-label="Abrir meu perfil"
               >
-                <div className="w-10 h-10 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
+                <div className="w-9 h-9 lg:w-10 lg:h-10 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
                   <span className="text-primary font-semibold">{user.name?.[0]?.toUpperCase() || user.username?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "U"}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{user.name || user.username || user.email}</p>
-                  <p className="text-xs text-muted-foreground capitalize truncate">{accountLabel}</p>
-                  <p className="mt-0.5 text-[11px] font-semibold text-primary">Meu perfil</p>
+                  <p className="text-sm font-semibold truncate">{user.name || user.username || user.email}</p>
+                  <p className="text-[11px] text-muted-foreground capitalize truncate">{accountLabel}</p>
                 </div>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
               </a>
             </Link>
 
-            <ThemeToggle />
+            <div className="mt-2 lg:mt-3"><ThemeToggle /></div>
             {availableDatabases.length > 0 && (
-              <div className="mt-3">
-                <p className="mb-1.5 text-xs font-medium text-muted-foreground">Banco em operação</p>
+              <div className="mt-2 lg:mt-3">
+                <p className="mb-1 text-[11px] font-medium text-muted-foreground">Banco em operação</p>
                 <Select value={activeDatabase ? String(activeDatabase.id) : undefined} onValueChange={handleDatabaseChange} disabled={setActiveDatabase.isPending}>
-                  <SelectTrigger className="bg-background"><SelectValue placeholder="Selecionar banco" /></SelectTrigger>
+                  <SelectTrigger className="h-9 bg-background text-xs"><SelectValue placeholder="Selecionar banco" /></SelectTrigger>
                   <SelectContent>{availableDatabases.map(database => <SelectItem key={database.id} value={String(database.id)}>{database.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             )}
           </div>
 
-          <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-            {navigation.filter(item => item.show).map(renderNavItem)}
+          <nav className="flex-1 overflow-y-auto overscroll-contain px-3 py-3 space-y-0.5 lg:py-4 lg:space-y-1">
+            {visibleNavigation.map(renderNavItem)}
             {(isAdmin || user?.canAccessSettings) && (
               <>
-                <div className="pt-4 pb-2"><p className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Administração</p></div>
+                <div className="pt-4 pb-2"><p className="px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Administração</p></div>
                 {adminNavigation.filter(item => item.show).map(renderNavItem)}
               </>
             )}
           </nav>
 
-          <div className="p-4 border-t border-border">
-            <Button variant="ghost" className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10" onClick={handleLogout}>
+          <div className="border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
+            <Button variant="ghost" className="h-10 w-full justify-start rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10" onClick={handleLogout}>
               <LogOut className="h-5 w-5 mr-3" />Sair
             </Button>
           </div>
@@ -201,12 +226,34 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       </aside>
 
       <div className="lg:pl-64">
-        <main className="pt-20 px-4 pb-8 sm:px-6 lg:pt-0 lg:px-8 lg:py-8">
+        <main className="app-mobile-content px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] pt-[4.25rem] sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto w-full max-w-[1600px]">{renderedChildren}</div>
         </main>
       </div>
 
-      {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      <nav className="mobile-app-nav lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-border/70 bg-background/92 px-2 pt-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-background/80">
+        <div className="mx-auto grid max-w-md grid-cols-5 items-end gap-1 pb-[max(0.35rem,env(safe-area-inset-bottom))]">
+          {mobileQuickNavigation.map(item => {
+            const Icon = item.icon;
+            const active = isActive(item.href);
+            return (
+              <Link key={item.href} href={item.href}>
+                <a className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[10px] font-semibold transition-all active:scale-95 ${active ? "text-primary" : "text-muted-foreground"}`}>
+                  <span className={`flex h-7 w-10 items-center justify-center rounded-full transition-colors ${active ? "bg-primary/12" : ""}`}><Icon className="h-[19px] w-[19px]" /></span>
+                  <span className="max-w-full truncate">{item.name === "Pagamentos" ? "Pagamentos" : item.name}</span>
+                </a>
+              </Link>
+            );
+          })}
+          {Array.from({ length: Math.max(0, 4 - mobileQuickNavigation.length) }).map((_, index) => <span key={`empty-${index}`} />)}
+          <button type="button" onClick={() => setSidebarOpen(true)} className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[10px] font-semibold transition-all active:scale-95 ${sidebarOpen ? "text-primary" : "text-muted-foreground"}`}>
+            <span className={`flex h-7 w-10 items-center justify-center rounded-full ${sidebarOpen ? "bg-primary/12" : ""}`}><MoreHorizontal className="h-5 w-5" /></span>
+            <span>Mais</span>
+          </button>
+        </div>
+      </nav>
+
+      {sidebarOpen && <div className="fixed inset-0 z-[55] bg-black/45 backdrop-blur-[2px] lg:hidden" onClick={() => setSidebarOpen(false)} />}
     </div>
   );
 }
