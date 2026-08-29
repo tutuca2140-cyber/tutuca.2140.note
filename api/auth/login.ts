@@ -1,4 +1,6 @@
 import bcrypt from "bcrypt";
+import { Client, neonConfig } from "@neondatabase/serverless";
+import WebSocket from "ws";
 import {
   getSql,
   ensureAuthUserColumns,
@@ -8,6 +10,259 @@ import {
   setSessionCookie,
 } from "./_shared.js";
 import { verifyLoginCaptcha } from "../../shared/login-captcha.js";
+
+neonConfig.webSocketConstructor = WebSocket;
+
+const PLAN_CONFIG = {
+  basic: { label: "Basic", limit: 1 },
+  plus: { label: "Plus", limit: 3 },
+} as const;
+
+type PlanId = keyof typeof PLAN_CONFIG;
+
+function isPlan(value: unknown): value is PlanId {
+  return value === "basic" || value === "plus";
+}
+
+function databaseName(username: string, position: number) {
+  return position === 1
+    ? `Principal - ${username}`
+    : `Principal - ${username} #${position}`;
+}
+
+async function provisionCommercialDatabasesOnFirstLogin(userId: number) {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw Object.assign(new Error("Banco principal não configurado."), {
+      statusCode: 503,
+    });
+  }
+
+  const sql = getSql();
+  await sql`
+    ALTER TABLE commercial_subscriptions
+    ADD COLUMN IF NOT EXISTS "provisionedAt" timestamptz
+  `;
+
+  const client = new Client(databaseUrl);
+  let inTransaction = false;
+
+  try {
+    await client.connect();
+    await client.query("BEGIN");
+    inTransaction = true;
+
+    const targetResult = await client.query(
+      `SELECT
+         u.id,
+         u.username,
+         u.name,
+         u."loginMethod",
+         cs.plan,
+         cs.status,
+         cs."provisionedAt"
+       FROM users u
+       JOIN commercial_subscriptions cs ON cs."userId" = u.id
+       WHERE u.id = $1
+       FOR UPDATE OF u, cs`,
+      [userId]
+    );
+    const target = targetResult.rows[0] as any;
+
+    if (
+      !target ||
+      target.loginMethod !== "commercial_signup" ||
+      !["active", "paid"].includes(String(target.status))
+    ) {
+      await client.query("COMMIT");
+      inTransaction = false;
+      return { provisioned: false, reason: "not_applicable" };
+    }
+
+    if (target.provisionedAt) {
+      await client.query("COMMIT");
+      inTransaction = false;
+      return { provisioned: false, reason: "already_provisioned" };
+    }
+
+    const planValue = String(target.plan || "");
+    if (!isPlan(planValue)) {
+      throw Object.assign(
+        new Error("O plano comercial desta conta é inválido. Contate o Super Admin."),
+        { statusCode: 409 }
+      );
+    }
+
+    const plan: PlanId = planValue;
+    const config = PLAN_CONFIG[plan];
+    const username = String(
+      target.username || target.name || `usuario-${target.id}`
+    ).trim();
+
+    const existingAccess = await client.query(
+      `SELECT uda.id, uda."databaseId", uda."isActive", d.name, d."createdBy"
+         FROM user_database_access uda
+         JOIN databases d ON d.id = uda."databaseId"
+        WHERE uda."userId" = $1
+        ORDER BY uda."createdAt", uda.id`,
+      [userId]
+    );
+
+    if (existingAccess.rows.length > config.limit) {
+      throw Object.assign(
+        new Error(
+          `Esta conta possui mais bancos do que o plano ${config.label} permite. Contate o Super Admin.`
+        ),
+        { statusCode: 409 }
+      );
+    }
+
+    const createdDatabases: Array<{ id: number; name: string }> = [];
+    let hasActiveDatabase = existingAccess.rows.some((row: any) => row.isActive);
+
+    for (
+      let position = existingAccess.rows.length + 1;
+      position <= config.limit;
+      position++
+    ) {
+      const name = databaseName(username, position);
+      const collision = await client.query(
+        `SELECT id, name, "createdBy"
+           FROM databases
+          WHERE lower(name) = lower($1)
+          LIMIT 1`,
+        [name]
+      );
+
+      let databaseId: number;
+      let databaseDisplayName = name;
+
+      if (collision.rows[0]) {
+        const existingDatabase = collision.rows[0] as any;
+        if (Number(existingDatabase.createdBy) !== Number(userId)) {
+          throw Object.assign(
+            new Error(
+              `Já existe um banco chamado “${name}”. Contate o Super Admin para concluir a preparação da conta.`
+            ),
+            { statusCode: 409 }
+          );
+        }
+        databaseId = Number(existingDatabase.id);
+        databaseDisplayName = String(existingDatabase.name || name);
+      } else {
+        const created = await client.query(
+          `INSERT INTO databases
+            (name, description, type, "isActive", "createdBy", "createdAt", "updatedAt")
+           VALUES ($1, $2, 'novo', false, $3, NOW(), NOW())
+           RETURNING id, name`,
+          [
+            name,
+            `Banco criado automaticamente no primeiro login pelo plano ${config.label} do usuário ${username}.`,
+            userId,
+          ]
+        );
+        const database = created.rows[0] as any;
+        databaseId = Number(database.id);
+        databaseDisplayName = String(database.name);
+        createdDatabases.push({ id: databaseId, name: databaseDisplayName });
+      }
+
+      const alreadyLinked = await client.query(
+        `SELECT id FROM user_database_access
+          WHERE "userId" = $1 AND "databaseId" = $2
+          LIMIT 1`,
+        [userId, databaseId]
+      );
+
+      if (!alreadyLinked.rows[0]) {
+        const shouldBeActive = !hasActiveDatabase;
+        await client.query(
+          `INSERT INTO user_database_access
+            ("userId", "databaseId", "isActive", "createdAt")
+           VALUES ($1, $2, $3, NOW())`,
+          [userId, databaseId, shouldBeActive]
+        );
+        if (shouldBeActive) hasActiveDatabase = true;
+      }
+    }
+
+    const allAccess = await client.query(
+      `SELECT uda.id, uda."databaseId", uda."isActive", d.name
+         FROM user_database_access uda
+         JOIN databases d ON d.id = uda."databaseId"
+        WHERE uda."userId" = $1
+        ORDER BY uda."createdAt", uda.id`,
+      [userId]
+    );
+
+    if (allAccess.rows.length !== config.limit) {
+      throw Object.assign(
+        new Error(
+          `Não foi possível preparar os ${config.limit} bancos previstos pelo plano ${config.label}.`
+        ),
+        { statusCode: 500 }
+      );
+    }
+
+    if (!allAccess.rows.some((row: any) => row.isActive)) {
+      await client.query(
+        `UPDATE user_database_access
+            SET "isActive" = true
+          WHERE id = $1`,
+        [allAccess.rows[0].id]
+      );
+    }
+
+    await client.query(
+      `UPDATE commercial_subscriptions
+          SET "provisionedAt" = NOW(), "updatedAt" = NOW()
+        WHERE "userId" = $1`,
+      [userId]
+    );
+
+    await client.query(
+      `INSERT INTO "auditLogs"
+        ("userId", username, action, entity, "entityId", details, status, "createdAt")
+       VALUES ($1, $2, 'provision_commercial_databases_first_login', 'databases', $3, $4, 'success', NOW())`,
+      [
+        userId,
+        username,
+        userId,
+        JSON.stringify({
+          plan,
+          databaseLimit: config.limit,
+          createdDatabases,
+          databaseNames: allAccess.rows.map((row: any) => row.name),
+        }),
+      ]
+    );
+
+    await client.query("COMMIT");
+    inTransaction = false;
+
+    return {
+      provisioned: true,
+      plan,
+      databaseLimit: config.limit,
+      createdDatabases,
+    };
+  } catch (error) {
+    if (inTransaction) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // mantém o erro original
+      }
+    }
+    throw error;
+  } finally {
+    try {
+      await client.end();
+    } catch {
+      // conexão já encerrada
+    }
+  }
+}
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
@@ -29,7 +284,10 @@ export default async function handler(req: any, res: any) {
       });
     }
     if (!verifyLoginCaptcha(captchaToken, captchaAnswer)) {
-      return sendJson(res, 400, { success: false, message: "Confirme corretamente que você não é um robô." });
+      return sendJson(res, 400, {
+        success: false,
+        message: "Confirme corretamente que você não é um robô.",
+      });
     }
 
     await ensureAuthUserColumns();
@@ -43,6 +301,7 @@ export default async function handler(req: any, res: any) {
         name,
         email,
         role,
+        "loginMethod",
         "canView",
         "canInsert",
         "canEdit",
@@ -68,17 +327,32 @@ export default async function handler(req: any, res: any) {
 
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) {
-      if (String(user.username).toLowerCase() === "draco" || user.role === "super_admin") {
-        return sendJson(res, 401, { success: false, message: "Usuário ou senha inválidos." });
+      if (
+        String(user.username).toLowerCase() === "draco" ||
+        user.role === "super_admin"
+      ) {
+        return sendJson(res, 401, {
+          success: false,
+          message: "Usuário ou senha inválidos.",
+        });
       }
       const attempts = Number(user.failedLoginAttempts || 0) + 1;
-      await sql`UPDATE users SET "failedLoginAttempts" = ${attempts}, "isActive" = ${attempts < 2}, "updatedAt" = NOW() WHERE id = ${user.id}`;
-      if (attempts >= 2) await sql`DELETE FROM local_sessions WHERE "userId" = ${user.id}`;
+      await sql`
+        UPDATE users
+        SET "failedLoginAttempts" = ${attempts},
+            "isActive" = ${attempts < 2},
+            "updatedAt" = NOW()
+        WHERE id = ${user.id}
+      `;
+      if (attempts >= 2) {
+        await sql`DELETE FROM local_sessions WHERE "userId" = ${user.id}`;
+      }
       return sendJson(res, 401, {
         success: false,
-        message: attempts >= 2
-          ? "Usuário desativado após duas tentativas incorretas. Solicite a reativação ao Super Admin."
-          : "Usuário ou senha inválidos. Mais uma tentativa incorreta desativará a conta.",
+        message:
+          attempts >= 2
+            ? "Usuário desativado após duas tentativas incorretas. Solicite a reativação ao Super Admin."
+            : "Usuário ou senha inválidos. Mais uma tentativa incorreta desativará a conta.",
       });
     }
 
@@ -87,6 +361,10 @@ export default async function handler(req: any, res: any) {
         success: false,
         message: "Usuário desativado.",
       });
+    }
+
+    if (user.loginMethod === "commercial_signup") {
+      await provisionCommercialDatabasesOnFirstLogin(Number(user.id));
     }
 
     // Draco permanece protegido como super administrador.
@@ -142,11 +420,14 @@ export default async function handler(req: any, res: any) {
             : user.role,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[auth/login]", error);
-    return sendJson(res, 500, {
+    return sendJson(res, Number(error?.statusCode || 500), {
       success: false,
-      message: "Não foi possível realizar o login.",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Não foi possível realizar o login.",
     });
   }
 }
