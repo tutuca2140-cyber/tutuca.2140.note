@@ -10,7 +10,6 @@ import {
   Minimize2,
   Send,
   Sparkles,
-  X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
@@ -67,12 +66,12 @@ const guides: Guide[] = [
     id: "clientes",
     title: "Cadastrar um cliente",
     area: "Clientes",
-    keywords: ["cliente", "clientes", "cadastrar cliente", "novo cliente", "editar cliente", "telefone", "cpf", "endereço", "endereco"],
+    keywords: ["cliente", "clientes", "cadastrar cliente", "criar cliente", "novo cliente", "editar cliente", "telefone", "cpf", "endereço", "endereco"],
     intro: "Clientes são a base para empréstimos, vendas, financiamentos e cobranças dentro do banco selecionado.",
     steps: [
       "Abra Clientes no menu lateral.",
       "Clique no botão para adicionar um novo cliente.",
-      "Preencha os dados solicitados, como nome, telefone e demais informações disponíveis no formulário.",
+      "Preencha nome, telefone e os demais dados disponíveis no formulário.",
       "Revise os dados e confirme o cadastro.",
       "Depois de salvo, localize o cliente na lista para consultar ou editar suas informações, se sua permissão permitir.",
     ],
@@ -82,24 +81,145 @@ const guides: Guide[] = [
     id: "emprestimos",
     title: "Cadastrar um empréstimo",
     area: "Empréstimos",
-    keywords: ["emprestimo", "empréstimo", "juros", "parcela", "parcelas", "contrato", "cadastrar empréstimo", "novo empréstimo"],
+    keywords: ["emprestimo", "empréstimo", "criar empréstimo", "cadastrar empréstimo", "novo empréstimo", "juros", "parcela", "parcelas", "contrato"],
     intro: "A área Empréstimos registra contratos, juros, parcelas e vencimentos vinculados a um cliente.",
     steps: [
       "Abra Empréstimos no menu lateral.",
       "Escolha a opção de novo empréstimo.",
       "Selecione o cliente já cadastrado.",
-      "Informe o valor, modalidade de juros, taxa, quantidade de parcelas e datas solicitadas.",
+      "Informe valor, modalidade de juros, taxa, quantidade de parcelas e datas solicitadas.",
       "Confira o cálculo apresentado pelo sistema antes de salvar.",
       "Salve o empréstimo. As parcelas passam a integrar o acompanhamento financeiro e de recebimentos.",
     ],
-    tip: "Se precisar registrar o recebimento de uma parcela, faça isso pela área de Pagamentos conforme a operação disponível.",
+    tip: "Quando o cliente efetivamente pagar uma parcela, registre o recebimento em Pagamentos.",
+  },
+  {
+    id: "criar-veiculo",
+    title: "Criar um veículo",
+    area: "Veículos",
+    keywords: ["criar veículo", "criar veiculo", "cadastrar veículo", "cadastrar veiculo", "novo veículo", "novo veiculo", "adicionar veículo", "adicionar veiculo"],
+    intro: "O cadastro de veículo cria o bem que poderá ser consultado e utilizado em operações como financiamentos.",
+    steps: [
+      "Abra Veículos no menu lateral.",
+      "Clique em adicionar ou cadastrar novo veículo.",
+      "Informe marca e modelo do veículo.",
+      "Preencha ano, placa, cor e os demais campos apresentados pelo sistema.",
+      "Adicione as imagens do veículo quando desejar e quando o campo estiver disponível.",
+      "Revise as informações e salve.",
+      "Confirme que o veículo aparece na listagem antes de tentar vinculá-lo a um financiamento.",
+    ],
+    tip: "O veículo é apenas o cadastro do bem. Para registrar uma venda financiada desse veículo, use Financiamentos.",
+  },
+  {
+    id: "veiculos",
+    title: "Administrar veículos cadastrados",
+    area: "Veículos",
+    keywords: ["veiculo", "veículo", "carro", "placa", "modelo", "marca", "editar veículo", "editar veiculo", "excluir veículo", "excluir veiculo"],
+    intro: "Veículos concentra os automóveis cadastrados para uso nas operações do sistema.",
+    steps: [
+      "Abra Veículos no menu lateral.",
+      "Localize o veículo desejado na lista.",
+      "Abra a ação de edição para corrigir os dados quando necessário.",
+      "Revise marca, modelo, ano, placa, cor e imagens.",
+      "Salve as alterações.",
+      "Para excluir, use a ação correspondente somente se sua permissão permitir e confirme a operação.",
+    ],
+  },
+  {
+    id: "criar-produto",
+    title: "Criar um produto",
+    area: "Produtos",
+    keywords: ["criar produto", "cadastrar produto", "novo produto", "adicionar produto", "criar celular", "cadastrar celular"],
+    intro: "O cadastro de produto registra um item que você comercializa, como um celular ou outro produto parcelado.",
+    steps: [
+      "Abra Produtos no menu lateral.",
+      "Clique no botão para cadastrar ou adicionar um novo produto.",
+      "Informe o nome ou identificação do produto.",
+      "Preencha as características e informações solicitadas na tela.",
+      "Informe o valor e, quando a operação permitir, as condições de parcelamento.",
+      "Revise as informações e salve o produto.",
+      "Confirme que ele apareceu na lista antes de registrar recebimentos relacionados à venda.",
+    ],
+    tip: "Criar o produto registra o item. Quando o cliente pagar uma parcela, o recebimento deve ser registrado em Pagamentos.",
+  },
+  {
+    id: "produtos",
+    title: "Administrar produtos",
+    area: "Produtos",
+    keywords: ["produto", "produtos", "celular", "venda produto", "parcelar produto", "editar produto", "excluir produto"],
+    intro: "Produtos permite consultar e administrar os itens comercializados no banco selecionado.",
+    steps: [
+      "Abra Produtos no menu lateral.",
+      "Localize o produto desejado.",
+      "Use a ação de edição para alterar características, valores ou outros dados permitidos.",
+      "Salve as mudanças.",
+      "Use Pagamentos para registrar recebimentos das parcelas vinculadas às operações quando aplicável.",
+    ],
+  },
+  {
+    id: "criar-financiamento",
+    title: "Criar um financiamento",
+    area: "Financiamentos",
+    keywords: ["criar financiamento", "cadastrar financiamento", "novo financiamento", "fazer financiamento", "financiar veículo", "financiar veiculo", "venda financiada"],
+    intro: "Financiamento é o contrato da operação: ele define quanto o cliente deve, entrada, juros, prazo, parcelas e vencimentos.",
+    steps: [
+      "Antes de começar, cadastre o cliente em Clientes e o veículo em Veículos.",
+      "Abra Financiamentos no menu lateral.",
+      "Clique para criar um novo financiamento.",
+      "Selecione o cliente que está comprando ou financiando.",
+      "Selecione o veículo relacionado à operação.",
+      "Informe valor total, entrada, tipo e taxa de juros, prazo, quantidade de parcelas e vencimentos conforme os campos apresentados.",
+      "Confira o valor das parcelas e o total calculado pelo sistema.",
+      "Salve o financiamento e confirme que a operação apareceu na listagem.",
+      "Quando cada parcela for efetivamente recebida, registre o recebimento em Pagamentos.",
+    ],
+    tip: "Financiamento cria a dívida e o cronograma de parcelas. Pagamento registra o dinheiro que realmente entrou.",
+  },
+  {
+    id: "financiamentos",
+    title: "Acompanhar um financiamento",
+    area: "Financiamentos",
+    keywords: ["financiamento", "financiamentos", "entrada", "venda veículo", "venda veiculo", "parcelas financiamento", "consultar financiamento"],
+    intro: "Depois de criado, o financiamento representa a operação parcelada vinculada ao cliente e ao veículo.",
+    steps: [
+      "Abra Financiamentos.",
+      "Localize a operação do cliente.",
+      "Confira valor financiado, entrada, juros, prazo e parcelas.",
+      "Use as ações disponíveis para editar ou consultar detalhes, conforme sua permissão.",
+      "Acompanhe os vencimentos em Contas a receber.",
+      "Registre os valores efetivamente recebidos em Pagamentos.",
+    ],
+  },
+  {
+    id: "diferenca-financiamento-pagamento",
+    title: "Diferença entre Financiamento e Pagamento",
+    area: "Financiamentos e Pagamentos",
+    keywords: [
+      "diferença financiamento pagamento",
+      "diferenca financiamento pagamento",
+      "diferença entre financiamento e pagamento",
+      "diferenca entre financiamento e pagamento",
+      "financiamento ou pagamento",
+      "qual diferença pagamento financiamento",
+      "qual a diferença financiamento pagamento"
+    ],
+    intro: "São duas etapas diferentes da mesma operação. Financiamento cria a obrigação do cliente; Pagamento registra o que o cliente já pagou.",
+    steps: [
+      "Use Financiamentos quando você estiver criando a venda ou contrato parcelado.",
+      "No Financiamento você define cliente, veículo, valor, entrada, juros, quantidade de parcelas e vencimentos.",
+      "Depois de salvo, o sistema passa a saber quanto o cliente ainda deve e quando deve pagar.",
+      "Use Pagamentos somente quando o dinheiro realmente for recebido do cliente.",
+      "Em Pagamentos você localiza a parcela correspondente e confirma o recebimento.",
+      "Ao registrar o pagamento, a parcela é atualizada e o valor recebido reflete no Caixa e nos indicadores financeiros.",
+    ],
+    tip: "Exemplo: hoje você vende um carro em 24 parcelas — crie o Financiamento. No mês que vem o cliente paga a 1ª parcela — registre esse valor em Pagamentos.",
   },
   {
     id: "pagamentos",
     title: "Registrar um pagamento",
     area: "Pagamentos",
-    keywords: ["pagamento", "pagamentos", "pagar parcela", "receber", "recebimento", "quitar", "parcial"],
-    intro: "Pagamentos registra recebimentos e atualiza a situação das parcelas e o fluxo financeiro do banco.",
+    keywords: ["pagamento", "pagamentos", "registrar pagamento", "pagar parcela", "receber parcela", "receber", "recebimento", "quitar", "parcial"],
+    intro: "Pagamentos registra um valor que foi efetivamente recebido e atualiza a situação das parcelas e o fluxo financeiro do banco.",
     steps: [
       "Abra Pagamentos no menu lateral.",
       "Localize a parcela ou operação que deseja receber.",
@@ -108,52 +228,7 @@ const guides: Guide[] = [
       "Informe os dados solicitados e confirme o recebimento.",
       "Depois da confirmação, confira a atualização da parcela e do Caixa.",
     ],
-    tip: "Sempre confirme o banco em operação antes de lançar um pagamento.",
-  },
-  {
-    id: "veiculos",
-    title: "Cadastrar e administrar veículos",
-    area: "Veículos",
-    keywords: ["veiculo", "veículo", "carro", "placa", "modelo", "marca", "cadastrar veículo", "excluir veículo"],
-    intro: "Veículos concentra os automóveis cadastrados para uso nas operações do sistema.",
-    steps: [
-      "Abra Veículos no menu lateral.",
-      "Escolha a opção para adicionar um veículo.",
-      "Preencha marca, modelo, ano, placa, cor e os demais campos disponíveis.",
-      "Adicione imagens quando essa opção estiver disponível e for necessária.",
-      "Salve o cadastro e confirme que o veículo apareceu na listagem.",
-      "Use as ações da própria lista para editar ou excluir quando sua permissão permitir.",
-    ],
-  },
-  {
-    id: "produtos",
-    title: "Cadastrar um produto",
-    area: "Produtos",
-    keywords: ["produto", "produtos", "celular", "venda", "cadastrar produto", "parcelar produto"],
-    intro: "Produtos permite registrar itens comercializados e acompanhar operações vinculadas a eles.",
-    steps: [
-      "Abra Produtos no menu lateral.",
-      "Clique para cadastrar um novo produto.",
-      "Preencha a identificação, características, valor e demais campos apresentados.",
-      "Quando houver venda parcelada, informe os dados de parcelamento solicitados.",
-      "Salve e confira o produto na lista.",
-      "Use Pagamentos para acompanhar ou registrar recebimentos relacionados às parcelas quando aplicável.",
-    ],
-  },
-  {
-    id: "financiamentos",
-    title: "Cadastrar um financiamento",
-    area: "Financiamentos",
-    keywords: ["financiamento", "financiamentos", "financiar", "entrada", "venda veículo", "venda veiculo"],
-    intro: "Financiamentos registra operações parceladas, incluindo dados do cliente, veículo, entrada, juros e parcelas.",
-    steps: [
-      "Abra Financiamentos no menu lateral.",
-      "Inicie um novo financiamento.",
-      "Selecione o cliente e o veículo relacionados à operação.",
-      "Informe valor total, entrada, juros, prazo, vencimentos e demais condições solicitadas.",
-      "Confira os valores calculados e salve a operação.",
-      "Acompanhe as parcelas nas áreas de recebimentos e registre os pagamentos conforme forem ocorrendo.",
-    ],
+    tip: "Não crie um financiamento para registrar dinheiro recebido. Financiamento cria a obrigação; Pagamento registra o recebimento.",
   },
   {
     id: "contas-receber",
@@ -164,7 +239,7 @@ const guides: Guide[] = [
     steps: [
       "Abra Contas a receber no menu.",
       "Consulte a listagem de valores e vencimentos do banco atual.",
-      "Use as informações de cliente, data e situação para identificar o que está próximo de vencer ou em atraso.",
+      "Use cliente, data e situação para identificar o que está próximo de vencer ou em atraso.",
       "Quando o pagamento ocorrer, registre-o pela ação correspondente ou pela área Pagamentos.",
       "Volte ao Dashboard para conferir o reflexo nos totais financeiros.",
     ],
@@ -179,8 +254,8 @@ const guides: Guide[] = [
       "Abra Caixa no menu lateral.",
       "Confira as entradas e saídas registradas para o banco selecionado.",
       "Use os filtros e informações da tela para localizar uma movimentação.",
-      "Quando houver opção de novo lançamento, preencha a descrição, tipo e valor conforme necessário.",
-      "Para excluir um lançamento, use a ação de exclusão somente se o contratante tiver liberado essa permissão para seu usuário.",
+      "Quando houver opção de novo lançamento, preencha descrição, tipo e valor conforme necessário.",
+      "Para excluir um lançamento, use a ação somente se o contratante tiver liberado essa permissão para seu usuário.",
       "Revise o saldo após qualquer lançamento ou pagamento.",
     ],
     tip: "Usuários adicionais do Plus não podem apagar fluxo de caixa por padrão; o contratante precisa liberar essa permissão.",
@@ -221,10 +296,10 @@ const guides: Guide[] = [
     intro: "Os dados exibidos nas áreas operacionais dependem do banco que está selecionado.",
     steps: [
       "Olhe o topo do menu lateral, abaixo do seu perfil.",
-      "Localize o campo Banco em operação.",
+      "Localize Banco em operação.",
       "Abra a seleção e escolha um dos bancos liberados para o seu usuário.",
       "Aguarde a atualização do sistema.",
-      "A partir daí, Dashboard, Clientes, operações e relatórios passam a trabalhar com o banco selecionado.",
+      "Dashboard, Clientes, operações e relatórios passam a trabalhar com o banco selecionado.",
     ],
   },
   {
@@ -238,7 +313,7 @@ const guides: Guide[] = [
       "Escolha o banco que deseja administrar.",
       "Para mudar nome ou descrição, use a opção de edição e salve as alterações.",
       "A limpeza de memória remove os dados operacionais e cria uma janela de recuperação de até 48 horas.",
-      "Se necessário, use Restaurar dentro do prazo de recuperação mostrado pelo sistema.",
+      "Se necessário, use Restaurar dentro do prazo mostrado pelo sistema.",
       "A exclusão definitiva do banco exige confirmação e não deve ser usada quando você só deseja limpar os dados.",
     ],
     tip: "Usuários adicionais do Plus só acessam essas ações se o contratante liberar a permissão de administrar bancos.",
@@ -254,8 +329,8 @@ const guides: Guide[] = [
       "Clique para adicionar um usuário da conta.",
       "Informe nome, nome de usuário, e-mail e senha solicitados.",
       "Selecione quais dos seus bancos esse usuário poderá acessar.",
-      "Marque somente as permissões que deseja liberar: visualizar, inserir, editar, excluir, relatórios e permissões especiais.",
-      "Revise e salve. Depois você pode voltar à equipe para editar permissões, ativar, desativar ou remover o usuário.",
+      "Marque somente as permissões que deseja liberar.",
+      "Revise e salve. Depois você pode editar permissões, ativar, desativar ou remover o usuário.",
     ],
     tip: "Administrar usuários, administrar bancos e apagar fluxo de caixa ficam bloqueados por padrão para usuários adicionais.",
   },
@@ -270,8 +345,8 @@ const guides: Guide[] = [
       "Na tela Meu Perfil, confira nome e sobrenome, usuário, e-mail e WhatsApp.",
       "Altere os campos permitidos e clique em Salvar alterações.",
       "Para mudar usuário, e-mail ou senha, informe também sua senha atual.",
-      "Se for trocar a senha, siga o padrão de no mínimo 8 caracteres, uma letra maiúscula e um número.",
-      "A opção Excluir minha conta fica na zona de segurança e exige senha atual e a confirmação EXCLUIR CONTA.",
+      "Se trocar a senha, use no mínimo 8 caracteres, uma letra maiúscula e um número.",
+      "Excluir minha conta exige senha atual e a confirmação EXCLUIR CONTA.",
     ],
     tip: "Excluir a conta comercial é definitivo e também afeta os bancos pertencentes à conta e os usuários adicionais vinculados.",
   },
@@ -300,7 +375,7 @@ const guides: Guide[] = [
       "Entre normalmente com seu usuário e senha.",
       "Enquanto o pagamento estiver pendente, use o Dashboard apenas para visualização.",
       "Ao tentar acessar uma função bloqueada, o sistema mostrará Sistema aguardando pagamento.",
-      "Depois que o pagamento for confirmado e a assinatura voltar ao status ativo, as funções do plano são liberadas novamente.",
+      "Depois que o pagamento for confirmado, as funções do plano são liberadas novamente.",
     ],
   },
   {
@@ -326,11 +401,11 @@ const guides: Guide[] = [
     intro: "Assinaturas e Aprovações reúne os clientes comerciais e o controle de pagamento de cada plano.",
     steps: [
       "Abra Administração > Assinaturas.",
-      "Consulte contato, plano, mensalidade, status de pagamento, data de cadastro, último acesso e tempo de uso.",
+      "Consulte contato, plano, mensalidade, status, data de cadastro, último acesso e tempo de uso.",
       "Para um cadastro novo, use Aprovar conta depois de confirmar o pagamento.",
-      "Para inadimplência, use Marcar sem pagamento; o cliente ficará restrito ao Dashboard.",
-      "Quando regularizar, use Confirmar pagamento para liberar novamente as funções do plano.",
-      "Use Baixar Excel para exportar a lista organizada de clientes comerciais e suas informações.",
+      "Para inadimplência, use Marcar sem pagamento.",
+      "Quando regularizar, use Confirmar pagamento.",
+      "Use Baixar Excel para exportar a lista organizada.",
     ],
     adminOnly: true,
   },
@@ -344,15 +419,24 @@ const guides: Guide[] = [
       "Abra Administração > Bancos de Dados.",
       "Use Novo banco para criar um banco administrativo quando necessário.",
       "Use Editar para alterar nome e descrição.",
-      "Use Duplicar quando precisar copiar a estrutura e os dados operacionais suportados para um novo banco.",
+      "Use Duplicar quando precisar copiar a estrutura e os dados suportados.",
       "Use Ativar para mudar o banco em operação.",
-      "A exclusão permanente deve ser usada somente depois de confirmar que o banco realmente não será mais necessário.",
+      "Use exclusão permanente somente quando o banco realmente não for mais necessário.",
     ],
     adminOnly: true,
   },
 ];
 
-const quickTopics = ["Cadastrar cliente", "Criar empréstimo", "Registrar pagamento", "Usar o Caixa", "Gerar relatório", "Meu Banco"];
+const quickTopics = [
+  "Cadastrar cliente",
+  "Criar produto",
+  "Criar veículo",
+  "Criar financiamento",
+  "Financiamento x pagamento",
+  "Registrar pagamento",
+  "Criar empréstimo",
+  "Usar o Caixa",
+];
 
 function normalize(value: string) {
   return value
@@ -367,9 +451,25 @@ function normalize(value: string) {
 function findGuide(query: string, available: Guide[]) {
   const normalizedQuery = normalize(query);
   if (!normalizedQuery) return null;
-  const queryWords = normalizedQuery.split(" ").filter(word => word.length >= 2);
 
+  const directRules: Array<[RegExp, string]> = [
+    [/diferenca.*financiamento.*pagamento|financiamento.*(x|ou).*pagamento|pagamento.*(x|ou).*financiamento/, "diferenca-financiamento-pagamento"],
+    [/(criar|cadastrar|novo|adicionar).*produto|(criar|cadastrar).*celular/, "criar-produto"],
+    [/(criar|cadastrar|novo|adicionar).*veiculo/, "criar-veiculo"],
+    [/(criar|cadastrar|novo|fazer).*financiamento|financiar.*veiculo|venda financiada/, "criar-financiamento"],
+    [/(registrar|lancar|receber|pagar).*pagamento|pagamento.*parcela/, "pagamentos"],
+  ];
+
+  for (const [pattern, id] of directRules) {
+    if (pattern.test(normalizedQuery)) {
+      const direct = available.find(guide => guide.id === id);
+      if (direct) return direct;
+    }
+  }
+
+  const queryWords = normalizedQuery.split(" ").filter(word => word.length >= 2);
   let best: { guide: Guide; score: number } | null = null;
+
   for (const guide of available) {
     const haystack = normalize([guide.title, guide.area, ...guide.keywords].join(" "));
     let score = 0;
@@ -384,15 +484,21 @@ function findGuide(query: string, available: Guide[]) {
     }
     if (!best || score > best.score) best = { guide, score };
   }
+
   return best && best.score >= 2 ? best.guide : null;
 }
 
 function responseFor(query: string, available: Guide[]) {
-  const normalized = normalize(query);
-  if (["oi", "ola", "bom dia", "boa tarde", "boa noite"].includes(normalized)) {
+  const normalizedQuery = normalize(query);
+  if (["oi", "ola", "bom dia", "boa tarde", "boa noite"].includes(normalizedQuery)) {
     return {
       text: "Olá! Eu sou o Guia Note Note. Posso ensinar o passo a passo das funcionalidades do sistema. Eu não faço lançamentos nem altero seus dados — apenas explico como você faz.",
     };
+  }
+
+  if (normalizedQuery === "financiamento x pagamento") {
+    const guide = available.find(item => item.id === "diferenca-financiamento-pagamento");
+    return { text: "Vou explicar a diferença entre Financiamento e Pagamento.", guide };
   }
 
   const guide = findGuide(query, available);
@@ -404,7 +510,7 @@ function responseFor(query: string, available: Guide[]) {
   }
 
   return {
-    text: "Não encontrei um passo a passo específico para essa pergunta. Tente escrever o nome da área ou o que deseja fazer, por exemplo: cadastrar cliente, criar empréstimo, registrar pagamento, usar o caixa, gerar relatório, administrar meu banco ou atualizar meu perfil.",
+    text: "Não encontrei um passo a passo específico. Tente perguntar, por exemplo: criar produto, criar veículo, criar financiamento, diferença entre financiamento e pagamento, cadastrar cliente, registrar pagamento, usar o caixa ou atualizar meu perfil.",
   };
 }
 
@@ -529,7 +635,7 @@ export default function SystemGuideAssistant() {
                           <p className="mb-4 text-sm leading-relaxed text-muted-foreground">{message.guide.intro}</p>
                           <ol className="space-y-3">
                             {message.guide.steps.map((step, index) => (
-                              <li key={step} className="flex gap-3 text-sm leading-relaxed">
+                              <li key={`${message.guide?.id}-${index}`} className="flex gap-3 text-sm leading-relaxed">
                                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-black text-primary">{index + 1}</span>
                                 <span>{step}</span>
                               </li>
@@ -567,7 +673,7 @@ export default function SystemGuideAssistant() {
               <Input
                 value={input}
                 onChange={event => setInput(event.target.value)}
-                placeholder="Ex.: Como cadastrar um empréstimo?"
+                placeholder="Ex.: Como criar um financiamento?"
                 autoComplete="off"
               />
               <Button type="submit" size="icon" disabled={!input.trim()} aria-label="Enviar pergunta">
