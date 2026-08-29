@@ -12,6 +12,7 @@ const Login = lazy(() => import("./pages/Login"));
 const Planos = lazy(() => import("./pages/Planos"));
 const Cadastro = lazy(() => import("./pages/Cadastro"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Perfil = lazy(() => import("./pages/Perfil"));
 const Clientes = lazy(() => import("./pages/Clientes"));
 const Emprestimos = lazy(() => import("./pages/Emprestimos"));
 const Pagamentos = lazy(() => import("./pages/Pagamentos"));
@@ -32,6 +33,7 @@ const AdminAuditoria = lazy(() => import("./pages/admin/Auditoria"));
 const AdminConfiguracoes = lazy(() => import("./pages/admin/Configuracoes"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
+const PaidPerfil = () => <CommercialPaymentGate><Perfil /></CommercialPaymentGate>;
 const PaidClientes = () => <CommercialPaymentGate><Clientes /></CommercialPaymentGate>;
 const PaidEmprestimos = () => <CommercialPaymentGate><Emprestimos /></CommercialPaymentGate>;
 const PaidPagamentos = () => <CommercialPaymentGate><Pagamentos /></CommercialPaymentGate>;
@@ -53,6 +55,7 @@ function Router() {
       <Route path={"/cadastro"} component={Cadastro} />
       <Route path={"/"} component={Home} />
       <Route path={"/dashboard"} component={Dashboard} />
+      <Route path={"/perfil"} component={PaidPerfil} />
       <Route path={"/clientes"} component={PaidClientes} />
       <Route path={"/emprestimos"} component={PaidEmprestimos} />
       <Route path={"/pagamentos"} component={PaidPagamentos} />
