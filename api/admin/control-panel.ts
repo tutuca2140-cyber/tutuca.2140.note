@@ -5,6 +5,9 @@ import {
   SESSION_COOKIE_NAME,
 } from "../auth/_shared.js";
 
+const NEON_STORAGE_LIMIT_BYTES = 536_870_912; // 512 MiB - limite lógico atual do plano Neon Free.
+const NEON_PLAN_NAME = "Free";
+
 let tablesPromise: Promise<void> | null = null;
 
 function ensureTables() {
@@ -79,6 +82,7 @@ export default async function handler(req: any, res: any) {
       sessionsSummary,
       operationalSummary,
       databaseSummary,
+      storageSummary,
       recentAccess,
       userRows,
       recentAudits,
@@ -134,6 +138,9 @@ export default async function handler(req: any, res: any) {
           COUNT(*)::int AS total,
           COUNT(*) FILTER (WHERE "isActive" = true)::int AS active
         FROM databases
+      `,
+      sql`
+        SELECT pg_database_size(current_database())::bigint AS "usedBytes"
       `,
       sql`
         SELECT
@@ -192,6 +199,13 @@ export default async function handler(req: any, res: any) {
       `,
     ]);
 
+    const usedBytes = Math.max(0, Number((storageSummary[0] as any)?.usedBytes || 0));
+    const remainingBytes = Math.max(0, NEON_STORAGE_LIMIT_BYTES - usedBytes);
+    const usedPercent = Math.min(
+      100,
+      Number(((usedBytes / NEON_STORAGE_LIMIT_BYTES) * 100).toFixed(2))
+    );
+
     return sendJson(res, 200, {
       success: true,
       generatedAt: new Date().toISOString(),
@@ -202,6 +216,15 @@ export default async function handler(req: any, res: any) {
         sessions: sessionsSummary[0] ?? {},
         operations: operationalSummary[0] ?? {},
         databases: databaseSummary[0] ?? {},
+        storage: {
+          provider: "Neon",
+          projectName: "notenote-database",
+          plan: NEON_PLAN_NAME,
+          usedBytes,
+          remainingBytes,
+          limitBytes: NEON_STORAGE_LIMIT_BYTES,
+          usedPercent,
+        },
       },
       recentAccess,
       users: userRows,
