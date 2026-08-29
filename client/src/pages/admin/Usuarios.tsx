@@ -28,6 +28,8 @@ import {
   Pencil,
   Plus,
   Shield,
+  ShoppingBag,
+  UserCog,
   UserRoundX,
 } from "lucide-react";
 import { useState } from "react";
@@ -51,6 +53,7 @@ type Draft = Permissions & {
   databaseIds: number[];
   dashboardOnly: boolean;
 };
+type UserTab = "super_admin" | "commercial";
 
 const permissionOptions: Array<{
   key: PermissionKey;
@@ -119,6 +122,9 @@ const makeEmptyDraft = (): Draft => ({
   ...permissionsForRole("user"),
 });
 
+const isCommercialAccount = (loginMethod: string | null | undefined) =>
+  loginMethod === "commercial_signup" || loginMethod === "commercial_subuser";
+
 export default function AdminUsuarios() {
   const utils = trpc.useUtils();
   const { data: users = [], isLoading } = trpc.users.list.useQuery();
@@ -129,6 +135,7 @@ export default function AdminUsuarios() {
   const resetPassword = trpc.users.adminResetPassword.useMutation();
   const [draft, setDraft] = useState<Draft>(makeEmptyDraft);
   const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<UserTab>("super_admin");
   const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>(
     {}
   );
@@ -139,6 +146,15 @@ export default function AdminUsuarios() {
         ? error.message
         : "Não foi possível concluir a operação."
     );
+
+  const superAdminUsers = users.filter(
+    user => !isCommercialAccount(user.loginMethod)
+  );
+  const commercialUsers = users.filter(user =>
+    isCommercialAccount(user.loginMethod)
+  );
+  const visibleUsers =
+    activeTab === "commercial" ? commercialUsers : superAdminUsers;
 
   const save = async () => {
     try {
@@ -229,7 +245,7 @@ export default function AdminUsuarios() {
               Gerenciamento de Usuários
             </h1>
             <p className="mt-2 text-muted-foreground">
-              Crie contas e defina exatamente o que cada usuário pode fazer.
+              Contas gratuitas/teste do Super Admin e contas comerciais ficam separadas por origem.
             </p>
           </div>
           <Dialog
@@ -239,12 +255,14 @@ export default function AdminUsuarios() {
               if (!value) setDraft(makeEmptyDraft());
             }}
           >
-            <DialogTrigger asChild>
-              <Button className="w-full sm:w-auto">
-                <Plus className="mr-2 h-4 w-4" />
-                Novo usuário
-              </Button>
-            </DialogTrigger>
+            {activeTab === "super_admin" && (
+              <DialogTrigger asChild>
+                <Button className="w-full sm:w-auto">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Novo usuário
+                </Button>
+              </DialogTrigger>
+            )}
             <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>
@@ -488,14 +506,79 @@ export default function AdminUsuarios() {
             </DialogContent>
           </Dialog>
         </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("super_admin")}
+            className={`rounded-2xl border p-5 text-left transition ${
+              activeTab === "super_admin"
+                ? "border-primary bg-primary/10 shadow-sm"
+                : "bg-card hover:border-primary/40 hover:bg-muted/30"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
+                  <UserCog className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-bold">Usuários Criados Pelo Super Admin</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Contas gratuitas, de teste e administrativas criadas diretamente pelo Super Admin.
+                  </p>
+                </div>
+              </div>
+              <Badge variant={activeTab === "super_admin" ? "default" : "secondary"}>
+                {superAdminUsers.length}
+              </Badge>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("commercial")}
+            className={`rounded-2xl border p-5 text-left transition ${
+              activeTab === "commercial"
+                ? "border-primary bg-primary/10 shadow-sm"
+                : "bg-card hover:border-primary/40 hover:bg-muted/30"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
+                  <ShoppingBag className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-bold">Usuários que Compraram Pelo Site</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Contratantes Basic/Plus e usuários adicionais vinculados às contas comerciais.
+                  </p>
+                </div>
+              </div>
+              <Badge variant={activeTab === "commercial" ? "default" : "secondary"}>
+                {commercialUsers.length}
+              </Badge>
+            </div>
+          </button>
+        </div>
+
+        {activeTab === "commercial" && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+            <strong>Contas comerciais:</strong> os contratantes são identificados pelo cadastro feito no site. Usuários adicionais criados por um contratante Plus permanecem nesta mesma aba para que toda a estrutura comercial fique agrupada.
+          </div>
+        )}
+
         {isLoading ? (
           <p className="py-12 text-center text-muted-foreground">
             Carregando usuários...
           </p>
-        ) : (
+        ) : visibleUsers.length ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {users.map(user => {
+            {visibleUsers.map(user => {
               const protectedUser = user.username?.toLowerCase() === "draco";
+              const commercialOwner = user.loginMethod === "commercial_signup";
+              const commercialSubuser = user.loginMethod === "commercial_subuser";
               return (
                 <Card key={user.id}>
                   <CardHeader>
@@ -507,16 +590,25 @@ export default function AdminUsuarios() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div>
-              <Badge>
-                {user.dashboardOnly ? "Somente Dashboard" : user.role}
-              </Badge>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge>
+                        {user.dashboardOnly ? "Somente Dashboard" : user.role}
+                      </Badge>
                       <Badge
                         variant="outline"
-                        className={`ml-2 ${user.isActive ? "text-green-700" : "text-red-700"}`}
+                        className={user.isActive ? "text-green-700" : "text-red-700"}
                       >
                         {user.isActive ? "Ativo" : "Inativo"}
                       </Badge>
+                      {commercialOwner && (
+                        <Badge variant="secondary">Contratante do site</Badge>
+                      )}
+                      {commercialSubuser && (
+                        <Badge variant="secondary">Usuário da conta</Badge>
+                      )}
+                      {!isCommercialAccount(user.loginMethod) && (
+                        <Badge variant="secondary">Criado pelo Super Admin</Badge>
+                      )}
                     </div>
                     <p className="text-sm text-muted-foreground">
                       @{user.username}
@@ -597,6 +689,14 @@ export default function AdminUsuarios() {
               );
             })}
           </div>
+        ) : (
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              {activeTab === "commercial"
+                ? "Nenhum usuário comercial cadastrado até o momento."
+                : "Nenhum usuário criado pelo Super Admin encontrado."}
+            </CardContent>
+          </Card>
         )}
       </div>
     </DashboardLayout>
