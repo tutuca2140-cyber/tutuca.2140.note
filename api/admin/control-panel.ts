@@ -1,6 +1,7 @@
 import {
   getSql,
   readCookie,
+  readJsonBody,
   sendJson,
   SESSION_COOKIE_NAME,
 } from "../auth/_shared.js";
@@ -44,9 +45,69 @@ function ensureTables() {
   return tablesPromise;
 }
 
+async function deleteInternalUser(userId: number, currentUser: any) {
+  const sql = getSql();
+  const targetRows = await sql`
+    SELECT id, username, email, name, role, "loginMethod"
+      FROM users
+     WHERE id = ${userId}
+     LIMIT 1
+  `;
+  const target = targetRows[0] as any;
+
+  if (!target) {
+    throw Object.assign(new Error("Usuário não encontrado."), { statusCode: 404 });
+  }
+  if (
+    target.role === "super_admin" ||
+    String(target.username || "").toLowerCase() === "draco"
+  ) {
+    throw Object.assign(
+      new Error("O Super Administrador protegido não pode ser excluído."),
+      { statusCode: 403 }
+    );
+  }
+  if (
+    target.loginMethod === "commercial_signup" ||
+    target.loginMethod === "commercial_subuser"
+  ) {
+    throw Object.assign(
+      new Error("Contas comerciais não podem ser excluídas por esta área de usuários internos."),
+      { statusCode: 403 }
+    );
+  }
+
+  // Exclui somente a conta e seus vínculos de acesso. Bancos e dados operacionais são preservados.
+  await sql`DELETE FROM local_sessions WHERE "userId" = ${userId}`;
+  await sql`DELETE FROM password_reset_tokens WHERE "userId" = ${userId}`;
+  await sql`DELETE FROM user_database_access WHERE "userId" = ${userId}`;
+  await sql`UPDATE site_access_logs SET "userId" = NULL WHERE "userId" = ${userId}`;
+  await sql`DELETE FROM users WHERE id = ${userId}`;
+
+  await sql`
+    INSERT INTO "auditLogs"
+      ("userId", username, action, entity, "entityId", details, status, "createdAt")
+    VALUES (
+      ${currentUser.id},
+      ${currentUser.username || "Super Admin"},
+      'delete_internal_user',
+      'users',
+      ${userId},
+      ${JSON.stringify({
+        deletedUsername: target.username,
+        deletedEmail: target.email,
+        deletedName: target.name,
+        preservedOperationalData: true,
+      })},
+      'success',
+      NOW()
+    )
+  `;
+}
+
 export default async function handler(req: any, res: any) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
+  if (req.method !== "GET" && req.method !== "POST") {
+    res.setHeader("Allow", "GET, POST");
     return sendJson(res, 405, { success: false, message: "Método não permitido." });
   }
 
@@ -74,6 +135,26 @@ export default async function handler(req: any, res: any) {
     }
 
     await ensureTables();
+
+    if (req.method === "POST") {
+      const body = await readJsonBody(req);
+      const action = String(body?.action ?? "").trim();
+      const userId = Number(body?.userId);
+      if (action !== "delete_internal_user") {
+        return sendJson(res, 400, {
+          success: false,
+          message: "Ação administrativa não reconhecida.",
+        });
+      }
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return sendJson(res, 400, { success: false, message: "Usuário inválido." });
+      }
+      await deleteInternalUser(userId, currentUser);
+      return sendJson(res, 200, {
+        success: true,
+        message: "Usuário excluído do sistema. Bancos e dados operacionais foram preservados.",
+      });
+    }
 
     const [
       usersSummary,
@@ -104,9 +185,10 @@ export default async function handler(req: any, res: any) {
           COUNT(*) FILTER (WHERE plan = 'basic')::int AS basic,
           COUNT(*) FILTER (WHERE plan = 'plus')::int AS plus,
           COUNT(*) FILTER (WHERE status = 'pending_payment')::int AS pending,
+          COUNT(*) FILTER (WHERE status = 'past_due')::int AS overdue,
           COUNT(*) FILTER (WHERE status IN ('active', 'paid'))::int AS active,
           COALESCE(SUM("priceCents"), 0)::bigint AS "selectedValueCents",
-          COALESCE(SUM("priceCents") FILTER (WHERE status = 'pending_payment'), 0)::bigint AS "pendingValueCents",
+          COALESCE(SUM("priceCents") FILTER (WHERE status IN ('pending_payment', 'past_due')), 0)::bigint AS "pendingValueCents",
           COALESCE(SUM("priceCents") FILTER (WHERE status IN ('active', 'paid')), 0)::bigint AS "activeMonthlyValueCents"
         FROM commercial_subscriptions
       `,
@@ -230,11 +312,14 @@ export default async function handler(req: any, res: any) {
       users: userRows,
       recentAudits,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[admin/control-panel]", error);
-    return sendJson(res, 500, {
+    return sendJson(res, Number(error?.statusCode || 500), {
       success: false,
-      message: "Não foi possível carregar o painel de controle.",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Não foi possível concluir a operação do painel de controle.",
     });
   }
 }
