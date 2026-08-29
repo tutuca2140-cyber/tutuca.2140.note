@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   CheckCircle2,
+  Clock3,
   CreditCard,
   Database,
   Loader2,
@@ -26,6 +27,7 @@ type CommercialAccount = {
   plan: "basic" | "plus";
   priceCents: number | string;
   status: string;
+  provisionedAt?: string | null;
   databaseCount: number;
   databaseLimit: number;
   databaseNames?: string;
@@ -98,7 +100,7 @@ export default function AdminAssinaturas() {
 
     if (
       !window.confirm(
-        `Aprovar a conta de ${account.username} no plano ${planName}?\n\nO usuário será ativado e o sistema garantirá automaticamente os bancos: ${names}.`
+        `Aprovar a conta de ${account.username} no plano ${planName}?\n\nO usuário será ativado agora. Os bancos ${names} serão criados automaticamente quando o contratante fizer o primeiro login.`
       )
     ) {
       return;
@@ -138,7 +140,7 @@ export default function AdminAssinaturas() {
             </div>
             <h1 className="mt-2 text-3xl font-black tracking-tight">Assinaturas e Aprovações</h1>
             <p className="mt-2 max-w-3xl text-muted-foreground">
-              Aprove contas comerciais após confirmar o pagamento. A aprovação ativa o cliente e cria automaticamente os bancos previstos no plano.
+              Aprove contas comerciais após confirmar o pagamento. A aprovação ativa o cliente; os bancos do plano são criados automaticamente no primeiro login do contratante.
             </p>
           </div>
           <Button variant="outline" onClick={load} disabled={loading}>
@@ -152,7 +154,7 @@ export default function AdminAssinaturas() {
         </div>
 
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
-          <strong>Provisionamento automático:</strong> Basic recebe 1 banco chamado <strong>Principal - nome do usuário</strong>. Plus recebe 3 bancos: o Principal, <strong>#2</strong> e <strong>#3</strong>. Depois da aprovação, o cliente pode renomear os próprios bancos na área Meu Banco.
+          <strong>Provisionamento no primeiro login:</strong> após a conta ser aprovada, o Basic recebe 1 banco chamado <strong>Principal - nome do usuário</strong>. O Plus recebe 3 bancos: o Principal, <strong>#2</strong> e <strong>#3</strong>. A criação acontece uma única vez no primeiro login e depois o cliente pode renomear os próprios bancos na área Meu Banco.
         </div>
 
         {error ? (
@@ -228,6 +230,7 @@ export default function AdminAssinaturas() {
                   <tbody className="divide-y">
                     {(data?.accounts ?? []).map(account => {
                       const approved = account.status === "active" || account.status === "paid";
+                      const provisioned = Boolean(account.provisionedAt);
                       return (
                         <tr key={account.id} className="hover:bg-muted/20">
                           <td className="px-4 py-4">
@@ -254,16 +257,11 @@ export default function AdminAssinaturas() {
                               {Number(account.databaseCount || 0)}/{account.databaseLimit}
                             </p>
                             <p className="max-w-[320px] truncate text-xs text-muted-foreground">
-                              {account.databaseNames || "Bancos serão criados na aprovação"}
+                              {account.databaseNames || (approved ? "Serão criados no primeiro login" : "Serão criados após aprovação, no primeiro login")}
                             </p>
                           </td>
                           <td className="px-4 py-4 text-right">
-                            {approved && Number(account.databaseCount) === account.databaseLimit ? (
-                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                                <CheckCircle2 className="h-4 w-4" />
-                                Provisionado
-                              </span>
-                            ) : (
+                            {!approved ? (
                               <Button
                                 size="sm"
                                 onClick={() => approve(account)}
@@ -274,8 +272,18 @@ export default function AdminAssinaturas() {
                                 ) : (
                                   <CheckCircle2 className="mr-2 h-4 w-4" />
                                 )}
-                                Aprovar e criar bancos
+                                Aprovar conta
                               </Button>
+                            ) : provisioned ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                                <CheckCircle2 className="h-4 w-4" />
+                                Provisionado
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700">
+                                <Clock3 className="h-4 w-4" />
+                                Aguardando primeiro login
+                              </span>
                             )}
                           </td>
                         </tr>
