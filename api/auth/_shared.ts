@@ -18,6 +18,18 @@ export function ensureAuthUserColumns() {
   authColumnsPromise = (async () => {
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "loginCount" integer DEFAULT 0 NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "feedbackSubmitted" boolean DEFAULT false NOT NULL`;
+    await sql`
+      CREATE TABLE IF NOT EXISTS user_feedback (
+        id serial PRIMARY KEY,
+        "userId" integer NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        rating integer NOT NULL CHECK (rating BETWEEN 1 AND 5),
+        comment varchar(200),
+        "createdAt" timestamp DEFAULT NOW() NOT NULL,
+        "updatedAt" timestamp DEFAULT NOW() NOT NULL
+      )
+    `;
   })().catch((error) => {
     authColumnsPromise = null;
     throw error;
