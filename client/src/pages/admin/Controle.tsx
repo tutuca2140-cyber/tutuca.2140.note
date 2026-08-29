@@ -12,6 +12,7 @@ import {
   CreditCard,
   Database,
   Eye,
+  HardDrive,
   History,
   Loader2,
   RefreshCw,
@@ -43,6 +44,7 @@ type ControlData = {
     sessions: Record<string, any>;
     operations: Record<string, any>;
     databases: Record<string, any>;
+    storage: Record<string, any>;
   };
   recentAccess: Array<Record<string, any>>;
   users: Array<Record<string, any>>;
@@ -55,6 +57,22 @@ function cents(value: unknown) {
 
 function amount(value: unknown) {
   return money.format(Number(value || 0));
+}
+
+function formatBytes(value: unknown) {
+  const bytes = Math.max(0, Number(value || 0));
+  if (bytes < 1024) return `${bytes.toFixed(0)} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; index < units.length && size >= 1024; index += 1) {
+    size /= 1024;
+    unit = units[index];
+  }
+  return `${size.toLocaleString("pt-BR", {
+    minimumFractionDigits: size < 100 ? 1 : 0,
+    maximumFractionDigits: 1,
+  })} ${unit}`;
 }
 
 function safeDate(value: unknown) {
@@ -150,6 +168,9 @@ export default function AdminControle() {
   }
 
   const s = data?.summary;
+  const storage = s?.storage ?? {};
+  const storagePercent = Math.min(100, Math.max(0, Number(storage.usedPercent || 0)));
+  const storageWarning = storagePercent >= 80;
 
   return (
     <DashboardLayout>
@@ -190,6 +211,69 @@ export default function AdminControle() {
           <StatCard title="Receita mensal ativa" value={cents(s?.subscriptions?.activeMonthlyValueCents)} note="Somente assinaturas marcadas como ativas/pagas" icon={Wallet} />
           <StatCard title="Bancos cadastrados" value={Number(s?.databases?.total || 0)} note={`${Number(s?.databases?.active || 0)} marcados como ativos`} icon={Database} />
         </div>
+
+        <Card className={storageWarning ? "border-amber-300" : undefined}>
+          <CardHeader>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <HardDrive className="h-5 w-5 text-primary" />
+                  Memória do banco de dados — Neon
+                </CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Uso do armazenamento PostgreSQL comparado ao limite atual do plano Neon.
+                </p>
+              </div>
+              <Badge variant={storageWarning ? "destructive" : "secondary"}>
+                Plano {storage.plan || "Free"} · {formatBytes(storage.limitBytes)}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div>
+              <div className="mb-2 flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Memória utilizada</p>
+                  <p className="text-3xl font-black tracking-tight">{formatBytes(storage.usedBytes)}</p>
+                </div>
+                <p className={`text-lg font-bold ${storageWarning ? "text-amber-600" : "text-primary"}`}>
+                  {storagePercent.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%
+                </p>
+              </div>
+              <div className="h-3 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={storageWarning ? "h-full rounded-full bg-amber-500 transition-all" : "h-full rounded-full bg-primary transition-all"}
+                  style={{ width: `${storagePercent}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Utilizado</p>
+                <p className="mt-1 text-xl font-bold">{formatBytes(storage.usedBytes)}</p>
+              </div>
+              <div className="rounded-xl border p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Restante</p>
+                <p className="mt-1 text-xl font-bold">{formatBytes(storage.remainingBytes)}</p>
+              </div>
+              <div className="rounded-xl border p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Limite do plano</p>
+                <p className="mt-1 text-xl font-bold">{formatBytes(storage.limitBytes)}</p>
+              </div>
+            </div>
+
+            {storageWarning ? (
+              <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                Atenção: o armazenamento já passou de 80% do limite do plano. Considere revisar dados antigos ou aumentar o plano antes de atingir a capacidade máxima.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                O uso é calculado pelo tamanho atual do banco PostgreSQL. O limite de 512 MiB corresponde ao limite lógico verificado no plano Neon atual do projeto notenote-database.
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
