@@ -111,7 +111,11 @@ export default async function handler(req: any, res: any) {
     } else {
       await sql`
         UPDATE users
-        SET "lastSignedIn" = NOW(), "failedLoginAttempts" = 0, "updatedAt" = NOW()
+        SET
+          "lastSignedIn" = NOW(),
+          "failedLoginAttempts" = 0,
+          "loginCount" = "loginCount" + 1,
+          "updatedAt" = NOW()
         WHERE id = ${user.id}
       `;
     }
