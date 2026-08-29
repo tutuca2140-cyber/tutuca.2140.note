@@ -105,6 +105,25 @@ async function getSessionUser(client: Client, req: any): Promise<SessionUser | n
   return user?.isActive ? user : null;
 }
 
+async function assertSubscriptionActive(client: Client, user: SessionUser) {
+  if (user.role === "super_admin") return;
+  const ownerId = commercialOwnerId(user);
+  if (!ownerId) return;
+  const result = await client.query(
+    `SELECT status FROM commercial_subscriptions WHERE "userId" = $1 LIMIT 1`,
+    [ownerId]
+  );
+  const status = String(result.rows[0]?.status || "");
+  if (status !== "active" && status !== "paid") {
+    throw Object.assign(
+      new Error(
+        "Sistema aguardando pagamento. Regularize sua assinatura para voltar a administrar bancos de dados."
+      ),
+      { statusCode: 402 }
+    );
+  }
+}
+
 async function assertDatabaseAccess(client: Client, user: SessionUser, databaseId: number) {
   const databaseResult = await client.query(`SELECT * FROM databases WHERE id = $1 LIMIT 1`, [databaseId]);
   const database = databaseResult.rows[0] as any;
@@ -284,6 +303,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    await assertSubscriptionActive(client, user);
     await ensureBackupTable(client);
     const body = await readJsonBody(req);
     const action = String(body?.action ?? "").trim();
