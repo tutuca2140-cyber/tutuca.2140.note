@@ -5,6 +5,7 @@ import { Route, Switch } from "wouter";
 import CommercialPaymentGate from "./components/CommercialPaymentGate";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SiteAccessTracker from "./components/SiteAccessTracker";
+import SystemGuideAssistant from "./components/SystemGuideAssistant";
 import { ThemeProvider } from "./contexts/ThemeContext";
 
 const Home = lazy(() => import("./pages/Home"));
@@ -87,6 +88,7 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <SiteAccessTracker />
+          <SystemGuideAssistant />
           <Suspense
             fallback={
               <div className="min-h-screen grid place-items-center text-muted-foreground">
