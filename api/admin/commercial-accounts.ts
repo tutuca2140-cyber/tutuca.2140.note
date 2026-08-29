@@ -63,6 +63,7 @@ async function listCommercialAccounts() {
       u.username,
       u.name,
       u.email,
+      u.whatsapp,
       u."isActive",
       u."createdAt",
       cs.plan,
@@ -81,10 +82,14 @@ async function listCommercialAccounts() {
     LEFT JOIN databases d ON d.id = uda."databaseId"
     WHERE u."loginMethod" = 'commercial_signup'
     GROUP BY
-      u.id, u.username, u.name, u.email, u."isActive", u."createdAt",
+      u.id, u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt",
       cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt"
     ORDER BY
-      CASE WHEN cs.status = 'pending_payment' THEN 0 ELSE 1 END,
+      CASE
+        WHEN cs.status = 'pending_payment' THEN 0
+        WHEN cs.status = 'past_due' THEN 1
+        ELSE 2
+      END,
       u."createdAt" DESC
   `;
 
@@ -102,6 +107,7 @@ async function listCommercialAccounts() {
     summary: {
       total: accounts.length,
       pending: accounts.filter((item: any) => item.status === "pending_payment").length,
+      overdue: accounts.filter((item: any) => item.status === "past_due").length,
       active: accounts.filter((item: any) => item.status === "active" || item.status === "paid").length,
       monthlyActiveCents: accounts
         .filter((item: any) => item.status === "active" || item.status === "paid")
@@ -110,9 +116,9 @@ async function listCommercialAccounts() {
   };
 }
 
-async function approveCommercialAccount(userId: number, admin: any) {
+async function getCommercialAccount(userId: number) {
   const sql = getSql();
-  const targetRows = await sql`
+  const rows = await sql`
     SELECT
       u.id, u.username, u.name, u.email, u."loginMethod", u."isActive",
       cs.plan, cs."priceCents", cs.status, cs."provisionedAt"
@@ -121,13 +127,36 @@ async function approveCommercialAccount(userId: number, admin: any) {
     WHERE u.id = ${userId}
     LIMIT 1
   `;
-  const target = targetRows[0] as any;
-
+  const target = rows[0] as any;
   if (!target || target.loginMethod !== "commercial_signup") {
     throw Object.assign(new Error("Conta comercial não encontrada."), {
       statusCode: 404,
     });
   }
+  return target;
+}
+
+async function writeSubscriptionAudit(admin: any, target: any, action: string, details: any) {
+  const sql = getSql();
+  await sql`
+    INSERT INTO "auditLogs"
+      ("userId", username, action, entity, "entityId", details, status, "createdAt")
+    VALUES (
+      ${admin.id},
+      ${admin.username || admin.email || "Super Admin"},
+      ${action},
+      'commercial_subscriptions',
+      ${target.id},
+      ${JSON.stringify(details)},
+      'success',
+      NOW()
+    )
+  `;
+}
+
+async function approveCommercialAccount(userId: number, admin: any) {
+  const sql = getSql();
+  const target = await getCommercialAccount(userId);
 
   const planValue = String(target.plan || "");
   if (!isPlan(planValue)) {
@@ -152,31 +181,60 @@ async function approveCommercialAccount(userId: number, admin: any) {
      WHERE "userId" = ${userId}
   `;
 
-  await sql`
-    INSERT INTO "auditLogs"
-      ("userId", username, action, entity, "entityId", details, status, "createdAt")
-    VALUES (
-      ${admin.id},
-      ${admin.username || admin.email || "Super Admin"},
-      'approve_commercial_account',
-      'users',
-      ${userId},
-      ${JSON.stringify({
-        plan,
-        databaseLimit: config.limit,
-        provisioning: "first_login",
-        alreadyProvisioned: Boolean(target.provisionedAt),
-      })},
-      'success',
-      NOW()
-    )
-  `;
+  await writeSubscriptionAudit(admin, target, "approve_commercial_account", {
+    plan,
+    databaseLimit: config.limit,
+    provisioning: "first_login",
+    alreadyProvisioned: Boolean(target.provisionedAt),
+  });
 
   return {
     plan,
     planLabel: config.label,
     databaseLimit: config.limit,
     alreadyProvisioned: Boolean(target.provisionedAt),
+  };
+}
+
+async function setPaymentStatus(userId: number, admin: any, status: "active" | "past_due") {
+  const sql = getSql();
+  const target = await getCommercialAccount(userId);
+  const planValue = String(target.plan || "");
+  if (!isPlan(planValue)) {
+    throw Object.assign(new Error("Plano comercial inválido para esta conta."), {
+      statusCode: 409,
+    });
+  }
+
+  // Falta de pagamento não desativa o login. O bloqueio é de uso e mantém somente o Dashboard.
+  await sql`
+    UPDATE users
+       SET "isActive" = true,
+           "failedLoginAttempts" = 0,
+           "updatedAt" = NOW()
+     WHERE id = ${userId}
+  `;
+  await sql`
+    UPDATE commercial_subscriptions
+       SET status = ${status}, "updatedAt" = NOW()
+     WHERE "userId" = ${userId}
+  `;
+
+  await writeSubscriptionAudit(
+    admin,
+    target,
+    status === "past_due" ? "mark_subscription_past_due" : "mark_subscription_paid",
+    {
+      previousStatus: target.status,
+      newStatus: status,
+      accessMode: status === "past_due" ? "dashboard_only" : "full_plan_access",
+    }
+  );
+
+  return {
+    status,
+    plan: planValue,
+    planLabel: PLAN_CONFIG[planValue].label,
   };
 }
 
@@ -208,12 +266,6 @@ export default async function handler(req: any, res: any) {
     const body = await readJsonBody(req);
     const action = String(body?.action ?? "approve");
     const userId = Number(body?.userId);
-    if (action !== "approve") {
-      return sendJson(res, 400, {
-        success: false,
-        message: "Ação comercial não reconhecida.",
-      });
-    }
     if (!Number.isInteger(userId) || userId <= 0) {
       return sendJson(res, 400, {
         success: false,
@@ -221,13 +273,39 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const approval = await approveCommercialAccount(userId, admin);
-    return sendJson(res, 200, {
-      success: true,
-      approval,
-      message: approval.alreadyProvisioned
-        ? `Conta ${approval.planLabel} aprovada e ativa. Os bancos já estavam provisionados.`
-        : `Conta ${approval.planLabel} aprovada e ativa. Os ${approval.databaseLimit} banco(s) do plano serão criados automaticamente no primeiro login do contratante.`,
+    if (action === "approve") {
+      const approval = await approveCommercialAccount(userId, admin);
+      return sendJson(res, 200, {
+        success: true,
+        approval,
+        message: approval.alreadyProvisioned
+          ? `Conta ${approval.planLabel} aprovada e ativa. Os bancos já estavam provisionados.`
+          : `Conta ${approval.planLabel} aprovada e ativa. Os ${approval.databaseLimit} banco(s) do plano serão criados automaticamente no primeiro login do contratante.`,
+      });
+    }
+
+    if (action === "mark_unpaid") {
+      const payment = await setPaymentStatus(userId, admin, "past_due");
+      return sendJson(res, 200, {
+        success: true,
+        payment,
+        message:
+          "Assinatura marcada como aguardando pagamento. O cliente poderá entrar, mas ficará restrito ao Dashboard.",
+      });
+    }
+
+    if (action === "mark_paid") {
+      const payment = await setPaymentStatus(userId, admin, "active");
+      return sendJson(res, 200, {
+        success: true,
+        payment,
+        message: "Pagamento confirmado. As funções do plano foram liberadas novamente.",
+      });
+    }
+
+    return sendJson(res, 400, {
+      success: false,
+      message: "Ação comercial não reconhecida.",
     });
   } catch (error: any) {
     console.error("[admin/commercial-accounts]", error);
