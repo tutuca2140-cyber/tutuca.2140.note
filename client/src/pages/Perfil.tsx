@@ -43,6 +43,8 @@ type Profile = {
   priceCents: number | null;
 };
 
+const PROFILE_API = "/api/commercial-account?scope=profile";
+
 function formatWhatsapp(value: string) {
   const digits = value.replace(/\D/g, "").replace(/^55(?=\d{11}$)/, "").slice(0, 11);
   if (digits.length <= 2) return digits;
@@ -78,7 +80,7 @@ export default function Perfil() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/profile", {
+      const response = await fetch(PROFILE_API, {
         credentials: "include",
         cache: "no-store",
       });
@@ -125,7 +127,7 @@ export default function Perfil() {
 
     setSaving(true);
     try {
-      const response = await fetch("/api/profile", {
+      const response = await fetch(PROFILE_API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -163,7 +165,7 @@ export default function Perfil() {
     if (!profile?.canDeleteAccount) return;
     setDeleting(true);
     try {
-      const response = await fetch("/api/profile", {
+      const response = await fetch(PROFILE_API, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
