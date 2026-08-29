@@ -30,6 +30,26 @@ function isValidCommercialPassword(value: string) {
   return value.length >= 8 && /[A-Z]/.test(value) && /[0-9]/.test(value);
 }
 
+function isValidFullName(value: string) {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  return value.trim().length >= 5 && value.trim().length <= 200 && parts.length >= 2;
+}
+
+function normalizeBrazilWhatsapp(value: string) {
+  let digits = value.replace(/\D/g, "");
+  if (digits.length === 13 && digits.startsWith("55")) digits = digits.slice(2);
+  return digits;
+}
+
+function isValidBrazilWhatsapp(value: string) {
+  const digits = normalizeBrazilWhatsapp(value);
+  return /^[1-9][0-9]9[0-9]{8}$/.test(digits);
+}
+
+function formatStoredWhatsapp(value: string) {
+  return `+55${normalizeBrazilWhatsapp(value)}`;
+}
+
 async function ensureCommercialSubscriptionTable() {
   const sql = getSql();
   await sql`
@@ -119,9 +139,11 @@ export default async function handler(req: any, res: any) {
 
   try {
     const body = await readJsonBody(req);
+    const name = String(body?.name ?? "").trim();
     const username = String(body?.username ?? "").trim();
     const email = String(body?.email ?? "").trim().toLowerCase();
     const password = String(body?.password ?? "");
+    const whatsappInput = String(body?.whatsapp ?? "").trim();
     const plan = String(body?.plan ?? "").trim().toLowerCase();
     const captchaToken = String(body?.captchaToken ?? "");
     const captchaAnswer = String(body?.captchaAnswer ?? "");
@@ -130,6 +152,13 @@ export default async function handler(req: any, res: any) {
       return sendJson(res, 400, {
         success: false,
         message: "Escolha um plano Basic ou Plus antes de se cadastrar.",
+      });
+    }
+
+    if (!isValidFullName(name)) {
+      return sendJson(res, 400, {
+        success: false,
+        message: "Informe seu nome e sobrenome completos.",
       });
     }
 
@@ -153,6 +182,14 @@ export default async function handler(req: any, res: any) {
         success: false,
         message:
           "A senha deve ter no mínimo 8 caracteres, pelo menos uma letra maiúscula e pelo menos um número.",
+      });
+    }
+
+    if (!isValidBrazilWhatsapp(whatsappInput)) {
+      return sendJson(res, 400, {
+        success: false,
+        message:
+          "Informe um WhatsApp brasileiro válido com DDD e número iniciado por 9, por exemplo (24) 99999-9999.",
       });
     }
 
@@ -187,12 +224,14 @@ export default async function handler(req: any, res: any) {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    const whatsapp = formatStoredWhatsapp(whatsappInput);
     const created = await sql`
       INSERT INTO users (
         username,
         "passwordHash",
         name,
         email,
+        whatsapp,
         "loginMethod",
         role,
         "canView",
@@ -211,8 +250,9 @@ export default async function handler(req: any, res: any) {
       ) VALUES (
         ${username},
         ${passwordHash},
-        ${username},
+        ${name},
         ${email},
+        ${whatsapp},
         'commercial_signup',
         'user',
         true,
@@ -229,7 +269,7 @@ export default async function handler(req: any, res: any) {
         NOW(),
         NOW()
       )
-      RETURNING id, username, email
+      RETURNING id, username, email, name, whatsapp
     `;
 
     const user = created[0] as any;
@@ -250,8 +290,10 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 201, {
       success: true,
       registration: {
+        name: user.name,
         username: user.username,
         email: user.email,
+        whatsapp: user.whatsapp,
         plan,
         priceCents: PLAN_PRICES[plan],
         databaseLimit: PLAN_DATABASE_LIMITS[plan],
