@@ -243,6 +243,7 @@ export default function FloatingTutorial() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const nextId = useRef(1);
   const dragging = useRef<{ pointerId: number; offsetX: number; offsetY: number; moved: boolean } | null>(null);
+  const dragJustMoved = useRef(false);
 
   const availableGuides = useMemo(() => guides.filter(guide => !guide.adminOnly || user?.role === "super_admin"), [user?.role]);
   const contextualGuide = useMemo(() => routeGuide(location, availableGuides), [location, availableGuides]);
@@ -264,7 +265,7 @@ export default function FloatingTutorial() {
 
   useEffect(() => {
     if (loading || !user || messages.length) return;
-    setMessages([{ id: nextId.current++, role: "assistant", text: `Olá${user.name ? `, ${user.name.split(" ")[0]}` : ""}! Sou o Guia Note Note. Mantive o tutorial completo. Você pode me mover pela tela, minimizar e continuar arrastando o ícone.`, guide: contextualGuide }]);
+    setMessages([{ id: nextId.current++, role: "assistant", text: `Olá${user.name ? `, ${user.name.split(" ")[0]}` : ""}! Sou o Guia Note Note. Você pode me mover pela tela aberto ou minimizado.`, guide: contextualGuide }]);
   }, [contextualGuide, loading, messages.length, user]);
 
   useEffect(() => {
@@ -303,7 +304,7 @@ export default function FloatingTutorial() {
   };
 
   const startDrag = (event: React.PointerEvent<HTMLElement>) => {
-    if ((event.target as HTMLElement).closest("button,input")) return;
+    if (!minimized && (event.target as HTMLElement).closest("button,input")) return;
     const rect = panelRef.current?.getBoundingClientRect();
     if (!rect) return;
     dragging.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top, moved: false };
@@ -313,7 +314,7 @@ export default function FloatingTutorial() {
   const moveDrag = (event: React.PointerEvent<HTMLElement>) => {
     const drag = dragging.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    drag.moved = true;
+    if (Math.abs(event.movementX) + Math.abs(event.movementY) > 1) drag.moved = true;
     const rect = panelRef.current?.getBoundingClientRect();
     setPosition(clampPosition({ x: event.clientX - drag.offsetX, y: event.clientY - drag.offsetY }, rect?.width ?? 72, rect?.height ?? 72));
   };
@@ -321,8 +322,10 @@ export default function FloatingTutorial() {
   const stopDrag = (event: React.PointerEvent<HTMLElement>) => {
     const drag = dragging.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
+    dragJustMoved.current = drag.moved;
     dragging.current = null;
     try { localStorage.setItem(POSITION_KEY, JSON.stringify(position)); } catch { /* sem bloqueio */ }
+    window.setTimeout(() => { dragJustMoved.current = false; }, 120);
   };
 
   const toggleMinimized = () => {
@@ -350,7 +353,7 @@ export default function FloatingTutorial() {
       >
         <button
           type="button"
-          onClick={() => { if (!dragging.current) toggleMinimized(); }}
+          onClick={() => { if (!dragJustMoved.current) toggleMinimized(); }}
           className="group relative flex h-[70px] w-[70px] cursor-move items-center justify-center rounded-[24px] border border-cyan-300/40 bg-slate-950/95 text-white shadow-[0_0_45px_rgba(34,211,238,0.42)] backdrop-blur-2xl transition hover:scale-105"
           aria-label="Abrir Guia Note Note"
         >
@@ -359,7 +362,6 @@ export default function FloatingTutorial() {
           <GraduationCap className="relative h-8 w-8 text-cyan-200 drop-shadow-[0_0_10px_rgba(103,232,249,.8)]" />
           <span className="absolute right-1 top-1 h-3 w-3 rounded-full border-2 border-slate-950 bg-emerald-400" />
         </button>
-        <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-cyan-300/20 bg-slate-950/90 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-cyan-200 opacity-0 shadow-lg transition group-hover:opacity-100">arraste • toque para abrir</div>
       </div>
     );
   }
