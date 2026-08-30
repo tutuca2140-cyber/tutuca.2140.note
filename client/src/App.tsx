@@ -1,8 +1,9 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { lazy, Suspense } from "react";
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
+import FloatingTutorial from "./components/FloatingTutorial";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import ThemeToggle from "./components/ThemeToggle";
 
@@ -54,6 +55,9 @@ function Router() {
 }
 
 function App() {
+  const [location] = useLocation();
+  const showTutorial = location !== "/" && location !== "/login" && location !== "/404";
+
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light" switchable>
@@ -69,6 +73,7 @@ function App() {
           >
             <Router />
           </Suspense>
+          {showTutorial && <FloatingTutorial />}
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
