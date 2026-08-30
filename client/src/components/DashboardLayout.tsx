@@ -25,6 +25,7 @@ import {
   CalendarDays,
   Package,
   MessageSquareText,
+  MoreHorizontal,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useEffect, useState } from "react";
@@ -45,36 +46,25 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [location, navigate] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const utils = trpc.useUtils();
-  const { data: availableDatabases = [] } = trpc.databases.list.useQuery(
-    undefined,
-    { enabled: Boolean(user) }
-  );
-  const { data: activeDatabase } = trpc.databases.getActive.useQuery(
-    undefined,
-    { enabled: Boolean(user) }
-  );
+  const { data: availableDatabases = [] } = trpc.databases.list.useQuery(undefined, { enabled: Boolean(user) });
+  const { data: activeDatabase } = trpc.databases.getActive.useQuery(undefined, { enabled: Boolean(user) });
   const setActiveDatabase = trpc.databases.setActive.useMutation();
 
   useEffect(() => {
-    if (user?.dashboardOnly && location !== "/dashboard") {
-      navigate("/dashboard", { replace: true });
-    }
+    if (user?.dashboardOnly && location !== "/dashboard") navigate("/dashboard", { replace: true });
   }, [location, navigate, user?.dashboardOnly]);
+
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location]);
 
   const handleDatabaseChange = async (value: string) => {
     try {
       await setActiveDatabase.mutateAsync({ id: Number(value) });
-      await Promise.all([
-        utils.databases.getActive.invalidate(),
-        utils.invalidate(),
-      ]);
+      await Promise.all([utils.databases.getActive.invalidate(), utils.invalidate()]);
       toast.success("Banco de dados alterado.");
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível alterar o banco."
-      );
+      toast.error(error instanceof Error ? error.message : "Não foi possível alterar o banco.");
     }
   };
 
@@ -87,10 +77,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   };
 
-  const isActive = (path: string) => {
-    return location === path || location.startsWith(path + "/");
-  };
-
+  const isActive = (path: string) => location === path || location.startsWith(path + "/");
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   const isSuperAdmin = user?.role === "super_admin";
   const regularAccess = !user?.dashboardOnly;
@@ -117,6 +104,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     { name: "Configurações", href: "/admin/configuracoes", icon: Settings, show: user?.canAccessSettings },
   ];
 
+  const visibleNavigation = navigation.filter(item => item.show);
+  const mobileQuickHrefs = ["/dashboard", "/clientes", "/pagamentos", "/caixa"];
+  const mobileQuickNavigation = mobileQuickHrefs
+    .map(href => visibleNavigation.find(item => item.href === href))
+    .filter((item): item is (typeof navigation)[number] => Boolean(item));
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -141,7 +134,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </div>
       </div>
 
-      <aside className={`fixed top-0 left-0 z-40 h-screen w-64 bg-background border-r border-border transition-transform duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}>
+      <aside className={`fixed top-0 left-0 z-[60] h-screen w-64 bg-background border-r border-border transition-transform duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:z-40 lg:translate-x-0`}>
         <div className="flex flex-col h-full">
           <div className="px-4 py-4 border-b border-border">
             <img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-auto w-full object-contain" />
@@ -173,7 +166,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
 
           <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-            {navigation.filter(item => item.show).map(item => {
+            {visibleNavigation.map(item => {
               const Icon = item.icon;
               const active = isActive(item.href);
               return (
@@ -212,17 +205,36 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       </aside>
 
       <div className="lg:pl-64">
-        <main className="pt-20 px-4 pb-8 sm:px-6 lg:pt-0 lg:px-8 lg:py-8">
+        <main className="pt-20 px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:px-6 lg:pt-0 lg:px-8 lg:py-8">
           <div className="mx-auto w-full max-w-[1600px]">{children}</div>
         </main>
       </div>
 
-      {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[70] border-t border-border/70 bg-background/95 px-2 pt-1.5 shadow-[0_-10px_30px_rgba(0,0,0,0.06)] backdrop-blur-xl">
+        <div className="mx-auto grid max-w-md grid-cols-5 items-end gap-1 pb-[max(0.35rem,env(safe-area-inset-bottom))]">
+          {mobileQuickNavigation.map(item => {
+            const Icon = item.icon;
+            const active = isActive(item.href);
+            return (
+              <Link key={item.href} href={item.href}>
+                <a className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[10px] font-semibold transition-all active:scale-95 ${active ? "text-primary" : "text-muted-foreground"}`}>
+                  <span className={`flex h-7 w-10 items-center justify-center rounded-full ${active ? "bg-primary/10" : ""}`}><Icon className="h-[19px] w-[19px]" /></span>
+                  <span className="max-w-full truncate">{item.name}</span>
+                </a>
+              </Link>
+            );
+          })}
+          {Array.from({ length: Math.max(0, 4 - mobileQuickNavigation.length) }).map((_, index) => <span key={`mobile-empty-${index}`} />)}
+          <button type="button" onClick={() => setSidebarOpen(true)} className="flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[10px] font-semibold text-muted-foreground transition-all active:scale-95">
+            <span className="flex h-7 w-10 items-center justify-center rounded-full"><MoreHorizontal className="h-[19px] w-[19px]" /></span>
+            <span>Mais</span>
+          </button>
+        </div>
+      </nav>
 
-      <FeedbackPrompt
-        open={Boolean(user.shouldShowFeedback)}
-        onSubmitted={() => { void refresh(); }}
-      />
+      {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-[55] lg:hidden" onClick={() => setSidebarOpen(false)} />}
+
+      <FeedbackPrompt open={Boolean(user.shouldShowFeedback)} onSubmitted={() => { void refresh(); }} />
     </div>
   );
 }
