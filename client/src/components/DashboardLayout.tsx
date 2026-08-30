@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCommercialContext } from "@/hooks/useCommercialContext";
 import { trpc } from "@/lib/trpc";
 import {
-  Activity, BookOpen, CalendarDays, Car, ChevronRight, ClipboardList, CreditCard, Database,
+  Activity, CalendarDays, Car, ChevronRight, ClipboardList, CreditCard, Database,
   FileText, LayoutDashboard, LogOut, Menu, MoreHorizontal, Package, Settings, Shield,
   UserRound, UserRoundCog, Users, Wallet, X,
 } from "lucide-react";
@@ -46,7 +46,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   const navigation: NavItem[] = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, show: true },
-    { name: "Tutorial", href: "/tutorial", icon: BookOpen, show: Boolean(commercialAccount && regularAccess) },
     { name: "Clientes", href: "/clientes", icon: Users, show: Boolean(user?.canView && regularAccess) },
     { name: "Empréstimos", href: "/emprestimos", icon: CreditCard, show: Boolean(user?.canView && regularAccess) },
     { name: "Veículos", href: "/veiculos", icon: Car, show: Boolean(user?.canView && regularAccess) },
