@@ -1,3 +1,4 @@
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { lazy, Suspense } from "react";
@@ -50,6 +51,12 @@ const PaidMeuBanco = () => <CommercialPaymentGate><MeuBanco /></CommercialPaymen
 const PaidEquipe = () => <CommercialPaymentGate><Equipe /></CommercialPaymentGate>;
 const PaidTutorial = () => <CommercialPaymentGate><Tutorial /></CommercialPaymentGate>;
 
+function AuthenticatedSystemGuide() {
+  const { user, loading } = useAuth();
+  if (loading || !user) return null;
+  return <SystemGuideAssistant />;
+}
+
 function Router() {
   return (
     <Switch>
@@ -91,7 +98,7 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <SiteAccessTracker />
-          <SystemGuideAssistant />
+          <AuthenticatedSystemGuide />
           <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Carregando...</div>}>
             <Router />
           </Suspense>
