@@ -26,6 +26,7 @@ const ContasAReceber = lazy(() => import("./pages/ContasAReceber"));
 const Relatorios = lazy(() => import("./pages/Relatorios"));
 const MeuBanco = lazy(() => import("./pages/MeuBanco"));
 const Equipe = lazy(() => import("./pages/Equipe"));
+const Tutorial = lazy(() => import("./pages/Tutorial"));
 const AdminControle = lazy(() => import("./pages/admin/Controle"));
 const AdminAssinaturas = lazy(() => import("./pages/admin/Assinaturas"));
 const AdminUsuarios = lazy(() => import("./pages/admin/Usuarios"));
@@ -47,6 +48,7 @@ const PaidContasAReceber = () => <CommercialPaymentGate><ContasAReceber /></Comm
 const PaidRelatorios = () => <CommercialPaymentGate><Relatorios /></CommercialPaymentGate>;
 const PaidMeuBanco = () => <CommercialPaymentGate><MeuBanco /></CommercialPaymentGate>;
 const PaidEquipe = () => <CommercialPaymentGate><Equipe /></CommercialPaymentGate>;
+const PaidTutorial = () => <CommercialPaymentGate><Tutorial /></CommercialPaymentGate>;
 
 function Router() {
   return (
@@ -69,6 +71,7 @@ function Router() {
       <Route path={"/relatorios"} component={PaidRelatorios} />
       <Route path={"/meu-banco"} component={PaidMeuBanco} />
       <Route path={"/equipe"} component={PaidEquipe} />
+      <Route path={"/tutorial"} component={PaidTutorial} />
       <Route path={"/admin/controle"} component={AdminControle} />
       <Route path={"/admin/assinaturas"} component={AdminAssinaturas} />
       <Route path={"/admin/usuarios"} component={AdminUsuarios} />
@@ -89,13 +92,7 @@ function App() {
           <Toaster />
           <SiteAccessTracker />
           <SystemGuideAssistant />
-          <Suspense
-            fallback={
-              <div className="min-h-screen grid place-items-center text-muted-foreground">
-                Carregando...
-              </div>
-            }
-          >
+          <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Carregando...</div>}>
             <Router />
           </Suspense>
         </TooltipProvider>
