@@ -22,6 +22,8 @@ const Caixa = lazy(() => import("./pages/Caixa"));
 const Agentes = lazy(() => import("./pages/Agentes"));
 const Veiculos = lazy(() => import("./pages/Veiculos"));
 const Produtos = lazy(() => import("./pages/Produtos"));
+const Imoveis = lazy(() => import("./pages/Imoveis"));
+const Alugueis = lazy(() => import("./pages/Alugueis"));
 const Financiamentos = lazy(() => import("./pages/Financiamentos"));
 const ContasAReceber = lazy(() => import("./pages/ContasAReceber"));
 const Relatorios = lazy(() => import("./pages/Relatorios"));
@@ -44,6 +46,8 @@ const PaidCaixa = () => <CommercialPaymentGate><Caixa /></CommercialPaymentGate>
 const PaidAgentes = () => <CommercialPaymentGate><Agentes /></CommercialPaymentGate>;
 const PaidVeiculos = () => <CommercialPaymentGate><Veiculos /></CommercialPaymentGate>;
 const PaidProdutos = () => <CommercialPaymentGate><Produtos /></CommercialPaymentGate>;
+const PaidImoveis = () => <CommercialPaymentGate><Imoveis /></CommercialPaymentGate>;
+const PaidAlugueis = () => <CommercialPaymentGate><Alugueis /></CommercialPaymentGate>;
 const PaidFinanciamentos = () => <CommercialPaymentGate><Financiamentos /></CommercialPaymentGate>;
 const PaidContasAReceber = () => <CommercialPaymentGate><ContasAReceber /></CommercialPaymentGate>;
 const PaidRelatorios = () => <CommercialPaymentGate><Relatorios /></CommercialPaymentGate>;
@@ -73,6 +77,8 @@ function Router() {
       <Route path={"/agentes"} component={PaidAgentes} />
       <Route path={"/veiculos"} component={PaidVeiculos} />
       <Route path={"/produtos"} component={PaidProdutos} />
+      <Route path={"/imoveis"} component={PaidImoveis} />
+      <Route path={"/alugueis"} component={PaidAlugueis} />
       <Route path={"/financiamentos"} component={PaidFinanciamentos} />
       <Route path={"/contas-a-receber"} component={PaidContasAReceber} />
       <Route path={"/relatorios"} component={PaidRelatorios} />
