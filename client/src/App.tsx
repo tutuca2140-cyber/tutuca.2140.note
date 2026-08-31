@@ -36,7 +36,6 @@ const AdminAuditoria = lazy(() => import("./pages/admin/Auditoria"));
 const AdminConfiguracoes = lazy(() => import("./pages/admin/Configuracoes"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
-const PaidPerfil = () => <CommercialPaymentGate><Perfil /></CommercialPaymentGate>;
 const PaidClientes = () => <CommercialPaymentGate><Clientes /></CommercialPaymentGate>;
 const PaidEmprestimos = () => <CommercialPaymentGate><Emprestimos /></CommercialPaymentGate>;
 const PaidPagamentos = () => <CommercialPaymentGate><Pagamentos /></CommercialPaymentGate>;
@@ -65,7 +64,7 @@ function Router() {
       <Route path={"/cadastro"} component={Cadastro} />
       <Route path={"/"} component={Home} />
       <Route path={"/dashboard"} component={Dashboard} />
-      <Route path={"/perfil"} component={PaidPerfil} />
+      <Route path={"/perfil"} component={Perfil} />
       <Route path={"/clientes"} component={PaidClientes} />
       <Route path={"/emprestimos"} component={PaidEmprestimos} />
       <Route path={"/pagamentos"} component={PaidPagamentos} />
