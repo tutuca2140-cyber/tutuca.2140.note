@@ -44,6 +44,15 @@ function requestOrigin(req: any) {
   return `${forwardedProto}://${forwardedHost}`;
 }
 
+function escapeEmailHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 async function sendCommercialPasswordResetEmail(params: {
   to: string;
   name?: string | null;
@@ -64,6 +73,65 @@ async function sendCommercialPasswordResetEmail(params: {
   }
 
   const firstName = String(params.name || "").trim().split(/\s+/)[0] || "cliente";
+  const safeName = escapeEmailHtml(firstName);
+  const safeResetUrl = escapeEmailHtml(params.resetUrl);
+  const logoUrl = "https://notenote.com.br/brand/note-note-logo-official.png";
+  const html = `<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Recuperação de senha — Note Note</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f4f7fb;padding:28px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:620px;background:#ffffff;border:1px solid #dbe7f5;border-radius:22px;overflow:hidden;box-shadow:0 14px 40px rgba(15,23,42,.08);">
+            <tr>
+              <td align="center" style="padding:30px 30px 20px;background:linear-gradient(135deg,#eff6ff,#e0f2fe);border-bottom:1px solid #dbeafe;">
+                <img src="${logoUrl}" alt="Note Note" width="220" style="display:block;max-width:220px;width:100%;height:auto;border:0;" />
+                <div style="margin-top:12px;font-size:13px;color:#475569;letter-spacing:.03em;">Sistema de Gestão Financeira</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:34px 34px 10px;">
+                <div style="display:inline-block;padding:6px 10px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:12px;font-weight:700;">SEGURANÇA DA CONTA</div>
+                <h1 style="margin:18px 0 10px;font-size:28px;line-height:1.2;color:#0f172a;">Crie uma nova senha</h1>
+                <p style="margin:0 0 16px;font-size:16px;line-height:1.7;color:#334155;">Olá, <strong>${safeName}</strong>.</p>
+                <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#475569;">Recebemos uma solicitação para redefinir a senha da sua conta no Note Note. Para continuar, use o botão abaixo. O link é válido por <strong>30 minutos</strong> e pode ser utilizado apenas uma vez.</p>
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:24px 0;">
+                  <tr>
+                    <td align="center">
+                      <a href="${safeResetUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 24px;border-radius:12px;">Redefinir minha senha</a>
+                    </td>
+                  </tr>
+                </table>
+                <div style="padding:16px 18px;border:1px solid #bfdbfe;border-radius:14px;background:#eff6ff;color:#1e3a8a;font-size:13px;line-height:1.6;">
+                  <strong>Normas da nova senha:</strong><br />
+                  mínimo de 8 caracteres, pelo menos 1 letra maiúscula e pelo menos 1 número.
+                </div>
+                <p style="margin:22px 0 0;font-size:13px;line-height:1.6;color:#64748b;">Se o botão não abrir, copie e cole este endereço no navegador:</p>
+                <p style="margin:8px 0 0;word-break:break-all;font-size:12px;line-height:1.6;color:#2563eb;">${safeResetUrl}</p>
+                <p style="margin:22px 0 0;font-size:13px;line-height:1.6;color:#64748b;">Se você não solicitou esta alteração, ignore esta mensagem. Sua senha atual continuará válida.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 34px 30px;">
+                <div style="border-top:1px solid #e2e8f0;padding-top:20px;text-align:center;color:#64748b;font-size:12px;line-height:1.6;">
+                  <strong style="color:#334155;">Este é um e-mail automático do Note Note.</strong><br />
+                  Por segurança, não responda a esta mensagem.<br />
+                  © ${new Date().getFullYear()} Note Note
+                </div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -73,16 +141,19 @@ async function sendCommercialPasswordResetEmail(params: {
     body: JSON.stringify({
       from,
       to: [params.to],
-      subject: "Recuperação de senha — Note Note",
+      subject: "Recupere sua senha do Note Note",
       text: [
         `Olá, ${firstName}.`,
         "",
         "Recebemos uma solicitação para redefinir sua senha do Note Note.",
+        "A nova senha deve ter no mínimo 8 caracteres, uma letra maiúscula e um número.",
         "Use o link abaixo em até 30 minutos:",
         params.resetUrl,
         "",
         "Se você não solicitou essa alteração, ignore este e-mail.",
+        "Este é um e-mail automático. Por segurança, não responda a esta mensagem.",
       ].join("\n"),
+      html,
     }),
   });
 
