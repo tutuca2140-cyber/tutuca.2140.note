@@ -138,7 +138,7 @@ export default function Cadastro() {
     if (!plan) return setError("Escolha um plano antes de criar o cadastro.");
     if (!fullNameValid) return setError("Informe seu nome e sobrenome completos.");
     if (!whatsappValid) return setError("Informe um WhatsApp brasileiro válido com DDD e número iniciado por 9.");
-    if (billingMethod === "pix_annual" && !cpfValid) return setError("Informe um CPF válido para gerar o Pix do Mercado Pago.");
+    if (billingMethod === "pix_annual" && !cpfValid) return setError("Informe um CPF válido para gerar o Pix do Asaas.");
     if (!passwordValid) return setError("A senha ainda não atende aos requisitos obrigatórios.");
     if (!passwordsMatch) return setError("As duas senhas precisam ser iguais.");
     if (!notRobot || !captchaAnswer.trim()) return setError("Confirme que você não é um robô e resolva a verificação.");
@@ -159,14 +159,14 @@ export default function Cadastro() {
       const paymentUrl = String(result?.subscription?.checkoutUrl ?? "").trim();
       if (billingMethod === "pix_annual") {
         const pix = result?.subscription?.pix as PixInfo | undefined;
-        if (!pix?.qrCode) throw new Error("Cadastro criado, mas o Mercado Pago não retornou o QR Code Pix.");
+        if (!pix?.qrCode) throw new Error("Cadastro criado, mas o Asaas não retornou o QR Code Pix.");
         setCheckoutUrl(paymentUrl);
         setPixInfo(pix);
         setSuccess(true);
         return;
       }
 
-      if (!paymentUrl.startsWith("https://")) throw new Error("Cadastro criado, mas o Mercado Pago não retornou o link de pagamento.");
+      if (!paymentUrl.startsWith("https://")) throw new Error("Cadastro criado, mas o Asaas não retornou o link de pagamento.");
       setCheckoutUrl(paymentUrl);
       setSuccess(true);
       window.location.assign(paymentUrl);
@@ -204,16 +204,16 @@ export default function Cadastro() {
               {billingMethod === "pix_annual" && pixInfo ? (
                 <div className="mt-6 text-left">
                   <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
-                    <strong>Seu Pix anual foi gerado pelo Mercado Pago.</strong> Você continua com os 7 dias grátis. Se pagar durante o teste, os 12 meses começam após o fim dos 7 dias.
+                    <strong>Seu Pix anual foi gerado pelo Asaas.</strong> Você continua com os 7 dias grátis. Se pagar durante o teste, os 12 meses começam após o fim dos 7 dias.
                   </div>
 
                   <div className="mt-5 rounded-2xl border bg-white p-5 text-center shadow-sm">
-                    <div className="mx-auto inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-extrabold uppercase tracking-wide text-emerald-700"><QrCode className="h-4 w-4" />Pix Mercado Pago</div>
+                    <div className="mx-auto inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-extrabold uppercase tracking-wide text-emerald-700"><QrCode className="h-4 w-4" />Pix Asaas</div>
                     <p className="mt-3 text-3xl font-black text-slate-950">{plans[plan].annualPix}</p>
                     <p className="mt-1 text-xs text-slate-500">Pagamento anual à vista</p>
 
                     {pixInfo.qrCodeBase64 ? (
-                      <img src={`data:image/png;base64,${pixInfo.qrCodeBase64}`} alt="QR Code Pix Mercado Pago" className="mx-auto mt-5 h-56 w-56 rounded-xl border bg-white p-2" />
+                      <img src={`data:image/png;base64,${pixInfo.qrCodeBase64}`} alt="QR Code Pix Asaas" className="mx-auto mt-5 h-56 w-56 rounded-xl border bg-white p-2" />
                     ) : null}
 
                     <Label htmlFor="pix-copy" className="mt-5 block text-left">Pix Copia e Cola</Label>
@@ -222,16 +222,16 @@ export default function Cadastro() {
                       <Copy className="mr-2 h-4 w-4" />{copied ? "Código copiado" : "Copiar Pix"}
                     </Button>
 
-                    {checkoutUrl.startsWith("https://") ? <a href={checkoutUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl border border-emerald-200 px-5 font-bold text-emerald-700 transition hover:bg-emerald-50">Abrir Pix no Mercado Pago</a> : null}
+                    {checkoutUrl.startsWith("https://") ? <a href={checkoutUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl border border-emerald-200 px-5 font-bold text-emerald-700 transition hover:bg-emerald-50">Abrir cobrança no Asaas</a> : null}
                   </div>
                 </div>
               ) : (
                 <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4 text-left text-sm text-blue-950">
-                  Você tem 7 dias grátis. Autorize a assinatura no Mercado Pago; a primeira cobrança mensal está programada para depois do período de teste.
+                  Você tem 7 dias grátis. Cadastre seu cartão no checkout seguro do Asaas; a primeira cobrança mensal está programada para depois do período de teste.
                 </div>
               )}
 
-              {billingMethod === "card_monthly" && checkoutUrl && <a href={checkoutUrl} className="mt-6 inline-flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-5 font-bold text-white transition hover:bg-blue-700">Continuar no Mercado Pago</a>}
+              {billingMethod === "card_monthly" && checkoutUrl && <a href={checkoutUrl} className="mt-6 inline-flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-5 font-bold text-white transition hover:bg-blue-700">Continuar no Asaas</a>}
               <Link href="/login"><a className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl border border-blue-200 px-5 font-bold text-blue-700 transition hover:bg-blue-50">Ir para o login</a></Link>
             </CardContent>
           </Card>
@@ -272,7 +272,7 @@ export default function Cadastro() {
                   <p className="text-xs font-extrabold uppercase tracking-wide text-emerald-700">Pix anual</p>
                   <p className="mt-1 text-xl font-black text-slate-950">{plans[plan].annualPix}</p>
                   <p className="mt-2 text-xs font-bold text-emerald-700">Economize {plans[plan].savings} no ano</p>
-                  <p className="mt-1 text-xs text-slate-600">QR Code gerado pelo Mercado Pago.</p>
+                  <p className="mt-1 text-xs text-slate-600">QR Code gerado pelo Asaas.</p>
                 </button>
               </div>
             )}
@@ -287,7 +287,7 @@ export default function Cadastro() {
                 <div>
                   <Label htmlFor="signup-cpf">CPF do pagador</Label>
                   <Input id="signup-cpf" value={cpf} onChange={e => setCpf(formatCpf(e.target.value))} inputMode="numeric" autoComplete="off" placeholder="000.000.000-00" required disabled={loading} className="mt-2" />
-                  <p className={`mt-1 text-xs ${cpf && !cpfValid ? "text-rose-600" : "text-muted-foreground"}`}>O Mercado Pago exige o CPF do pagador para gerar o Pix. O Note Note não salva esse CPF no cadastro.</p>
+                  <p className={`mt-1 text-xs ${cpf && !cpfValid ? "text-rose-600" : "text-muted-foreground"}`}>O Asaas usa o CPF para criar o pagador e gerar o Pix. O Note Note não salva esse CPF no cadastro local.</p>
                 </div>
               )}
 
