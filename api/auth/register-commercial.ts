@@ -4,7 +4,6 @@ import { verifyLoginCaptcha } from "../../shared/login-captcha.js";
 
 const MERCADO_PAGO_API = "https://api.mercadopago.com";
 const CHECKOUT_RETURN_URL = "https://notenote.com.br/login?assinatura=retorno";
-const MERCADO_PAGO_TEST_PAYER_EMAIL = "test@testuser.com";
 
 const PLAN_PRICES = {
   basic: 2990,
@@ -187,6 +186,37 @@ async function postMercadoPagoSubscription(args: {
   return { response, data };
 }
 
+async function createMercadoPagoTestPayer(accessToken: string) {
+  const response = await fetch(`${MERCADO_PAGO_API}/users/test`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      site_id: "MLB",
+      description: `Note Note comprador ${Date.now()}`,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.email) {
+    console.error("[mercadopago/create-test-payer]", {
+      status: response.status,
+      code: data?.code,
+      message: data?.message,
+    });
+    throw Object.assign(new Error("Não foi possível criar o comprador de teste no Mercado Pago."), {
+      statusCode: 502,
+    });
+  }
+
+  return {
+    email: String(data.email).trim().toLowerCase(),
+    id: data?.id ? String(data.id) : null,
+  };
+}
+
 async function createMercadoPagoSubscription(args: {
   userId: number;
   email: string;
@@ -201,6 +231,7 @@ async function createMercadoPagoSubscription(args: {
 
   const externalReference = `notenote:${args.userId}:${args.plan}`;
   let payerEmail = args.email;
+  let sandboxPayer = false;
   let result = await postMercadoPagoSubscription({
     accessToken,
     payerEmail,
@@ -208,9 +239,6 @@ async function createMercadoPagoSubscription(args: {
     plan: args.plan,
   });
 
-  // Com credenciais de um vendedor de teste, o pagador também precisa ser de teste.
-  // Mantemos o e-mail real apenas no cadastro Note Note e usamos o pagador sandbox
-  // somente para a preapproval quando o Mercado Pago indicar mistura real/teste.
   const mercadoPagoMessage = String(result.data?.message ?? "").toLowerCase();
   const shouldRetryWithSandboxPayer =
     !result.response.ok &&
@@ -218,7 +246,19 @@ async function createMercadoPagoSubscription(args: {
       mercadoPagoMessage.includes("both payer and collector must be real or test users"));
 
   if (shouldRetryWithSandboxPayer) {
-    payerEmail = MERCADO_PAGO_TEST_PAYER_EMAIL;
+    const configuredTestPayer = String(process.env.MERCADOPAGO_TEST_PAYER_EMAIL ?? "")
+      .trim()
+      .toLowerCase();
+
+    if (configuredTestPayer && isValidEmail(configuredTestPayer)) {
+      payerEmail = configuredTestPayer;
+    } else {
+      const testPayer = await createMercadoPagoTestPayer(accessToken);
+      payerEmail = testPayer.email;
+      console.info("[mercadopago/test-payer-created]", { id: testPayer.id });
+    }
+
+    sandboxPayer = true;
     result = await postMercadoPagoSubscription({
       accessToken,
       payerEmail,
@@ -244,7 +284,7 @@ async function createMercadoPagoSubscription(args: {
     status: String(data.status ?? "pending"),
     checkoutUrl: String(data.init_point),
     externalReference,
-    sandboxPayer: payerEmail === MERCADO_PAGO_TEST_PAYER_EMAIL,
+    sandboxPayer,
   };
 }
 
