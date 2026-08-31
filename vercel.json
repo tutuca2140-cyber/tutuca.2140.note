@@ -5,6 +5,7 @@
   "outputDirectory": "dist/public",
   "rewrites": [
     { "source": "/api/webhooks/mercadopago", "destination": "/api/site-access?scope=mercadopago-webhook" },
+    { "source": "/api/webhooks/asaas", "destination": "/api/site-access?scope=asaas-webhook" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
