@@ -6,10 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   AlertTriangle,
-  CalendarDays,
   CheckCircle2,
   Clock3,
-  CreditCard,
   Database,
   Download,
   Loader2,
@@ -21,7 +19,6 @@ import {
   ShieldCheck,
   Timer,
   Trash2,
-  Users,
   X,
   XCircle,
 } from "lucide-react";
@@ -38,6 +35,7 @@ type CommercialAccount = {
   whatsapp?: string | null;
   isActive: boolean;
   createdAt: string;
+  lastSignedIn?: string | null;
   lastAccessAt?: string | null;
   usageMinutes: number;
   paymentState: PaymentState;
@@ -45,6 +43,7 @@ type CommercialAccount = {
   priceCents: number | string;
   status: string;
   provisionedAt?: string | null;
+  subscriptionUpdatedAt?: string | null;
   databaseCount: number;
   databaseLimit: number;
   databaseNames?: string;
@@ -58,6 +57,9 @@ type CommercialAccount = {
   paidUntil?: string | null;
   pixExpiresAt?: string | null;
   checkoutUrl?: string | null;
+  providerSubscriptionId?: string | null;
+  providerCheckoutId?: string | null;
+  providerCustomerId?: string | null;
 };
 
 type CommercialResponse = {
@@ -100,9 +102,23 @@ function formatUsage(value: number | string | null | undefined) {
 function paymentLabel(account: CommercialAccount) {
   if (account.paymentState === "trial") return "Teste grátis";
   if (account.paymentState === "paid") return "Ativo / pago";
-  if (account.paymentState === "unpaid") return "Não pago";
+  if (account.paymentState === "unpaid") return "Não pago / em atraso";
   if (account.paymentState === "canceled") return "Cancelado";
-  return "Pendente";
+  return "Pendente / não fechou o plano";
+}
+
+function lifecycleLabel(account: CommercialAccount) {
+  const now = Date.now();
+  const paidUntil = account.paidUntil ? new Date(account.paidUntil).getTime() : 0;
+  const trialEndsAt = account.trialEndsAt ? new Date(account.trialEndsAt).getTime() : 0;
+  if (account.status === "canceled" || account.paymentState === "canceled") return "Contrato cancelado";
+  if (account.billingMethod === "pix_annual" && paidUntil && paidUntil < now) return "Contrato concluído / vencido";
+  if (!account.isActive && account.status !== "pending_payment") return "Cliente inativo";
+  if (account.status === "past_due") return "Inadimplente / pagamento pendente";
+  if (account.status === "pending_payment") return "Pré-cadastro / não concluiu contratação";
+  if (trialEndsAt > now && account.paymentState === "trial") return "Período de teste";
+  if (account.status === "active" || account.status === "paid") return "Contrato ativo";
+  return account.status || "Sem classificação";
 }
 
 function paymentBadge(account: CommercialAccount) {
@@ -114,29 +130,109 @@ function paymentBadge(account: CommercialAccount) {
 }
 
 function billingLabel(account: CommercialAccount) {
-  return account.billingMethod === "pix_annual" ? "Pix anual" : account.billingMethod === "card_monthly" ? "Cartão mensal" : "—";
+  return account.billingMethod === "pix_annual"
+    ? "Pix anual"
+    : account.billingMethod === "card_monthly"
+      ? "Cartão mensal"
+      : "—";
 }
 
 function escapeHtml(value: unknown) {
-  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function downloadAccountsExcel(accounts: CommercialAccount[]) {
   if (!accounts.length) return toast.error("Não há assinaturas para exportar.");
-  const headers = ["Cliente", "Usuário", "E-mail", "Plano", "Cobrança", "Valor", "Status", "Provedor", "Status provedor", "Último pagamento", "Teste até", "Validade", "Último webhook", "Bancos"];
-  const rows = accounts.map(a => [
-    a.name || a.username, a.username, a.email || "", a.plan === "plus" ? "Plus" : "Basic", billingLabel(a),
-    money.format(Number(a.priceCents || 0) / 100), paymentLabel(a), a.provider || "", a.providerStatus || "",
-    a.lastPaymentStatus || "", safeDate(a.trialEndsAt), safeDate(a.paidUntil), safeDate(a.lastWebhookAt, true), a.databaseNames || "",
+
+  const headers = [
+    "ID",
+    "Nome completo",
+    "Usuário",
+    "E-mail",
+    "WhatsApp",
+    "Situação comercial",
+    "Status de pagamento",
+    "Status interno",
+    "Conta ativa",
+    "Plano",
+    "Forma de cobrança",
+    "Valor contratado",
+    "Provedor",
+    "Status no provedor",
+    "Último status de pagamento",
+    "ID do último pagamento",
+    "Fim do teste grátis",
+    "Validade / pago até",
+    "Expiração do Pix",
+    "Cadastro",
+    "Última atualização da assinatura",
+    "Último login",
+    "Último acesso",
+    "Tempo de uso",
+    "Bancos utilizados",
+    "Limite de bancos",
+    "Nomes dos bancos",
+    "Provisionado",
+    "Último webhook",
+    "ID assinatura provedor",
+    "ID checkout provedor",
+    "ID cliente provedor",
+    "Link da cobrança",
+  ];
+
+  const rows = accounts.map(account => [
+    account.id,
+    account.name || account.username,
+    account.username,
+    account.email || "",
+    account.whatsapp || "",
+    lifecycleLabel(account),
+    paymentLabel(account),
+    account.status || "",
+    account.isActive ? "Sim" : "Não",
+    account.plan === "plus" ? "Plus" : "Basic",
+    billingLabel(account),
+    money.format(Number(account.priceCents || 0) / 100),
+    account.provider || "",
+    account.providerStatus || "",
+    account.lastPaymentStatus || "",
+    account.lastPaymentId || "",
+    safeDate(account.trialEndsAt),
+    account.billingMethod === "pix_annual" ? safeDate(account.paidUntil) : "Renovação mensal",
+    safeDate(account.pixExpiresAt),
+    safeDate(account.createdAt, true),
+    safeDate(account.subscriptionUpdatedAt, true),
+    safeDate(account.lastSignedIn, true),
+    safeDate(account.lastAccessAt, true),
+    formatUsage(account.usageMinutes),
+    Number(account.databaseCount || 0),
+    Number(account.databaseLimit || 0),
+    account.databaseNames || "",
+    account.provisionedAt ? `Sim — ${safeDate(account.provisionedAt, true)}` : "Não",
+    safeDate(account.lastWebhookAt, true),
+    account.providerSubscriptionId || "",
+    account.providerCheckoutId || "",
+    account.providerCustomerId || "",
+    account.checkoutUrl || "",
   ]);
-  const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><table border="1"><thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></body></html>`;
-  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+
+  const title = "Relatório detalhado de clientes e assinaturas — Note Note";
+  const generated = dateTime.format(new Date());
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>table{border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px}th{background:#eaf2ff;font-weight:bold}th,td{border:1px solid #b8c2d1;padding:6px;white-space:nowrap}h2{font-family:Arial,sans-serif}p{font-family:Arial,sans-serif;font-size:12px}</style></head><body><h2>${escapeHtml(title)}</h2><p>Gerado em ${escapeHtml(generated)} · ${accounts.length} cliente(s)</p><table><thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></body></html>`;
+  const blob = new Blob(["\ufeff", html], { type: "application/vnd.ms-excel;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `assinaturas-notenote-${new Date().toISOString().slice(0, 10)}.xls`;
+  link.download = `relatorio-detalhado-clientes-notenote-${new Date().toISOString().slice(0, 10)}.xls`;
+  document.body.appendChild(link);
   link.click();
+  link.remove();
   URL.revokeObjectURL(url);
+  toast.success("Relatório detalhado em Excel gerado.");
 }
 
 export default function AdminAssinaturas() {
@@ -176,15 +272,20 @@ export default function AdminAssinaturas() {
     setActionId(account.id);
     try {
       const response = await fetch("/api/admin/commercial-accounts", {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ action, userId: account.id }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) throw new Error(result?.message || "Não foi possível atualizar a assinatura.");
       toast.success(result.message || "Assinatura atualizada.");
       await load();
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Não foi possível atualizar a assinatura."); }
-    finally { setActionId(null); }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível atualizar a assinatura.");
+    } finally {
+      setActionId(null);
+    }
   };
 
   const openSecureAction = (account: CommercialAccount, action: SecureAction) => {
@@ -200,16 +301,24 @@ export default function AdminAssinaturas() {
     setActionId(secureTarget.id);
     try {
       const response = await fetch("/api/admin/commercial-accounts", {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ action: secureAction, userId: secureTarget.id, password: adminPassword }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) throw new Error(result?.message || "Não foi possível concluir a operação.");
       toast.success(result.message || "Operação concluída.");
-      setSecureTarget(null); setSecureAction(null); setAdminPassword("");
+      setSecureTarget(null);
+      setSecureAction(null);
+      setAdminPassword("");
       await load();
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Não foi possível concluir a operação."); }
-    finally { setSecureLoading(false); setActionId(null); }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível concluir a operação.");
+    } finally {
+      setSecureLoading(false);
+      setActionId(null);
+    }
   };
 
   if (authLoading || !user || user.role !== "super_admin") return null;
@@ -223,14 +332,18 @@ export default function AdminAssinaturas() {
             <h1 className="mt-2 text-3xl font-black tracking-tight">Assinaturas</h1>
             <p className="mt-2 text-muted-foreground">Visão comercial completa: plano, cobrança, pagamento, teste, validade, Asaas e acesso do cliente.</p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => downloadAccountsExcel(data?.accounts ?? [])}><Download className="mr-2 h-4 w-4" />Excel</Button>
-            <Button variant="outline" onClick={load} disabled={loading}>{loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Atualizar</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => downloadAccountsExcel(data?.accounts ?? [])} disabled={!data?.accounts?.length}>
+              <Download className="mr-2 h-4 w-4" />Baixar relatório detalhado
+            </Button>
+            <Button variant="outline" onClick={load} disabled={loading}>
+              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Atualizar
+            </Button>
           </div>
         </div>
 
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
-          <strong>Integração Asaas:</strong> ao excluir uma conta sem pagamento, o Note Note tenta remover primeiro a cobrança ou assinatura pendente no Asaas. Cancelamentos também exigem sua senha de Super Admin. O estorno Pix já está reservado na interface, mas permanece bloqueado até concluirmos o fluxo financeiro de reembolso.
+          <strong>Relatório comercial:</strong> o Excel inclui contato, WhatsApp, e-mail, plano, pagamento, teste, cancelamento, inatividade, validade, dados do Asaas, acessos e bancos vinculados.
         </div>
 
         {error ? <Card className="border-destructive/40"><CardContent className="p-5 text-sm text-destructive">{error}</CardContent></Card> : null}
@@ -240,15 +353,17 @@ export default function AdminAssinaturas() {
           <Card><CardContent className="p-5"><p className="text-xs text-muted-foreground">Em teste</p><p className="mt-1 text-2xl font-black text-blue-600">{data?.summary.trial ?? 0}</p></CardContent></Card>
           <Card><CardContent className="p-5"><p className="text-xs text-muted-foreground">Ativos</p><p className="mt-1 text-2xl font-black text-emerald-600">{data?.summary.active ?? 0}</p></CardContent></Card>
           <Card><CardContent className="p-5"><p className="text-xs text-muted-foreground">Em atraso</p><p className="mt-1 text-2xl font-black text-rose-600">{data?.summary.overdue ?? 0}</p></CardContent></Card>
+          <Card><CardContent className="p-5"><p className="text-xs text-muted-foreground">Cancelados</p><p className="mt-1 text-2xl font-black">{data?.summary.canceled ?? 0}</p></CardContent></Card>
           <Card><CardContent className="p-5"><p className="text-xs text-muted-foreground">Cartão / mês</p><p className="mt-1 text-xl font-black">{money.format(Number(data?.summary.monthlyActiveCents || 0) / 100)}</p></CardContent></Card>
           <Card><CardContent className="p-5"><p className="text-xs text-muted-foreground">Pix anual ativo</p><p className="mt-1 text-xl font-black">{money.format(Number(data?.summary.annualPixActiveCents || 0) / 100)}</p></CardContent></Card>
-          <Card><CardContent className="p-5"><p className="text-xs text-muted-foreground">Uso acumulado</p><p className="mt-1 text-xl font-black">{formatUsage(data?.summary.totalUsageMinutes ?? 0)}</p></CardContent></Card>
         </div>
 
         <Card>
           <CardHeader><CardTitle>Clientes e assinaturas</CardTitle></CardHeader>
           <CardContent>
-            {loading && !data ? <div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Carregando...</div> : (
+            {loading && !data ? (
+              <div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Carregando...</div>
+            ) : (
               <div className="space-y-4">
                 {(data?.accounts ?? []).map(account => {
                   const canDelete = account.status === "past_due" || account.status === "pending_payment";
@@ -257,9 +372,16 @@ export default function AdminAssinaturas() {
                     <div key={account.id} className="rounded-2xl border bg-card p-5 shadow-sm">
                       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                         <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-black">{account.name || account.username}</h3>{paymentBadge(account)}<Badge variant={account.plan === "plus" ? "default" : "secondary"}>{account.plan === "plus" ? "Plus" : "Basic"}</Badge></div>
-                          <p className="mt-1 text-xs text-muted-foreground">@{account.username}</p>
-                          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground"><span className="flex items-center gap-1"><Mail className="h-3.5 w-3.5" />{account.email || "—"}</span><span className="flex items-center gap-1"><MessageCircle className="h-3.5 w-3.5" />{account.whatsapp || "—"}</span></div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-lg font-black">{account.name || account.username}</h3>
+                            {paymentBadge(account)}
+                            <Badge variant={account.plan === "plus" ? "default" : "secondary"}>{account.plan === "plus" ? "Plus" : "Basic"}</Badge>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">@{account.username} · {lifecycleLabel(account)}</p>
+                          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1"><Mail className="h-3.5 w-3.5" />{account.email || "—"}</span>
+                            <span className="flex items-center gap-1"><MessageCircle className="h-3.5 w-3.5" />{account.whatsapp || "—"}</span>
+                          </div>
                         </div>
                         <div className="flex flex-wrap gap-2 xl:justify-end">
                           {account.status === "pending_payment" && <Button size="sm" onClick={() => runAction(account, "approve")} disabled={actionId === account.id}><CheckCircle2 className="mr-2 h-4 w-4" />Aprovar</Button>}
@@ -298,11 +420,20 @@ export default function AdminAssinaturas() {
       {secureTarget && secureAction ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
           <div className="w-full max-w-md rounded-2xl border bg-background p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2 font-black"><LockKeyhole className="h-5 w-5 text-rose-600" />Confirmação do Super Admin</div><p className="mt-2 text-sm text-muted-foreground">{secureAction === "delete_unpaid" ? `Excluir definitivamente a conta de ${secureTarget.name || secureTarget.username}?` : `Cancelar a assinatura de ${secureTarget.name || secureTarget.username}?`}</p></div><button onClick={() => !secureLoading && setSecureTarget(null)}><X className="h-5 w-5" /></button></div>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 font-black"><LockKeyhole className="h-5 w-5 text-rose-600" />Confirmação do Super Admin</div>
+                <p className="mt-2 text-sm text-muted-foreground">{secureAction === "delete_unpaid" ? `Excluir definitivamente a conta de ${secureTarget.name || secureTarget.username}?` : `Cancelar a assinatura de ${secureTarget.name || secureTarget.username}?`}</p>
+              </div>
+              <button onClick={() => !secureLoading && setSecureTarget(null)}><X className="h-5 w-5" /></button>
+            </div>
             <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">{secureAction === "delete_unpaid" ? "A cobrança/assinatura pendente no Asaas será removida antes dos dados locais sempre que houver um recurso vinculado." : "O sistema tentará encerrar a recorrência no Asaas e bloqueará o acesso do cliente."}</div>
             <label className="mt-5 block text-sm font-semibold">Senha do Super Administrador</label>
             <Input className="mt-2" type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} autoFocus disabled={secureLoading} />
-            <div className="mt-5 flex justify-end gap-2"><Button variant="outline" onClick={() => setSecureTarget(null)} disabled={secureLoading}>Voltar</Button><Button variant="destructive" onClick={confirmSecureAction} disabled={secureLoading}>{secureLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{secureAction === "delete_unpaid" ? "Excluir conta" : "Cancelar assinatura"}</Button></div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setSecureTarget(null)} disabled={secureLoading}>Voltar</Button>
+              <Button variant="destructive" onClick={confirmSecureAction} disabled={secureLoading}>{secureLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{secureAction === "delete_unpaid" ? "Excluir conta" : "Cancelar assinatura"}</Button>
+            </div>
           </div>
         </div>
       ) : null}
