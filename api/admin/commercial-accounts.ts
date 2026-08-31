@@ -8,9 +8,10 @@ import {
 } from "../auth/_shared.js";
 
 const MERCADO_PAGO_API = "https://api.mercadopago.com";
+const ASAAS_API = "https://api.asaas.com/v3";
 const PLAN_CONFIG = {
-  basic: { label: "Basic", limit: 1, priceCents: 2990 },
-  plus: { label: "Plus", limit: 3, priceCents: 4990 },
+  basic: { label: "Basic", limit: 1, monthlyCents: 2990, annualPixCents: 19990 },
+  plus: { label: "Plus", limit: 3, monthlyCents: 4990, annualPixCents: 39990 },
 } as const;
 
 type PlanId = keyof typeof PLAN_CONFIG;
@@ -34,7 +35,24 @@ async function ensureTables() {
       "updatedAt" timestamptz NOT NULL DEFAULT NOW()
     )
   `;
-  await sql`ALTER TABLE commercial_subscriptions ADD COLUMN IF NOT EXISTS "provisionedAt" timestamptz`;
+  await sql`
+    ALTER TABLE commercial_subscriptions
+      ADD COLUMN IF NOT EXISTS "provisionedAt" timestamptz,
+      ADD COLUMN IF NOT EXISTS provider varchar(40),
+      ADD COLUMN IF NOT EXISTS "providerSubscriptionId" varchar(120),
+      ADD COLUMN IF NOT EXISTS "providerCheckoutId" varchar(120),
+      ADD COLUMN IF NOT EXISTS "providerCustomerId" varchar(120),
+      ADD COLUMN IF NOT EXISTS "providerStatus" varchar(40),
+      ADD COLUMN IF NOT EXISTS "checkoutUrl" text,
+      ADD COLUMN IF NOT EXISTS "externalReference" varchar(160),
+      ADD COLUMN IF NOT EXISTS "lastPaymentStatus" varchar(40),
+      ADD COLUMN IF NOT EXISTS "lastPaymentId" varchar(120),
+      ADD COLUMN IF NOT EXISTS "lastWebhookAt" timestamptz,
+      ADD COLUMN IF NOT EXISTS "billingMethod" varchar(30) NOT NULL DEFAULT 'card_monthly',
+      ADD COLUMN IF NOT EXISTS "trialEndsAt" timestamptz,
+      ADD COLUMN IF NOT EXISTS "paidUntil" timestamptz,
+      ADD COLUMN IF NOT EXISTS "pixExpiresAt" timestamptz
+  `;
   await sql`
     CREATE TABLE IF NOT EXISTS site_access_logs (
       id bigserial PRIMARY KEY,
@@ -90,6 +108,9 @@ async function listCommercialAccounts() {
     SELECT
       u.id, u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt", u."lastSignedIn",
       cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt" AS "subscriptionUpdatedAt",
+      cs.provider, cs."billingMethod", cs."providerStatus", cs."providerSubscriptionId",
+      cs."providerCheckoutId", cs."providerCustomerId", cs."checkoutUrl", cs."lastPaymentStatus",
+      cs."lastPaymentId", cs."lastWebhookAt", cs."trialEndsAt", cs."paidUntil", cs."pixExpiresAt",
       COUNT(uda.id)::int AS "databaseCount",
       COALESCE(string_agg(d.name, ', ' ORDER BY uda."createdAt", d.id), '') AS "databaseNames",
       usage."lastAccessAt",
@@ -102,40 +123,57 @@ async function listCommercialAccounts() {
     WHERE u."loginMethod" = 'commercial_signup'
     GROUP BY
       u.id, u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt", u."lastSignedIn",
-      cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt",
+      cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt", cs.provider,
+      cs."billingMethod", cs."providerStatus", cs."providerSubscriptionId", cs."providerCheckoutId",
+      cs."providerCustomerId", cs."checkoutUrl", cs."lastPaymentStatus", cs."lastPaymentId",
+      cs."lastWebhookAt", cs."trialEndsAt", cs."paidUntil", cs."pixExpiresAt",
       usage."lastAccessAt", usage."usageBuckets"
     ORDER BY
-      CASE WHEN cs.status = 'pending_payment' THEN 0 WHEN cs.status = 'past_due' THEN 1 ELSE 2 END,
+      CASE WHEN cs.status = 'past_due' THEN 0 WHEN cs.status = 'pending_payment' THEN 1 WHEN cs.status = 'active' THEN 2 ELSE 3 END,
       u."createdAt" DESC
   `;
 
+  const now = Date.now();
   const accounts = rows.map((row: any) => {
     const planValue = String(row.plan || "");
     const plan: PlanId | null = isPlan(planValue) ? planValue : null;
     const usageMinutes = Number(row.usageMinutes || 0);
+    const trialEndsAt = row.trialEndsAt ? new Date(row.trialEndsAt).getTime() : 0;
+    const trialActive = Boolean(trialEndsAt && trialEndsAt > now && !row.lastPaymentStatus?.includes?.("RECEIVED"));
+    const paymentState = row.status === "past_due"
+      ? "unpaid"
+      : row.status === "canceled"
+        ? "canceled"
+        : trialActive
+          ? "trial"
+          : row.status === "active" || row.status === "paid"
+            ? "paid"
+            : "pending";
     return {
       ...row,
       usageMinutes,
       usageHours: Number((usageMinutes / 60).toFixed(2)),
       databaseLimit: plan ? PLAN_CONFIG[plan].limit : 0,
-      paymentState:
-        row.status === "active" || row.status === "paid"
-          ? "paid"
-          : row.status === "past_due"
-            ? "unpaid"
-            : "pending",
+      paymentState,
+      trialActive,
     };
   });
 
+  const active = accounts.filter((item: any) => item.status === "active" || item.status === "paid");
   return {
     accounts,
     summary: {
       total: accounts.length,
+      trial: accounts.filter((item: any) => item.paymentState === "trial").length,
       pending: accounts.filter((item: any) => item.status === "pending_payment").length,
       overdue: accounts.filter((item: any) => item.status === "past_due").length,
-      active: accounts.filter((item: any) => item.status === "active" || item.status === "paid").length,
-      monthlyActiveCents: accounts
-        .filter((item: any) => item.status === "active" || item.status === "paid")
+      active: active.length,
+      canceled: accounts.filter((item: any) => item.status === "canceled").length,
+      monthlyActiveCents: active
+        .filter((item: any) => String(item.billingMethod) === "card_monthly")
+        .reduce((sum: number, item: any) => sum + Number(item.priceCents || 0), 0),
+      annualPixActiveCents: active
+        .filter((item: any) => String(item.billingMethod) === "pix_annual")
         .reduce((sum: number, item: any) => sum + Number(item.priceCents || 0), 0),
       totalUsageMinutes: accounts.reduce((sum: number, item: any) => sum + Number(item.usageMinutes || 0), 0),
     },
@@ -147,8 +185,10 @@ async function getCommercialAccount(userId: number) {
   const rows = await sql`
     SELECT
       u.id, u.username, u.name, u.email, u."loginMethod", u."isActive",
-      cs.plan, cs."priceCents", cs.status, cs."provisionedAt",
-      cs."providerSubscriptionId", cs.provider, cs."billingMethod"
+      cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs.provider,
+      cs."providerSubscriptionId", cs."providerCheckoutId", cs."providerCustomerId",
+      cs."lastPaymentId", cs."lastPaymentStatus", cs."providerStatus", cs."billingMethod",
+      cs."trialEndsAt", cs."paidUntil"
     FROM users u
     JOIN commercial_subscriptions cs ON cs."userId" = u.id
     WHERE u.id = ${userId}
@@ -173,6 +213,14 @@ async function writeSubscriptionAudit(admin: any, target: any, action: string, d
   `;
 }
 
+async function verifyAdminPassword(admin: any, password: string) {
+  if (!password || !admin.passwordHash) {
+    throw Object.assign(new Error("Digite a senha do Super Administrador para confirmar."), { statusCode: 400 });
+  }
+  const ok = await bcrypt.compare(password, String(admin.passwordHash));
+  if (!ok) throw Object.assign(new Error("Senha do Super Administrador incorreta."), { statusCode: 403 });
+}
+
 async function approveCommercialAccount(userId: number, admin: any) {
   const sql = getSql();
   const target = await getCommercialAccount(userId);
@@ -187,12 +235,7 @@ async function approveCommercialAccount(userId: number, admin: any) {
     provisioning: "first_login",
     alreadyProvisioned: Boolean(target.provisionedAt),
   });
-  return {
-    plan: planValue,
-    planLabel: config.label,
-    databaseLimit: config.limit,
-    alreadyProvisioned: Boolean(target.provisionedAt),
-  };
+  return { plan: planValue, planLabel: config.label, databaseLimit: config.limit, alreadyProvisioned: Boolean(target.provisionedAt) };
 }
 
 async function setPaymentStatus(userId: number, admin: any, status: "active" | "past_due") {
@@ -202,32 +245,81 @@ async function setPaymentStatus(userId: number, admin: any, status: "active" | "
   if (!isPlan(planValue)) throw Object.assign(new Error("Plano comercial inválido para esta conta."), { statusCode: 409 });
   await sql`UPDATE users SET "isActive" = true, "failedLoginAttempts" = 0, "updatedAt" = NOW() WHERE id = ${userId}`;
   await sql`UPDATE commercial_subscriptions SET status = ${status}, "updatedAt" = NOW() WHERE "userId" = ${userId}`;
-  await writeSubscriptionAudit(
-    admin,
-    target,
-    status === "past_due" ? "mark_subscription_past_due" : "mark_subscription_paid",
-    {
-      previousStatus: target.status,
-      newStatus: status,
-      accessMode: status === "past_due" ? "dashboard_only" : "full_plan_access",
-    }
-  );
+  await writeSubscriptionAudit(admin, target, status === "past_due" ? "mark_subscription_past_due" : "mark_subscription_paid", {
+    previousStatus: target.status,
+    newStatus: status,
+    accessMode: status === "past_due" ? "dashboard_only" : "full_plan_access",
+  });
   return { status, plan: planValue, planLabel: PLAN_CONFIG[planValue].label };
 }
 
 async function cancelMercadoPagoSubscription(providerSubscriptionId: string) {
   const accessToken = String(process.env.MERCADOPAGO_ACCESS_TOKEN ?? "").trim();
-  if (!accessToken || !providerSubscriptionId) return;
+  if (!accessToken || !providerSubscriptionId) return false;
   const response = await fetch(`${MERCADO_PAGO_API}/preapproval/${encodeURIComponent(providerSubscriptionId)}`, {
     method: "PUT",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ status: "cancelled" }),
   });
   if (!response.ok && response.status !== 404) {
-    const data = await response.json().catch(() => ({}));
-    console.error("[admin/commercial-accounts/cancel-provider]", data);
     throw Object.assign(new Error("Não foi possível cancelar a cobrança no Mercado Pago. A conta não foi excluída por segurança."), { statusCode: 502 });
   }
+  return true;
+}
+
+function getAsaasApiKey() {
+  return String(process.env.ASAAS_API_KEY ?? "").trim();
+}
+
+async function deleteAsaasResource(path: string, label: string) {
+  const apiKey = getAsaasApiKey();
+  if (!apiKey) throw Object.assign(new Error("A chave da API Asaas não está configurada. A conta não foi excluída por segurança."), { statusCode: 503 });
+  const response = await fetch(`${ASAAS_API}${path}`, {
+    method: "DELETE",
+    headers: { accept: "application/json", access_token: apiKey },
+  });
+  if (!response.ok && response.status !== 404) {
+    const body = await response.json().catch(() => ({}));
+    console.error("[admin/commercial-accounts/asaas-delete]", { path, body });
+    throw Object.assign(new Error(`Não foi possível cancelar ${label} no Asaas. A conta não foi excluída por segurança.`), { statusCode: 502 });
+  }
+  return true;
+}
+
+async function cancelProviderForDeletion(target: any) {
+  const provider = String(target.provider || "");
+  const subscriptionId = String(target.providerSubscriptionId || "").trim();
+  const paymentId = String(target.lastPaymentId || "").trim();
+
+  if (provider === "mercadopago" && subscriptionId) {
+    return { provider, resource: "subscription", cancelled: await cancelMercadoPagoSubscription(subscriptionId) };
+  }
+  if (provider === "asaas") {
+    if (subscriptionId) {
+      return { provider, resource: "subscription", cancelled: await deleteAsaasResource(`/subscriptions/${encodeURIComponent(subscriptionId)}`, "a assinatura") };
+    }
+    if (paymentId && ["pending_payment", "past_due"].includes(String(target.status))) {
+      return { provider, resource: "payment", cancelled: await deleteAsaasResource(`/payments/${encodeURIComponent(paymentId)}`, "a cobrança") };
+    }
+  }
+  return { provider, resource: null, cancelled: false };
+}
+
+async function cancelCommercialSubscription(userId: number, admin: any, password: string) {
+  const sql = getSql();
+  const target = await getCommercialAccount(userId);
+  await verifyAdminPassword(admin, password);
+  const providerResult = await cancelProviderForDeletion(target);
+  await sql`UPDATE commercial_subscriptions SET status='canceled', "providerStatus"='CANCELED_BY_ADMIN', "updatedAt"=NOW() WHERE "userId"=${userId}`;
+  await sql`UPDATE users SET "isActive"=false, "updatedAt"=NOW() WHERE id=${userId}`;
+  await sql`DELETE FROM local_sessions WHERE "userId"=${userId}`;
+  await writeSubscriptionAudit(admin, target, "cancel_commercial_subscription", {
+    previousStatus: target.status,
+    provider: target.provider,
+    providerResourceCancelled: providerResult.cancelled,
+    providerResource: providerResult.resource,
+  });
+  return { username: String(target.username || "cliente"), providerResult };
 }
 
 async function deleteUnpaidCommercialAccount(userId: number, admin: any, password: string) {
@@ -236,53 +328,35 @@ async function deleteUnpaidCommercialAccount(userId: number, admin: any, passwor
   if (target.status !== "past_due" && target.status !== "pending_payment") {
     throw Object.assign(new Error("Só é permitido excluir clientes sem pagamento confirmado."), { statusCode: 409 });
   }
-  if (!password || !admin.passwordHash) {
-    throw Object.assign(new Error("Digite a senha do Super Administrador para confirmar a exclusão."), { statusCode: 400 });
-  }
-  const passwordOk = await bcrypt.compare(password, String(admin.passwordHash));
-  if (!passwordOk) {
-    throw Object.assign(new Error("Senha do Super Administrador incorreta. A conta não foi excluída."), { statusCode: 403 });
-  }
+  await verifyAdminPassword(admin, password);
+  const providerResult = await cancelProviderForDeletion(target);
 
-  const providerSubscriptionId = String(target.providerSubscriptionId || "").trim();
-  if (target.provider === "mercadopago" && providerSubscriptionId) {
-    await cancelMercadoPagoSubscription(providerSubscriptionId);
-  }
-
-  const childRows = await sql`
-    SELECT id FROM users
-    WHERE "loginMethod" = 'commercial_subuser' AND "accountOwnerId" = ${userId}
-  `;
+  const childRows = await sql`SELECT id FROM users WHERE "loginMethod"='commercial_subuser' AND "accountOwnerId"=${userId}`;
   const childIds = childRows.map((row: any) => Number(row.id)).filter((id: number) => Number.isInteger(id) && id > 0);
-
   for (const childId of childIds) {
-    await sql`DELETE FROM local_sessions WHERE "userId" = ${childId}`;
-    await sql`DELETE FROM user_database_access WHERE "userId" = ${childId}`;
-    await sql`DELETE FROM site_access_logs WHERE "userId" = ${childId}`;
-    await sql`DELETE FROM "auditLogs" WHERE "userId" = ${childId}`;
+    await sql`DELETE FROM local_sessions WHERE "userId"=${childId}`;
+    await sql`DELETE FROM user_database_access WHERE "userId"=${childId}`;
+    await sql`DELETE FROM site_access_logs WHERE "userId"=${childId}`;
+    await sql`DELETE FROM "auditLogs" WHERE "userId"=${childId}`;
   }
-
-  await sql`DELETE FROM local_sessions WHERE "userId" = ${userId}`;
-  await sql`DELETE FROM user_database_access WHERE "userId" = ${userId}`;
-  await sql`DELETE FROM site_access_logs WHERE "userId" = ${userId}`;
-  await sql`DELETE FROM "auditLogs" WHERE "userId" = ${userId}`;
-  await sql`DELETE FROM users WHERE "loginMethod" = 'commercial_subuser' AND "accountOwnerId" = ${userId}`;
-  await sql`DELETE FROM commercial_subscriptions WHERE "userId" = ${userId}`;
-  const deleted = await sql`
-    DELETE FROM users
-    WHERE id = ${userId} AND "loginMethod" = 'commercial_signup'
-    RETURNING id, username
-  `;
+  await sql`DELETE FROM local_sessions WHERE "userId"=${userId}`;
+  await sql`DELETE FROM user_database_access WHERE "userId"=${userId}`;
+  await sql`DELETE FROM site_access_logs WHERE "userId"=${userId}`;
+  await sql`DELETE FROM "auditLogs" WHERE "userId"=${userId}`;
+  await sql`DELETE FROM users WHERE "loginMethod"='commercial_subuser' AND "accountOwnerId"=${userId}`;
+  await sql`DELETE FROM commercial_subscriptions WHERE "userId"=${userId}`;
+  const deleted = await sql`DELETE FROM users WHERE id=${userId} AND "loginMethod"='commercial_signup' RETURNING id, username`;
   if (!deleted[0]) throw Object.assign(new Error("Conta comercial não encontrada para exclusão."), { statusCode: 404 });
 
   await writeSubscriptionAudit(admin, target, "delete_unpaid_commercial_account", {
     deletedUsername: target.username,
     previousStatus: target.status,
-    providerSubscriptionCancelled: Boolean(providerSubscriptionId),
+    provider: target.provider,
+    providerResourceCancelled: providerResult.cancelled,
+    providerResource: providerResult.resource,
     deletedSubusers: childIds.length,
   });
-
-  return { username: String(target.username || "cliente"), deletedSubusers: childIds.length };
+  return { username: String(target.username || "cliente"), deletedSubusers: childIds.length, providerResult };
 }
 
 export default async function handler(req: any, res: any) {
@@ -291,7 +365,6 @@ export default async function handler(req: any, res: any) {
       res.setHeader("Allow", "GET, POST");
       return sendJson(res, 405, { success: false, message: "Método não permitido." });
     }
-
     const admin = await getSuperAdmin(req);
     if (!admin) return sendJson(res, 403, { success: false, message: "Área exclusiva do Super Administrador." });
     await ensureTables();
@@ -308,42 +381,24 @@ export default async function handler(req: any, res: any) {
 
     if (action === "approve") {
       const approval = await approveCommercialAccount(userId, admin);
-      return sendJson(res, 200, {
-        success: true,
-        approval,
-        message: approval.alreadyProvisioned
-          ? `Conta ${approval.planLabel} aprovada e ativa. Os bancos já estavam provisionados.`
-          : `Conta ${approval.planLabel} aprovada e ativa. Os ${approval.databaseLimit} banco(s) do plano serão criados automaticamente no primeiro login do contratante.`,
-      });
+      return sendJson(res, 200, { success: true, approval, message: approval.alreadyProvisioned ? `Conta ${approval.planLabel} aprovada e ativa.` : `Conta ${approval.planLabel} aprovada. Os bancos serão criados automaticamente no primeiro login.` });
     }
-
     if (action === "mark_unpaid") {
       const payment = await setPaymentStatus(userId, admin, "past_due");
-      return sendJson(res, 200, {
-        success: true,
-        payment,
-        message: "Assinatura marcada como aguardando pagamento. O cliente poderá entrar, mas ficará restrito ao Dashboard.",
-      });
+      return sendJson(res, 200, { success: true, payment, message: "Assinatura marcada como não paga. O cliente ficará restrito ao Dashboard." });
     }
-
     if (action === "mark_paid") {
       const payment = await setPaymentStatus(userId, admin, "active");
-      return sendJson(res, 200, {
-        success: true,
-        payment,
-        message: "Pagamento confirmado. As funções do plano foram liberadas novamente.",
-      });
+      return sendJson(res, 200, { success: true, payment, message: "Pagamento confirmado. As funções do plano foram liberadas novamente." });
     }
-
+    if (action === "cancel_subscription") {
+      const canceled = await cancelCommercialSubscription(userId, admin, String(body?.password ?? ""));
+      return sendJson(res, 200, { success: true, canceled, message: `Assinatura de ${canceled.username} cancelada.` });
+    }
     if (action === "delete_unpaid") {
       const deleted = await deleteUnpaidCommercialAccount(userId, admin, String(body?.password ?? ""));
-      return sendJson(res, 200, {
-        success: true,
-        deleted,
-        message: `Conta de ${deleted.username} excluída com segurança.`,
-      });
+      return sendJson(res, 200, { success: true, deleted, message: `Conta de ${deleted.username} excluída com segurança.` });
     }
-
     return sendJson(res, 400, { success: false, message: "Ação comercial não reconhecida." });
   } catch (error: any) {
     console.error("[admin/commercial-accounts]", error);
