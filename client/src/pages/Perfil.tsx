@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   CalendarDays,
+  Clock3,
   CreditCard,
   KeyRound,
   Loader2,
@@ -21,6 +22,7 @@ import {
   ShieldCheck,
   Trash2,
   UserRound,
+  XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -38,12 +40,25 @@ type Profile = {
   commercialOwner: boolean;
   editable: boolean;
   canDeleteAccount: boolean;
+  canCancelPlan: boolean;
   plan: "basic" | "plus" | null;
   subscriptionStatus: string | null;
   priceCents: number | null;
+  provider?: string | null;
+  billingMethod?: "card_monthly" | "pix_annual" | string | null;
+  providerStatus?: string | null;
+  lastPaymentStatus?: string | null;
+  trialEndsAt?: string | null;
+  trialActive?: boolean;
+  trialDaysRemaining?: number;
+  paidUntil?: string | null;
+  lastWebhookAt?: string | null;
+  subscriptionUpdatedAt?: string | null;
 };
 
 const PROFILE_API = "/api/commercial-account?scope=profile";
+const dateOnly = new Intl.DateTimeFormat("pt-BR", { dateStyle: "long" });
+const dateTime = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
 function formatWhatsapp(value: string) {
   const digits = value.replace(/\D/g, "").replace(/^55(?=\d{11}$)/, "").slice(0, 11);
@@ -52,16 +67,39 @@ function formatWhatsapp(value: string) {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 }
 
+function safeDate(value?: string | null, withTime = false) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return withTime ? dateTime.format(date) : dateOnly.format(date);
+}
+
 const money = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
 });
+
+function subscriptionLabel(profile: Profile) {
+  if (profile.subscriptionStatus === "canceled") return "Cancelado";
+  if (profile.subscriptionStatus === "past_due") return "Em atraso";
+  if (profile.subscriptionStatus === "pending_payment") return "Aguardando pagamento";
+  if (profile.trialActive) return "Teste grátis";
+  if (profile.subscriptionStatus === "active" || profile.subscriptionStatus === "paid") return "Ativo";
+  return profile.subscriptionStatus || "Sem status";
+}
+
+function billingLabel(profile: Profile) {
+  if (profile.billingMethod === "pix_annual") return "Pix anual";
+  if (profile.billingMethod === "card_monthly") return "Cartão mensal";
+  return "Não informado";
+}
 
 export default function Perfil() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [cancelingPlan, setCancelingPlan] = useState(false);
   const [error, setError] = useState("");
 
   const [name, setName] = useState("");
@@ -72,9 +110,19 @@ export default function Perfil() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelPassword, setCancelPassword] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
+
+  const applyProfile = (next: Profile) => {
+    setProfile(next);
+    setName(next.name || "");
+    setUsername(next.username || "");
+    setEmail(next.email || "");
+    setWhatsapp(formatWhatsapp(next.whatsapp || ""));
+  };
 
   const load = async () => {
     setLoading(true);
@@ -88,12 +136,7 @@ export default function Perfil() {
       if (!response.ok || !result?.success) {
         throw new Error(result?.message || "Não foi possível carregar seu perfil.");
       }
-      const next = result.profile as Profile;
-      setProfile(next);
-      setName(next.name || "");
-      setUsername(next.username || "");
-      setEmail(next.email || "");
-      setWhatsapp(formatWhatsapp(next.whatsapp || ""));
+      applyProfile(result.profile as Profile);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível carregar seu perfil.");
     } finally {
@@ -145,12 +188,7 @@ export default function Perfil() {
         throw new Error(result?.message || "Não foi possível atualizar seu perfil.");
       }
       toast.success(result.message || "Perfil atualizado.");
-      const next = result.profile as Profile;
-      setProfile(next);
-      setName(next.name || "");
-      setUsername(next.username || "");
-      setEmail(next.email || "");
-      setWhatsapp(formatWhatsapp(next.whatsapp || ""));
+      applyProfile(result.profile as Profile);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -158,6 +196,38 @@ export default function Perfil() {
       toast.error(err instanceof Error ? err.message : "Não foi possível atualizar seu perfil.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const cancelPlan = async () => {
+    if (!profile?.canCancelPlan) return;
+    if (!cancelPassword) {
+      toast.error("Informe sua senha atual.");
+      return;
+    }
+    setCancelingPlan(true);
+    try {
+      const response = await fetch(PROFILE_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          action: "cancel_subscription",
+          currentPassword: cancelPassword,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Não foi possível cancelar o plano.");
+      }
+      toast.success(result.message || "Plano cancelado.");
+      if (result.profile) applyProfile(result.profile as Profile);
+      setCancelPassword("");
+      setCancelOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível cancelar o plano.");
+    } finally {
+      setCancelingPlan(false);
     }
   };
 
@@ -189,6 +259,8 @@ export default function Perfil() {
 
   const planName = profile?.plan === "plus" ? "Plus" : profile?.plan === "basic" ? "Basic" : null;
   const activeSubscription = profile?.subscriptionStatus === "active" || profile?.subscriptionStatus === "paid";
+  const canceledSubscription = profile?.subscriptionStatus === "canceled";
+  const trialDays = Number(profile?.trialDaysRemaining || 0);
 
   return (
     <DashboardLayout>
@@ -200,7 +272,7 @@ export default function Perfil() {
           </div>
           <h1 className="mt-2 text-3xl font-black tracking-tight">Meu Perfil</h1>
           <p className="mt-2 max-w-3xl text-muted-foreground">
-            Consulte os dados da sua conta e, quando permitido, mantenha suas informações de cadastro atualizadas.
+            Consulte seus dados, acompanhe o plano contratado, o teste grátis e gerencie sua assinatura.
           </p>
         </div>
 
@@ -236,19 +308,19 @@ export default function Perfil() {
                   <div className="rounded-xl bg-primary/10 p-3 text-primary">
                     <CreditCard className="h-5 w-5" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Plano</p>
-                    <div className="mt-1 flex items-center gap-2">
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
                       <p className="font-bold">{planName || "Conta interna"}</p>
                       {planName && (
-                        <Badge variant={activeSubscription ? "default" : "outline"}>
-                          {activeSubscription ? "Ativo" : "Aguardando pagamento"}
+                        <Badge variant={canceledSubscription ? "secondary" : activeSubscription ? "default" : "outline"}>
+                          {subscriptionLabel(profile)}
                         </Badge>
                       )}
                     </div>
                     {profile.priceCents != null && (
                       <p className="text-xs text-muted-foreground">
-                        {money.format(Number(profile.priceCents) / 100)}/mês
+                        {money.format(Number(profile.priceCents) / 100)} · {billingLabel(profile)}
                       </p>
                     )}
                   </div>
@@ -274,6 +346,94 @@ export default function Perfil() {
                 </CardContent>
               </Card>
             </div>
+
+            {profile.commercialOwner && planName ? (
+              <Card className={profile.trialActive ? "border-blue-200" : canceledSubscription ? "border-slate-300" : undefined}>
+                <CardHeader>
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <CardTitle>Detalhes da assinatura</CardTitle>
+                      <CardDescription className="mt-1">
+                        Veja exatamente o período de teste, forma de pagamento, situação e validade do seu plano.
+                      </CardDescription>
+                    </div>
+                    <Badge variant={canceledSubscription ? "secondary" : activeSubscription ? "default" : "outline"}>
+                      {subscriptionLabel(profile)}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {profile.trialActive ? (
+                    <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5 text-blue-950">
+                      <div className="flex items-start gap-3">
+                        <Clock3 className="mt-0.5 h-5 w-5 shrink-0" />
+                        <div>
+                          <p className="font-black">Seu teste grátis está ativo</p>
+                          <p className="mt-1 text-sm">
+                            {trialDays === 1 ? "Falta 1 dia" : `Faltam ${trialDays} dias`} para o fim do teste. Ele termina em <strong>{safeDate(profile.trialEndsAt)}</strong>.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : profile.trialEndsAt ? (
+                    <div className="rounded-xl border bg-muted/30 p-4 text-sm">
+                      O período de teste grátis terminou em <strong>{safeDate(profile.trialEndsAt)}</strong>.
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl border p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Plano e valor</p>
+                      <p className="mt-1 font-bold">{planName}</p>
+                      <p className="text-sm text-muted-foreground">{profile.priceCents != null ? money.format(Number(profile.priceCents) / 100) : "—"}</p>
+                    </div>
+                    <div className="rounded-xl border p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cobrança</p>
+                      <p className="mt-1 font-bold">{billingLabel(profile)}</p>
+                      <p className="text-sm text-muted-foreground">Provedor: {profile.provider || "—"}</p>
+                    </div>
+                    <div className="rounded-xl border p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Teste grátis</p>
+                      <p className="mt-1 font-bold">{safeDate(profile.trialEndsAt)}</p>
+                      <p className="text-sm text-muted-foreground">{profile.trialActive ? `${trialDays} dia(s) restante(s)` : "Encerrado ou não aplicável"}</p>
+                    </div>
+                    <div className="rounded-xl border p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Validade / renovação</p>
+                      <p className="mt-1 font-bold">{profile.billingMethod === "pix_annual" ? safeDate(profile.paidUntil) : "Mensal"}</p>
+                      <p className="text-sm text-muted-foreground">{profile.billingMethod === "pix_annual" ? "Plano anual" : "Renovação recorrente"}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl bg-muted/30 p-4 text-sm">
+                      <p className="font-semibold">Status do pagamento</p>
+                      <p className="mt-1 text-muted-foreground">{profile.lastPaymentStatus || profile.providerStatus || subscriptionLabel(profile)}</p>
+                    </div>
+                    <div className="rounded-xl bg-muted/30 p-4 text-sm">
+                      <p className="font-semibold">Última atualização</p>
+                      <p className="mt-1 text-muted-foreground">{safeDate(profile.lastWebhookAt || profile.subscriptionUpdatedAt, true)}</p>
+                    </div>
+                  </div>
+
+                  {canceledSubscription ? (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800">
+                      <strong>Plano cancelado:</strong> o cancelamento já foi registrado. Você ainda pode excluir definitivamente sua conta pela seção abaixo.
+                    </div>
+                  ) : profile.canCancelPlan ? (
+                    <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-semibold text-amber-950">Deseja interromper o plano?</p>
+                        <p className="text-sm text-amber-900">O cancelamento interrompe novas cobranças recorrentes e altera a situação da assinatura para cancelada.</p>
+                      </div>
+                      <Button variant="outline" onClick={() => setCancelOpen(true)}>
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Cancelar plano
+                      </Button>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            ) : null}
 
             {!profile.editable && (
               <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
@@ -408,7 +568,7 @@ export default function Perfil() {
                     <div>
                       <CardTitle className="text-destructive">Excluir minha conta</CardTitle>
                       <CardDescription className="mt-1">
-                        A exclusão remove o acesso comercial, os bancos pertencentes à conta e os dados operacionais. No Plus, usuários adicionais vinculados também perdem o acesso.
+                        Antes da exclusão, o Note Note cancela a assinatura/cobrança vinculada no Asaas quando houver um recurso ativo. Depois disso, remove o acesso comercial, os bancos pertencentes à conta e os dados operacionais. No Plus, usuários adicionais vinculados também perdem o acesso.
                       </CardDescription>
                     </div>
                   </div>
@@ -422,12 +582,52 @@ export default function Perfil() {
               </Card>
             )}
 
+            <Dialog open={cancelOpen} onOpenChange={open => !cancelingPlan && setCancelOpen(open)}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Cancelar seu plano?</DialogTitle>
+                  <DialogDescription>
+                    Confirme sua senha para cancelar a assinatura. Esta ação não exclui sua conta nem seus dados; a exclusão continua sendo uma ação separada.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                  {profile.trialActive ? (
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+                      Seu teste grátis termina em <strong>{safeDate(profile.trialEndsAt)}</strong> e restam <strong>{trialDays} dia(s)</strong>.
+                    </div>
+                  ) : null}
+                  <div>
+                    <Label htmlFor="cancel-plan-password">Senha atual</Label>
+                    <Input
+                      id="cancel-plan-password"
+                      type="password"
+                      className="mt-2"
+                      value={cancelPassword}
+                      onChange={event => setCancelPassword(event.target.value)}
+                      disabled={cancelingPlan}
+                    />
+                  </div>
+                  <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                    <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
+                    <p>O Note Note tentará cancelar primeiro a recorrência ou cobrança pendente vinculada ao Asaas e só depois registrará o plano como cancelado.</p>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setCancelOpen(false)} disabled={cancelingPlan}>Voltar</Button>
+                  <Button variant="destructive" onClick={cancelPlan} disabled={cancelingPlan || !cancelPassword}>
+                    {cancelingPlan ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />}
+                    Confirmar cancelamento
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Excluir conta definitivamente?</DialogTitle>
                   <DialogDescription>
-                    Esta ação não pode ser desfeita. Confirme sua senha e digite EXCLUIR CONTA para continuar.
+                    Esta ação não pode ser desfeita. O plano será cancelado automaticamente antes da exclusão. Confirme sua senha e digite EXCLUIR CONTA para continuar.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-2">
@@ -454,7 +654,7 @@ export default function Perfil() {
                   </div>
                   <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
                     <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-                    <p>O sistema exige duas confirmações para impedir exclusões acidentais.</p>
+                    <p>O sistema cancela o plano vinculado e exige duas confirmações para impedir exclusões acidentais.</p>
                   </div>
                 </div>
                 <DialogFooter>
