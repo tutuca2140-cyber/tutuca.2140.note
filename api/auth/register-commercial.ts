@@ -183,13 +183,14 @@ async function createAsaasPix(args: {
 }) {
   const externalReference = `notenote:${args.userId}:${args.plan}:pix_annual`;
   const customerId = await createAsaasCustomer(args);
+  const paymentDueDate = new Date();
   const payment = await asaasRequest("/payments", {
     method: "POST",
     body: JSON.stringify({
       customer: customerId,
       billingType: "PIX",
       value: ANNUAL_PIX_PRICES[args.plan] / 100,
-      dueDate: yyyyMmDd(args.trialEndsAt),
+      dueDate: yyyyMmDd(paymentDueDate),
       description: `Note Note - Plano ${PLAN_LABELS[args.plan]} Anual`,
       externalReference,
     }),
@@ -200,6 +201,31 @@ async function createAsaasPix(args: {
   const qrCode = String(qr?.payload ?? "");
   const qrCodeBase64 = String(qr?.encodedImage ?? "");
   if (!qrCode) throw Object.assign(new Error("O Asaas não retornou o QR Code Pix."), { statusCode: 502 });
+
+  try {
+    const decoded = await asaasRequest("/pix/qrCodes/decode", {
+      method: "POST",
+      body: JSON.stringify({
+        payload: qrCode,
+        expectedPaymentDate: yyyyMmDd(new Date()),
+      }),
+    });
+    const canBePaid = decoded?.canBePaid;
+    console.info("[asaas/pix-validation]", {
+      paymentId: String(payment.id),
+      canBePaid,
+      paymentStatus: String(payment.status ?? "PENDING"),
+      dueDate: String(payment.dueDate ?? yyyyMmDd(paymentDueDate)),
+      expirationDate: String(qr?.expirationDate ?? ""),
+    });
+    if (canBePaid === false) {
+      const reason = String(decoded?.cannotBePaidReason ?? decoded?.reason ?? "O QR Code foi gerado, mas o Asaas informou que ele não pode ser pago.");
+      throw Object.assign(new Error(reason), { statusCode: 502, providerResponse: decoded });
+    }
+  } catch (validationError: any) {
+    if (validationError?.providerResponse?.canBePaid === false) throw validationError;
+    console.warn("[asaas/pix-validation-unavailable]", validationError instanceof Error ? validationError.message : validationError);
+  }
 
   return {
     kind: "pix" as const,
