@@ -7,11 +7,24 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 
 const plans = {
-  basic: { name: "Basic", price: "R$ 29,90/mês", databaseAccess: "1 banco de dados" },
-  plus: { name: "Plus", price: "R$ 49,90/mês", databaseAccess: "até 3 bancos de dados" },
+  basic: {
+    name: "Basic",
+    monthly: "R$ 29,90/mês",
+    annualPix: "R$ 199,90/ano",
+    savings: "R$ 158,90",
+    databaseAccess: "1 banco de dados",
+  },
+  plus: {
+    name: "Plus",
+    monthly: "R$ 49,90/mês",
+    annualPix: "R$ 399,90/ano",
+    savings: "R$ 198,90",
+    databaseAccess: "até 3 bancos de dados",
+  },
 } as const;
 
 type PlanId = keyof typeof plans;
+type BillingMethod = "card_monthly" | "pix_annual";
 
 function readSelectedPlan(): PlanId | null {
   const query = new URLSearchParams(window.location.search).get("plano")?.toLowerCase();
@@ -19,10 +32,18 @@ function readSelectedPlan(): PlanId | null {
   try {
     const stored = window.sessionStorage.getItem("notenote:selected-plan");
     if (stored === "basic" || stored === "plus") return stored;
-  } catch {
-    // segue sem seleção quando o storage não estiver disponível
-  }
+  } catch {}
   return null;
+}
+
+function readBillingMethod(): BillingMethod {
+  const query = new URLSearchParams(window.location.search).get("cobranca")?.toLowerCase();
+  if (query === "pix_annual") return "pix_annual";
+  if (query === "card_monthly") return "card_monthly";
+  try {
+    if (window.sessionStorage.getItem("notenote:selected-billing") === "pix_annual") return "pix_annual";
+  } catch {}
+  return "card_monthly";
 }
 
 function formatWhatsapp(value: string) {
@@ -43,6 +64,7 @@ function validWhatsapp(value: string) {
 
 export default function Cadastro() {
   const plan = useMemo(readSelectedPlan, []);
+  const [billingMethod, setBillingMethod] = useState<BillingMethod>(() => readBillingMethod());
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -62,17 +84,11 @@ export default function Cadastro() {
     try {
       const response = await fetch("/api/auth/captcha", { cache: "no-store" });
       const result = await response.json();
-      if (response.ok && result?.success) {
-        setCaptcha({ question: result.question, token: result.token });
-      }
-    } catch {
-      // a mensagem de erro será exibida ao enviar caso a validação não esteja disponível
-    }
+      if (response.ok && result?.success) setCaptcha({ question: result.question, token: result.token });
+    } catch {}
   }, []);
 
-  useEffect(() => {
-    void refreshCaptcha();
-  }, [refreshCaptcha]);
+  useEffect(() => { void refreshCaptcha(); }, [refreshCaptcha]);
 
   const passwordRules = {
     length: password.length >= 8,
@@ -83,35 +99,17 @@ export default function Cadastro() {
   const passwordsMatch = password.length > 0 && password === confirmPassword;
   const fullNameValid = validFullName(name);
   const whatsappValid = validWhatsapp(whatsapp);
+  const selectedPrice = plan ? (billingMethod === "pix_annual" ? plans[plan].annualPix : plans[plan].monthly) : "";
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
-
-    if (!plan) {
-      setError("Escolha um plano antes de criar o cadastro.");
-      return;
-    }
-    if (!fullNameValid) {
-      setError("Informe seu nome e sobrenome completos.");
-      return;
-    }
-    if (!whatsappValid) {
-      setError("Informe um WhatsApp brasileiro válido com DDD e número iniciado por 9.");
-      return;
-    }
-    if (!passwordValid) {
-      setError("A senha ainda não atende aos requisitos obrigatórios.");
-      return;
-    }
-    if (!passwordsMatch) {
-      setError("As duas senhas precisam ser iguais.");
-      return;
-    }
-    if (!notRobot || !captchaAnswer.trim()) {
-      setError("Confirme que você não é um robô e resolva a verificação.");
-      return;
-    }
+    if (!plan) return setError("Escolha um plano antes de criar o cadastro.");
+    if (!fullNameValid) return setError("Informe seu nome e sobrenome completos.");
+    if (!whatsappValid) return setError("Informe um WhatsApp brasileiro válido com DDD e número iniciado por 9.");
+    if (!passwordValid) return setError("A senha ainda não atende aos requisitos obrigatórios.");
+    if (!passwordsMatch) return setError("As duas senhas precisam ser iguais.");
+    if (!notRobot || !captchaAnswer.trim()) return setError("Confirme que você não é um robô e resolva a verificação.");
 
     setLoading(true);
     try {
@@ -119,26 +117,14 @@ export default function Cadastro() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
-          username: username.trim(),
-          email: email.trim(),
-          whatsapp,
-          password,
-          plan,
-          captchaToken: captcha.token,
-          captchaAnswer,
+          name: name.trim(), username: username.trim(), email: email.trim(), whatsapp, password,
+          plan, billingMethod, captchaToken: captcha.token, captchaAnswer,
         }),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Não foi possível concluir o cadastro.");
-      }
-
+      if (!response.ok || !result?.success) throw new Error(result?.message || "Não foi possível concluir o cadastro.");
       const paymentUrl = String(result?.subscription?.checkoutUrl ?? "").trim();
-      if (!paymentUrl.startsWith("https://")) {
-        throw new Error("Cadastro criado, mas o Mercado Pago não retornou o link de assinatura.");
-      }
-
+      if (!paymentUrl.startsWith("https://")) throw new Error("Cadastro criado, mas o Mercado Pago não retornou o link de pagamento.");
       setCheckoutUrl(paymentUrl);
       setSuccess(true);
       window.location.assign(paymentUrl);
@@ -155,36 +141,17 @@ export default function Cadastro() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-sky-100 px-4 py-10">
         <div className="mx-auto max-w-lg">
-          <div className="mb-8 text-center">
-            <img src="/brand/note-note-logo-official.png" alt="Note Note" className="mx-auto h-14 w-auto" />
-          </div>
-          <Card className="border-emerald-200 shadow-xl">
-            <CardContent className="p-8 text-center">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                <CheckCircle2 className="h-8 w-8" />
-              </div>
-              <h1 className="mt-5 text-2xl font-black text-slate-950">Cadastro realizado</h1>
-              <p className="mt-3 text-sm leading-6 text-slate-600">
-                <strong>{name.trim()}</strong>, sua conta foi criada para o plano <strong>{plans[plan].name}</strong> — {plans[plan].price} — com acesso a <strong>{plans[plan].databaseAccess}</strong>.
-              </p>
-              <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4 text-left text-sm text-blue-950">
-                Agora falta autorizar a assinatura no Mercado Pago. Assim que o Mercado Pago confirmar a assinatura, o Note Note libera sua conta automaticamente.
-              </div>
-              {checkoutUrl ? (
-                <a
-                  href={checkoutUrl}
-                  className="mt-6 inline-flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-5 font-bold text-white transition hover:bg-blue-700"
-                >
-                  Continuar no Mercado Pago
-                </a>
-              ) : null}
-              <Link href="/login">
-                <a className="mt-3 inline-flex h-11 items-center justify-center rounded-xl border border-blue-200 px-5 font-bold text-blue-700 transition hover:bg-blue-50">
-                  Ir para o login
-                </a>
-              </Link>
-            </CardContent>
-          </Card>
+          <img src="/brand/note-note-logo-official.png" alt="Note Note" className="mx-auto mb-8 h-14 w-auto" />
+          <Card className="border-emerald-200 shadow-xl"><CardContent className="p-8 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><CheckCircle2 className="h-8 w-8" /></div>
+            <h1 className="mt-5 text-2xl font-black text-slate-950">Cadastro realizado</h1>
+            <p className="mt-3 text-sm leading-6 text-slate-600"><strong>{name.trim()}</strong>, você escolheu o plano <strong>{plans[plan].name}</strong> — {selectedPrice}.</p>
+            <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4 text-left text-sm text-blue-950">
+              Você tem 7 dias grátis. Autorize o pagamento no Mercado Pago agora; a primeira cobrança está programada para depois do período de teste, conforme a modalidade escolhida.
+            </div>
+            {checkoutUrl && <a href={checkoutUrl} className="mt-6 inline-flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-5 font-bold text-white transition hover:bg-blue-700">Continuar no Mercado Pago</a>}
+            <Link href="/login"><a className="mt-3 inline-flex h-11 items-center justify-center rounded-xl border border-blue-200 px-5 font-bold text-blue-700 transition hover:bg-blue-50">Ir para o login</a></Link>
+          </CardContent></Card>
         </div>
       </div>
     );
@@ -194,209 +161,56 @@ export default function Cadastro() {
     <div className="min-h-screen bg-gradient-to-br from-white via-blue-50/80 to-sky-100/80 px-4 py-8 sm:py-12">
       <div className="mx-auto max-w-xl">
         <div className="mb-7 flex items-center justify-between gap-4">
-          <Link href="/planos">
-            <a className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-blue-700">
-              <ArrowLeft className="h-4 w-4" />
-              Voltar aos planos
-            </a>
-          </Link>
+          <Link href="/planos"><a className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-blue-700"><ArrowLeft className="h-4 w-4" />Voltar aos planos</a></Link>
           <img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-10 w-auto" />
         </div>
 
         <Card className="border-blue-100 shadow-2xl shadow-blue-900/10">
           <CardHeader>
-            <CardTitle className="text-2xl">Criar cadastro para assinar</CardTitle>
-            <CardDescription>
-              Informe seus dados. O nome de usuário e a senha abaixo serão usados para entrar no Note Note.
-            </CardDescription>
+            <CardTitle className="text-2xl">Crie sua conta e teste por 7 dias</CardTitle>
+            <CardDescription>Cadastre-se, autorize a forma de pagamento e use o Note Note gratuitamente durante o período de teste.</CardDescription>
           </CardHeader>
           <CardContent>
             {plan ? (
               <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Plano escolhido</p>
-                    <p className="mt-1 text-lg font-black text-slate-950">{plans[plan].name}</p>
-                  </div>
-                  <p className="font-extrabold text-blue-700">{plans[plan].price}</p>
-                </div>
-                <p className="mt-3 border-t border-blue-200 pt-3 text-sm font-semibold text-blue-950">
-                  Inclui {plans[plan].databaseAccess}.
-                </p>
+                <div className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">Plano escolhido</p><p className="mt-1 text-lg font-black text-slate-950">{plans[plan].name}</p></div><p className="font-extrabold text-blue-700">{selectedPrice}</p></div>
+                <p className="mt-3 border-t border-blue-200 pt-3 text-sm font-semibold text-blue-950">Inclui {plans[plan].databaseAccess}. 7 dias grátis para novos usuários.</p>
               </div>
-            ) : (
-              <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                Nenhum plano foi selecionado. <Link href="/planos"><a className="font-bold underline">Escolha Basic ou Plus</a></Link> antes de continuar.
+            ) : <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Nenhum plano foi selecionado. <Link href="/planos"><a className="font-bold underline">Escolha Basic ou Plus</a></Link>.</div>}
+
+            {plan && (
+              <div className="mb-6 grid gap-3 sm:grid-cols-2">
+                <button type="button" onClick={() => setBillingMethod("card_monthly")} className={`rounded-2xl border p-4 text-left transition ${billingMethod === "card_monthly" ? "border-blue-500 bg-blue-50 ring-2 ring-blue-100" : "border-slate-200 bg-white"}`}>
+                  <p className="text-xs font-extrabold uppercase tracking-wide text-blue-600">Cartão mensal</p>
+                  <p className="mt-1 text-xl font-black text-slate-950">{plans[plan].monthly}</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-600">Primeira cobrança após os 7 dias grátis.</p>
+                </button>
+                <button type="button" onClick={() => setBillingMethod("pix_annual")} className={`rounded-2xl border p-4 text-left transition ${billingMethod === "pix_annual" ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100" : "border-slate-200 bg-white"}`}>
+                  <p className="text-xs font-extrabold uppercase tracking-wide text-emerald-700">Pix anual</p>
+                  <p className="mt-1 text-xl font-black text-slate-950">{plans[plan].annualPix}</p>
+                  <p className="mt-2 text-xs font-bold text-emerald-700">Economize {plans[plan].savings} no ano</p>
+                </button>
               </div>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div>
-                <Label htmlFor="signup-name">Nome e Sobrenome</Label>
-                <Input
-                  id="signup-name"
-                  value={name}
-                  onChange={event => setName(event.target.value)}
-                  autoComplete="name"
-                  placeholder="ex.: João da Silva"
-                  maxLength={200}
-                  required
-                  disabled={loading}
-                  className="mt-2"
-                />
-                {name && !fullNameValid ? (
-                  <p className="mt-1 text-xs text-rose-600">Informe pelo menos nome e sobrenome.</p>
-                ) : null}
-              </div>
-
-              <div>
-                <Label htmlFor="signup-username">Nome de usuário</Label>
-                <Input
-                  id="signup-username"
-                  value={username}
-                  onChange={event => setUsername(event.target.value)}
-                  autoComplete="username"
-                  placeholder="ex.: joaosilva"
-                  minLength={3}
-                  maxLength={40}
-                  required
-                  disabled={loading}
-                  className="mt-2"
-                />
-                <p className="mt-1 text-xs text-muted-foreground">Este será o usuário usado para entrar no sistema. De 3 a 40 caracteres: letras, números, ponto, hífen ou _.</p>
-              </div>
-
-              <div>
-                <Label htmlFor="signup-email">E-mail</Label>
-                <Input
-                  id="signup-email"
-                  type="email"
-                  value={email}
-                  onChange={event => setEmail(event.target.value)}
-                  autoComplete="email"
-                  placeholder="voce@email.com"
-                  required
-                  disabled={loading}
-                  className="mt-2"
-                />
-                <p className="mt-1 text-xs text-muted-foreground">Este e-mail também será usado para recuperação de senha.</p>
-              </div>
-
-              <div>
-                <Label htmlFor="signup-whatsapp">WhatsApp</Label>
-                <Input
-                  id="signup-whatsapp"
-                  type="tel"
-                  inputMode="tel"
-                  value={whatsapp}
-                  onChange={event => setWhatsapp(formatWhatsapp(event.target.value))}
-                  autoComplete="tel"
-                  placeholder="(24) 99999-9999"
-                  required
-                  disabled={loading}
-                  className="mt-2"
-                />
-                <p className={`mt-1 text-xs ${whatsapp && !whatsappValid ? "text-rose-600" : "text-muted-foreground"}`}>
-                  Use DDD + celular brasileiro iniciado por 9. Ex.: (24) 99999-9999.
-                </p>
-              </div>
-
-              <div>
-                <Label htmlFor="signup-password">Senha</Label>
-                <div className="relative mt-2">
-                  <Input
-                    id="signup-password"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={event => setPassword(event.target.value)}
-                    autoComplete="new-password"
-                    required
-                    disabled={loading}
-                    className="pr-11"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(value => !value)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
-                    aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
-                  <div className={passwordRules.length ? "text-emerald-700" : "text-slate-500"}>✓ Mínimo 8 caracteres</div>
-                  <div className={passwordRules.uppercase ? "text-emerald-700" : "text-slate-500"}>✓ 1 letra maiúscula</div>
-                  <div className={passwordRules.number ? "text-emerald-700" : "text-slate-500"}>✓ 1 número</div>
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="signup-confirm-password">Confirmar senha</Label>
-                <Input
-                  id="signup-confirm-password"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={event => setConfirmPassword(event.target.value)}
-                  autoComplete="new-password"
-                  required
-                  disabled={loading}
-                  className="mt-2"
-                />
-                {confirmPassword && (
-                  <p className={`mt-1 text-xs ${passwordsMatch ? "text-emerald-700" : "text-rose-600"}`}>
-                    {passwordsMatch ? "As senhas são iguais." : "As senhas ainda não são iguais."}
-                  </p>
-                )}
-              </div>
+              <div><Label htmlFor="signup-name">Nome e Sobrenome</Label><Input id="signup-name" value={name} onChange={e => setName(e.target.value)} autoComplete="name" placeholder="ex.: João da Silva" maxLength={200} required disabled={loading} className="mt-2" />{name && !fullNameValid && <p className="mt-1 text-xs text-rose-600">Informe pelo menos nome e sobrenome.</p>}</div>
+              <div><Label htmlFor="signup-username">Nome de usuário</Label><Input id="signup-username" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" placeholder="ex.: joaosilva" minLength={3} maxLength={40} required disabled={loading} className="mt-2" /></div>
+              <div><Label htmlFor="signup-email">E-mail</Label><Input id="signup-email" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" placeholder="voce@email.com" required disabled={loading} className="mt-2" /></div>
+              <div><Label htmlFor="signup-whatsapp">WhatsApp</Label><Input id="signup-whatsapp" type="tel" value={whatsapp} onChange={e => setWhatsapp(formatWhatsapp(e.target.value))} autoComplete="tel" placeholder="(24) 99999-9999" required disabled={loading} className="mt-2" />{whatsapp && !whatsappValid && <p className="mt-1 text-xs text-rose-600">Informe DDD + celular iniciado por 9.</p>}</div>
+              <div><Label htmlFor="signup-password">Senha</Label><div className="relative mt-2"><Input id="signup-password" type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" required disabled={loading} className="pr-11" /><button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500" aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-3"><div className={passwordRules.length ? "text-emerald-700" : "text-slate-500"}>✓ Mínimo 8 caracteres</div><div className={passwordRules.uppercase ? "text-emerald-700" : "text-slate-500"}>✓ 1 letra maiúscula</div><div className={passwordRules.number ? "text-emerald-700" : "text-slate-500"}>✓ 1 número</div></div></div>
+              <div><Label htmlFor="signup-confirm-password">Confirmar senha</Label><Input id="signup-confirm-password" type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" required disabled={loading} className="mt-2" />{confirmPassword && <p className={`mt-1 text-xs ${passwordsMatch ? "text-emerald-700" : "text-rose-600"}`}>{passwordsMatch ? "As senhas são iguais." : "As senhas ainda não são iguais."}</p>}</div>
 
               <div className="space-y-3 rounded-xl border bg-slate-50 p-4">
-                <label className="flex items-center gap-3 text-sm font-medium">
-                  <input
-                    type="checkbox"
-                    checked={notRobot}
-                    onChange={event => setNotRobot(event.target.checked)}
-                    disabled={loading}
-                    className="h-5 w-5"
-                  />
-                  Não sou um robô
-                </label>
-                {notRobot && (
-                  <div>
-                    <Label htmlFor="signup-captcha">Verificação: {captcha.question}</Label>
-                    <Input
-                      id="signup-captcha"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      value={captchaAnswer}
-                      onChange={event => setCaptchaAnswer(event.target.value)}
-                      disabled={loading}
-                      required
-                      className="mt-2"
-                    />
-                  </div>
-                )}
+                <label className="flex items-center gap-3 text-sm font-medium"><input type="checkbox" checked={notRobot} onChange={e => setNotRobot(e.target.checked)} disabled={loading} className="h-5 w-5" />Não sou um robô</label>
+                {notRobot && <div><Label htmlFor="signup-captcha">Verificação: {captcha.question}</Label><Input id="signup-captcha" inputMode="numeric" autoComplete="off" value={captchaAnswer} onChange={e => setCaptchaAnswer(e.target.value)} required disabled={loading} className="mt-2" /></div>}
               </div>
 
-              <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-xs leading-5 text-slate-600">
-                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
-                <p>
-                  Este cadastro é exclusivo para clientes de assinatura. Usuários gratuitos ou de teste criados pelo Super Admin continuam separados deste fluxo.
-                </p>
-              </div>
+              {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-800">{error}</div>}
 
-              {error && (
-                <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-                  {error}
-                </div>
-              )}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950"><div className="flex items-center gap-2 font-bold"><ShieldCheck className="h-4 w-4" />7 dias grátis</div><p className="mt-1">Você pode cancelar durante o período de teste. A cobrança começa depois dos 7 dias conforme a modalidade escolhida.</p></div>
 
-              <Button type="submit" className="h-12 w-full" disabled={loading || !plan}>
-                {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Preparando assinatura...</> : "Criar cadastro e assinar"}
-              </Button>
-
-              <p className="text-center text-sm text-slate-500">
-                Já possui acesso? <Link href="/login"><a className="font-bold text-blue-700 hover:underline">Entrar no Note Note</a></Link>
-              </p>
+              <Button type="submit" className="h-12 w-full text-base font-bold" disabled={loading || !plan}>{loading ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Criando sua conta...</> : "Começar 7 dias grátis"}</Button>
             </form>
           </CardContent>
         </Card>
