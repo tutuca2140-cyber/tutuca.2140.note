@@ -1,11 +1,9 @@
-import crypto from "node:crypto";
 import bcrypt from "bcrypt";
 import { ensureAuthUserColumns, getSql, readJsonBody, sendJson } from "./_shared.js";
 import { verifyLoginCaptcha } from "../../shared/login-captcha.js";
 
-const MERCADO_PAGO_API = "https://api.mercadopago.com";
-const CHECKOUT_RETURN_URL = "https://notenote.com.br/login?assinatura=retorno";
-const WEBHOOK_URL = "https://notenote.com.br/api/webhooks/mercadopago";
+const ASAAS_API = "https://api.asaas.com/v3";
+const RETURN_BASE = "https://notenote.com.br";
 const TRIAL_DAYS = 7;
 
 const MONTHLY_PRICES = { basic: 2990, plus: 4990 } as const;
@@ -55,6 +53,38 @@ function isValidCpf(value: string) {
   };
   return calc(9) === Number(cpf[9]) && calc(10) === Number(cpf[10]);
 }
+function yyyyMmDd(date: Date) { return date.toISOString().slice(0, 10); }
+function asaasDateTime(date: Date) {
+  return date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+}
+
+function getAsaasApiKey() {
+  const apiKey = String(process.env.ASAAS_API_KEY ?? "").trim();
+  if (!apiKey) throw Object.assign(new Error("Asaas ainda não está configurado no servidor."), { statusCode: 503 });
+  return apiKey;
+}
+
+async function asaasRequest(path: string, init: RequestInit = {}) {
+  const apiKey = getAsaasApiKey();
+  const response = await fetch(`${ASAAS_API}${path}`, {
+    ...init,
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      access_token: apiKey,
+      ...(init.headers || {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.error("[asaas/request]", { path, status: response.status, errors: data?.errors, message: data?.message });
+    const message = Array.isArray(data?.errors) && data.errors[0]?.description
+      ? String(data.errors[0].description)
+      : "Não foi possível iniciar o pagamento no Asaas.";
+    throw Object.assign(new Error(message), { statusCode: 502, providerResponse: data });
+  }
+  return data as any;
+}
 
 async function ensureCommercialSubscriptionTable() {
   const sql = getSql();
@@ -74,6 +104,8 @@ async function ensureCommercialSubscriptionTable() {
     ALTER TABLE commercial_subscriptions
       ADD COLUMN IF NOT EXISTS provider varchar(40),
       ADD COLUMN IF NOT EXISTS "providerSubscriptionId" varchar(120),
+      ADD COLUMN IF NOT EXISTS "providerCheckoutId" varchar(120),
+      ADD COLUMN IF NOT EXISTS "providerCustomerId" varchar(120),
       ADD COLUMN IF NOT EXISTS "providerStatus" varchar(40),
       ADD COLUMN IF NOT EXISTS "checkoutUrl" text,
       ADD COLUMN IF NOT EXISTS "externalReference" varchar(160),
@@ -118,106 +150,110 @@ async function ensureCommercialSubscriptionTable() {
   `;
 }
 
-async function createMercadoPagoCardSubscription(args: {
+async function createAsaasCustomer(args: {
   userId: number;
+  name: string;
   email: string;
-  plan: CommercialPlan;
-  trialEndsAt: Date;
+  whatsapp: string;
+  cpf: string;
 }) {
-  const accessToken = String(process.env.MERCADOPAGO_ACCESS_TOKEN ?? "").trim();
-  if (!accessToken) throw Object.assign(new Error("Mercado Pago ainda não está configurado no servidor."), { statusCode: 503 });
-
-  const externalReference = `notenote:${args.userId}:${args.plan}:card_monthly`;
-  const response = await fetch(`${MERCADO_PAGO_API}/preapproval`, {
+  const data = await asaasRequest("/customers", {
     method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      reason: `Note Note - Plano ${PLAN_LABELS[args.plan]} Mensal`,
-      external_reference: externalReference,
-      payer_email: args.email,
-      auto_recurring: {
-        frequency: 1,
-        frequency_type: "months",
-        start_date: args.trialEndsAt.toISOString(),
-        transaction_amount: MONTHLY_PRICES[args.plan] / 100,
-        currency_id: "BRL",
-      },
-      back_url: CHECKOUT_RETURN_URL,
-      status: "pending",
+      name: args.name,
+      cpfCnpj: normalizeCpf(args.cpf),
+      email: args.email,
+      mobilePhone: normalizeBrazilWhatsapp(args.whatsapp),
+      externalReference: `notenote:user:${args.userId}`,
+      notificationDisabled: false,
     }),
   });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data?.id || !data?.init_point) {
-    console.error("[mercadopago/create-subscription]", { status: response.status, code: data?.code, message: data?.message });
-    throw Object.assign(new Error("Não foi possível iniciar a assinatura no Mercado Pago."), { statusCode: 502 });
-  }
-  return {
-    kind: "subscription" as const,
-    id: String(data.id),
-    status: String(data.status ?? "pending"),
-    checkoutUrl: String(data.init_point),
-    externalReference,
-  };
+  if (!data?.id) throw Object.assign(new Error("O Asaas não retornou o identificador do cliente."), { statusCode: 502 });
+  return String(data.id);
 }
 
-async function createMercadoPagoPix(args: {
+async function createAsaasPix(args: {
   userId: number;
-  email: string;
   name: string;
+  email: string;
+  whatsapp: string;
   cpf: string;
   plan: CommercialPlan;
   trialEndsAt: Date;
 }) {
-  const accessToken = String(process.env.MERCADOPAGO_PIX_ACCESS_TOKEN ?? "").trim();
-  if (!accessToken) throw Object.assign(new Error("Mercado Pago Pix ainda não está configurado no servidor."), { statusCode: 503 });
-
   const externalReference = `notenote:${args.userId}:${args.plan}:pix_annual`;
-  const nameParts = args.name.trim().split(/\s+/);
-  const firstName = nameParts.shift() || args.name;
-  const lastName = nameParts.join(" ") || firstName;
-  const response = await fetch(`${MERCADO_PAGO_API}/v1/payments`, {
+  const customerId = await createAsaasCustomer(args);
+  const payment = await asaasRequest("/payments", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "X-Idempotency-Key": crypto.randomUUID(),
-    },
     body: JSON.stringify({
-      transaction_amount: ANNUAL_PIX_PRICES[args.plan] / 100,
+      customer: customerId,
+      billingType: "PIX",
+      value: ANNUAL_PIX_PRICES[args.plan] / 100,
+      dueDate: yyyyMmDd(args.trialEndsAt),
       description: `Note Note - Plano ${PLAN_LABELS[args.plan]} Anual`,
-      payment_method_id: "pix",
-      external_reference: externalReference,
-      notification_url: WEBHOOK_URL,
-      date_of_expiration: args.trialEndsAt.toISOString(),
-      payer: {
-        email: args.email,
-        first_name: firstName,
-        last_name: lastName,
-        identification: { type: "CPF", number: normalizeCpf(args.cpf) },
-      },
+      externalReference,
     }),
   });
+  if (!payment?.id) throw Object.assign(new Error("O Asaas não retornou o identificador do Pix."), { statusCode: 502 });
 
-  const data = await response.json().catch(() => ({}));
-  const transactionData = data?.point_of_interaction?.transaction_data ?? {};
-  const qrCode = String(transactionData?.qr_code ?? "");
-  const qrCodeBase64 = String(transactionData?.qr_code_base64 ?? "");
-  const ticketUrl = String(transactionData?.ticket_url ?? "");
-  if (!response.ok || !data?.id || !qrCode) {
-    console.error("[mercadopago/create-pix]", { status: response.status, code: data?.code, message: data?.message, cause: data?.cause });
-    throw Object.assign(new Error("Não foi possível gerar o Pix do Mercado Pago."), { statusCode: 502 });
-  }
+  const qr = await asaasRequest(`/payments/${encodeURIComponent(String(payment.id))}/pixQrCode`, { method: "GET" });
+  const qrCode = String(qr?.payload ?? "");
+  const qrCodeBase64 = String(qr?.encodedImage ?? "");
+  if (!qrCode) throw Object.assign(new Error("O Asaas não retornou o QR Code Pix."), { statusCode: 502 });
 
   return {
     kind: "pix" as const,
-    id: String(data.id),
-    status: String(data.status ?? "pending"),
-    checkoutUrl: ticketUrl,
+    paymentId: String(payment.id),
+    customerId,
+    status: String(payment.status ?? "PENDING"),
+    checkoutUrl: String(payment.invoiceUrl ?? ""),
     externalReference,
     qrCode,
     qrCodeBase64,
-    expiresAt: args.trialEndsAt.toISOString(),
+    expiresAt: String(qr?.expirationDate ?? args.trialEndsAt.toISOString()),
+  };
+}
+
+async function createAsaasCardCheckout(args: {
+  userId: number;
+  plan: CommercialPlan;
+  trialEndsAt: Date;
+}) {
+  const externalReference = `notenote:${args.userId}:${args.plan}:card_monthly`;
+  const checkout = await asaasRequest("/checkouts", {
+    method: "POST",
+    body: JSON.stringify({
+      billingTypes: ["CREDIT_CARD"],
+      chargeTypes: ["RECURRENT"],
+      minutesToExpire: 1440,
+      externalReference,
+      callback: {
+        successUrl: `${RETURN_BASE}/login?assinatura=asaas-sucesso`,
+        cancelUrl: `${RETURN_BASE}/login?assinatura=asaas-cancelado`,
+        expiredUrl: `${RETURN_BASE}/login?assinatura=asaas-expirado`,
+      },
+      items: [
+        {
+          name: `Note Note ${PLAN_LABELS[args.plan]}`,
+          description: `Assinatura mensal do plano ${PLAN_LABELS[args.plan]}`,
+          quantity: 1,
+          value: MONTHLY_PRICES[args.plan] / 100,
+        },
+      ],
+      subscription: {
+        cycle: "MONTHLY",
+        nextDueDate: asaasDateTime(args.trialEndsAt),
+      },
+    }),
+  });
+  if (!checkout?.id) throw Object.assign(new Error("O Asaas não retornou o checkout da assinatura."), { statusCode: 502 });
+  const checkoutId = String(checkout.id);
+  return {
+    kind: "checkout" as const,
+    checkoutId,
+    status: "PENDING",
+    externalReference,
+    checkoutUrl: `https://asaas.com/checkoutSession/show?id=${encodeURIComponent(checkoutId)}`,
   };
 }
 
@@ -246,7 +282,7 @@ export default async function handler(req: any, res: any) {
     if (!isValidEmail(email)) return sendJson(res, 400, { success: false, message: "Informe um e-mail válido." });
     if (!isValidCommercialPassword(password)) return sendJson(res, 400, { success: false, message: "A senha deve ter no mínimo 8 caracteres, pelo menos uma letra maiúscula e pelo menos um número." });
     if (!isValidBrazilWhatsapp(whatsappInput)) return sendJson(res, 400, { success: false, message: "Informe um WhatsApp brasileiro válido com DDD e número iniciado por 9." });
-    if (billingMethod === "pix_annual" && !isValidCpf(cpf)) return sendJson(res, 400, { success: false, message: "Informe um CPF válido para gerar o Pix do Mercado Pago." });
+    if (billingMethod === "pix_annual" && !isValidCpf(cpf)) return sendJson(res, 400, { success: false, message: "Informe um CPF válido para gerar o Pix do Asaas." });
     if (!verifyLoginCaptcha(captchaToken, captchaAnswer)) return sendJson(res, 400, { success: false, message: "Confirme corretamente que você não é um robô." });
 
     await ensureAuthUserColumns();
@@ -280,21 +316,22 @@ export default async function handler(req: any, res: any) {
       INSERT INTO commercial_subscriptions (
         "userId", plan, "priceCents", status, source, provider, "billingMethod", "trialEndsAt", "createdAt", "updatedAt"
       ) VALUES (
-        ${user.id}, ${plan}, ${selectedPrice}, 'active', 'commercial_signup', 'mercadopago',
+        ${user.id}, ${plan}, ${selectedPrice}, 'active', 'commercial_signup', 'asaas',
         ${billingMethod}, ${trialEndsAt.toISOString()}, NOW(), NOW()
       )
     `;
 
     if (billingMethod === "pix_annual") {
-      const pix = await createMercadoPagoPix({
-        userId: Number(user.id), email: String(user.email), name: String(user.name), cpf, plan, trialEndsAt,
+      const pix = await createAsaasPix({
+        userId: Number(user.id), name: String(user.name), email: String(user.email), whatsapp: String(user.whatsapp), cpf, plan, trialEndsAt,
       });
       await sql`
         UPDATE commercial_subscriptions SET
-          "providerStatus"=${pix.status}, "checkoutUrl"=${pix.checkoutUrl || null},
-          "externalReference"=${pix.externalReference}, "lastPaymentId"=${pix.id},
-          "lastPaymentStatus"=${pix.status}, "pixQrCode"=${pix.qrCode},
-          "pixQrCodeBase64"=${pix.qrCodeBase64 || null}, "pixExpiresAt"=${pix.expiresAt}, "updatedAt"=NOW()
+          provider='asaas', "providerCustomerId"=${pix.customerId}, "providerStatus"=${pix.status},
+          "checkoutUrl"=${pix.checkoutUrl || null}, "externalReference"=${pix.externalReference},
+          "lastPaymentId"=${pix.paymentId}, "lastPaymentStatus"=${pix.status},
+          "pixQrCode"=${pix.qrCode}, "pixQrCodeBase64"=${pix.qrCodeBase64 || null},
+          "pixExpiresAt"=${pix.expiresAt}, "updatedAt"=NOW()
         WHERE "userId"=${user.id}
       `;
       return sendJson(res, 201, {
@@ -305,21 +342,19 @@ export default async function handler(req: any, res: any) {
           status: "active", trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString(),
         },
         subscription: {
-          provider: "mercadopago", providerStatus: pix.status, checkoutUrl: pix.checkoutUrl,
+          provider: "asaas", providerStatus: pix.status, checkoutUrl: pix.checkoutUrl,
           billingMethod, trialEndsAt: trialEndsAt.toISOString(),
-          pix: { paymentId: pix.id, qrCode: pix.qrCode, qrCodeBase64: pix.qrCodeBase64, ticketUrl: pix.checkoutUrl, expiresAt: pix.expiresAt },
+          pix: { paymentId: pix.paymentId, qrCode: pix.qrCode, qrCodeBase64: pix.qrCodeBase64, ticketUrl: pix.checkoutUrl, expiresAt: pix.expiresAt },
         },
-        message: "Cadastro realizado. Seus 7 dias grátis começaram e o Pix anual do Mercado Pago já está disponível.",
+        message: "Cadastro realizado. Seus 7 dias grátis começaram e o Pix anual do Asaas já está disponível.",
       });
     }
 
-    const mercadoPago = await createMercadoPagoCardSubscription({
-      userId: Number(user.id), email: String(user.email), plan, trialEndsAt,
-    });
+    const checkout = await createAsaasCardCheckout({ userId: Number(user.id), plan, trialEndsAt });
     await sql`
       UPDATE commercial_subscriptions SET
-        "providerSubscriptionId"=${mercadoPago.id}, "providerStatus"=${mercadoPago.status},
-        "checkoutUrl"=${mercadoPago.checkoutUrl}, "externalReference"=${mercadoPago.externalReference}, "updatedAt"=NOW()
+        provider='asaas', "providerCheckoutId"=${checkout.checkoutId}, "providerStatus"=${checkout.status},
+        "checkoutUrl"=${checkout.checkoutUrl}, "externalReference"=${checkout.externalReference}, "updatedAt"=NOW()
       WHERE "userId"=${user.id}
     `;
 
@@ -331,14 +366,14 @@ export default async function handler(req: any, res: any) {
         status: "active", trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString(),
       },
       subscription: {
-        provider: "mercadopago", providerSubscriptionId: mercadoPago.id,
-        providerStatus: mercadoPago.status, checkoutUrl: mercadoPago.checkoutUrl,
+        provider: "asaas", providerCheckoutId: checkout.checkoutId,
+        providerStatus: checkout.status, checkoutUrl: checkout.checkoutUrl,
         billingMethod, trialEndsAt: trialEndsAt.toISOString(),
       },
-      message: "Cadastro realizado. Seus 7 dias grátis começaram. Autorize a assinatura no Mercado Pago para continuar após o teste.",
+      message: "Cadastro realizado. Seus 7 dias grátis começaram. Cadastre seu cartão no Asaas; a primeira cobrança será após o período de teste.",
     });
   } catch (error: any) {
-    console.error("[auth/register-commercial]", error);
+    console.error("[auth/register-commercial]", error?.providerResponse ?? error);
     if (createdUserId) {
       try {
         const sql = getSql();
