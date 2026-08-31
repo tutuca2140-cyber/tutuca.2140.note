@@ -208,14 +208,16 @@ async function createMercadoPagoSubscription(args: {
     plan: args.plan,
   });
 
-  // No sandbox do Mercado Pago, o pagador também precisa pertencer ao ambiente de teste.
-  // Se a API detectar que o e-mail real do cadastro pertence a outro site/ambiente,
-  // repetimos somente o checkout de teste com o e-mail sandbox oficial. A conta Note Note
-  // continua vinculada ao e-mail real e é reconciliada pelo external_reference.
-  if (
+  // Com credenciais de um vendedor de teste, o pagador também precisa ser de teste.
+  // Mantemos o e-mail real apenas no cadastro Note Note e usamos o pagador sandbox
+  // somente para a preapproval quando o Mercado Pago indicar mistura real/teste.
+  const mercadoPagoMessage = String(result.data?.message ?? "").toLowerCase();
+  const shouldRetryWithSandboxPayer =
     !result.response.ok &&
-    String(result.data?.code ?? "") === "guest_site_mismatch"
-  ) {
+    (String(result.data?.code ?? "") === "guest_site_mismatch" ||
+      mercadoPagoMessage.includes("both payer and collector must be real or test users"));
+
+  if (shouldRetryWithSandboxPayer) {
     payerEmail = MERCADO_PAGO_TEST_PAYER_EMAIL;
     result = await postMercadoPagoSubscription({
       accessToken,
