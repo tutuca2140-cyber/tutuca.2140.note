@@ -6,6 +6,7 @@ import {
   SESSION_COOKIE_NAME,
 } from "./auth/_shared.js";
 import { handleMercadoPagoWebhook } from "../server/mercadopago-webhook.js";
+import { handleAsaasWebhook } from "../server/asaas-webhook.js";
 
 let accessTablePromise: Promise<void> | null = null;
 
@@ -51,6 +52,9 @@ export default async function handler(req: any, res: any) {
     .toLowerCase();
   if (scope === "mercadopago-webhook") {
     return handleMercadoPagoWebhook(req, res);
+  }
+  if (scope === "asaas-webhook") {
+    return handleAsaasWebhook(req, res);
   }
 
   if (req.method !== "POST") {
