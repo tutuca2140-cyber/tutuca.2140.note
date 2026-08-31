@@ -101,7 +101,7 @@ async function handlePaymentEvent(event: string, payment: any) {
       "lastPaymentStatus"=${event},
       status=${nextStatus},
       "paidUntil"=CASE
-        WHEN ${annualPixPaid} THEN COALESCE("trialEndsAt", NOW()) + INTERVAL '1 year'
+        WHEN ${annualPixPaid} THEN NOW() + INTERVAL '1 year'
         ELSE "paidUntil"
       END,
       "lastWebhookAt"=NOW(), "updatedAt"=NOW()
