@@ -186,37 +186,6 @@ async function postMercadoPagoSubscription(args: {
   return { response, data };
 }
 
-async function createMercadoPagoTestPayer(accessToken: string) {
-  const response = await fetch(`${MERCADO_PAGO_API}/users/test`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      site_id: "MLB",
-      description: `Note Note comprador ${Date.now()}`,
-    }),
-  });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data?.email) {
-    console.error("[mercadopago/create-test-payer]", {
-      status: response.status,
-      code: data?.code,
-      message: data?.message,
-    });
-    throw Object.assign(new Error("Não foi possível criar o comprador de teste no Mercado Pago."), {
-      statusCode: 502,
-    });
-  }
-
-  return {
-    email: String(data.email).trim().toLowerCase(),
-    id: data?.id ? String(data.id) : null,
-  };
-}
-
 async function createMercadoPagoSubscription(args: {
   userId: number;
   email: string;
@@ -230,42 +199,12 @@ async function createMercadoPagoSubscription(args: {
   }
 
   const externalReference = `notenote:${args.userId}:${args.plan}`;
-  let payerEmail = args.email;
-  let sandboxPayer = false;
-  let result = await postMercadoPagoSubscription({
+  const result = await postMercadoPagoSubscription({
     accessToken,
-    payerEmail,
+    payerEmail: args.email,
     externalReference,
     plan: args.plan,
   });
-
-  const mercadoPagoMessage = String(result.data?.message ?? "").toLowerCase();
-  const shouldRetryWithSandboxPayer =
-    !result.response.ok &&
-    (String(result.data?.code ?? "") === "guest_site_mismatch" ||
-      mercadoPagoMessage.includes("both payer and collector must be real or test users"));
-
-  if (shouldRetryWithSandboxPayer) {
-    const configuredTestPayer = String(process.env.MERCADOPAGO_TEST_PAYER_EMAIL ?? "")
-      .trim()
-      .toLowerCase();
-
-    if (configuredTestPayer && isValidEmail(configuredTestPayer)) {
-      payerEmail = configuredTestPayer;
-    } else {
-      const testPayer = await createMercadoPagoTestPayer(accessToken);
-      payerEmail = testPayer.email;
-      console.info("[mercadopago/test-payer-created]", { id: testPayer.id });
-    }
-
-    sandboxPayer = true;
-    result = await postMercadoPagoSubscription({
-      accessToken,
-      payerEmail,
-      externalReference,
-      plan: args.plan,
-    });
-  }
 
   const { response, data } = result;
   if (!response.ok || !data?.id || !data?.init_point) {
@@ -284,7 +223,7 @@ async function createMercadoPagoSubscription(args: {
     status: String(data.status ?? "pending"),
     checkoutUrl: String(data.init_point),
     externalReference,
-    sandboxPayer,
+    sandboxPayer: false,
   };
 }
 
@@ -478,7 +417,7 @@ export default async function handler(req: any, res: any) {
         providerSubscriptionId: mercadoPago.id,
         providerStatus: mercadoPago.status,
         checkoutUrl: mercadoPago.checkoutUrl,
-        sandbox: mercadoPago.sandboxPayer,
+        sandbox: false,
       },
       message: "Cadastro realizado. Continue no Mercado Pago para autorizar sua assinatura.",
     });
