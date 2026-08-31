@@ -12,6 +12,8 @@ import {
 
 neonConfig.webSocketConstructor = WebSocket;
 
+const ASAAS_API = "https://api.asaas.com/v3";
+
 const DELETE_ORDER = [
   "cash_flow",
   "payments",
@@ -56,6 +58,27 @@ function quoteIdent(value: string) {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
+function getAsaasApiKey() {
+  return String(process.env.ASAAS_API_KEY ?? "").trim();
+}
+
+async function deleteAsaasResource(path: string, label: string) {
+  const apiKey = getAsaasApiKey();
+  if (!apiKey) {
+    throw Object.assign(new Error("A integração com o Asaas não está disponível neste momento. Tente novamente mais tarde."), { statusCode: 503 });
+  }
+  const response = await fetch(`${ASAAS_API}${path}`, {
+    method: "DELETE",
+    headers: { accept: "application/json", access_token: apiKey },
+  });
+  if (!response.ok && response.status !== 404) {
+    const body = await response.json().catch(() => ({}));
+    console.error("[profile-service/asaas-cancel]", { path, body });
+    throw Object.assign(new Error(`Não foi possível cancelar ${label} no Asaas. Nenhuma alteração foi feita na sua conta.`), { statusCode: 502 });
+  }
+  return true;
+}
+
 async function getViewer(client: Client, req: any) {
   const token = readCookie(req, SESSION_COOKIE_NAME);
   if (!token) return null;
@@ -84,7 +107,11 @@ async function getSubscription(client: Client, user: any) {
   if (!ownerId) return null;
 
   const result = await client.query(
-    `SELECT plan, status, "priceCents"
+    `SELECT
+       plan, status, "priceCents", provider, "billingMethod", "providerStatus",
+       "providerSubscriptionId", "providerCheckoutId", "providerCustomerId",
+       "lastPaymentId", "lastPaymentStatus", "lastWebhookAt", "trialEndsAt",
+       "paidUntil", "pixExpiresAt", "updatedAt"
        FROM commercial_subscriptions
       WHERE "userId" = $1
       LIMIT 1`,
@@ -92,12 +119,35 @@ async function getSubscription(client: Client, user: any) {
   );
   const row = result.rows[0] as any;
   if (!row) return null;
+
+  const now = Date.now();
+  const trialEndsAtMs = row.trialEndsAt ? new Date(row.trialEndsAt).getTime() : 0;
+  const trialActive = Boolean(trialEndsAtMs && trialEndsAtMs > now);
+  const trialDaysRemaining = trialActive
+    ? Math.max(1, Math.ceil((trialEndsAtMs - now) / 86400000))
+    : 0;
+
   return {
     ownerId,
     plan: String(row.plan || ""),
     status: String(row.status || ""),
     priceCents: Number(row.priceCents || 0),
     active: row.status === "active" || row.status === "paid",
+    provider: String(row.provider || ""),
+    billingMethod: String(row.billingMethod || ""),
+    providerStatus: row.providerStatus ? String(row.providerStatus) : null,
+    providerSubscriptionId: row.providerSubscriptionId ? String(row.providerSubscriptionId) : null,
+    providerCheckoutId: row.providerCheckoutId ? String(row.providerCheckoutId) : null,
+    providerCustomerId: row.providerCustomerId ? String(row.providerCustomerId) : null,
+    lastPaymentId: row.lastPaymentId ? String(row.lastPaymentId) : null,
+    lastPaymentStatus: row.lastPaymentStatus ? String(row.lastPaymentStatus) : null,
+    lastWebhookAt: row.lastWebhookAt ?? null,
+    trialEndsAt: row.trialEndsAt ?? null,
+    paidUntil: row.paidUntil ?? null,
+    pixExpiresAt: row.pixExpiresAt ?? null,
+    subscriptionUpdatedAt: row.updatedAt ?? null,
+    trialActive,
+    trialDaysRemaining,
   };
 }
 
@@ -116,22 +166,110 @@ async function getProfile(client: Client, user: any) {
     commercialOwner: user.loginMethod === "commercial_signup",
     editable: user.loginMethod === "commercial_signup",
     canDeleteAccount: user.loginMethod === "commercial_signup",
+    canCancelPlan: user.loginMethod === "commercial_signup" && Boolean(subscription) && subscription?.status !== "canceled",
     plan: subscription?.plan === "basic" || subscription?.plan === "plus" ? subscription.plan : null,
     subscriptionStatus: subscription?.status ?? null,
     priceCents: subscription?.priceCents ?? null,
+    provider: subscription?.provider ?? null,
+    billingMethod: subscription?.billingMethod ?? null,
+    providerStatus: subscription?.providerStatus ?? null,
+    lastPaymentStatus: subscription?.lastPaymentStatus ?? null,
+    trialEndsAt: subscription?.trialEndsAt ?? null,
+    trialActive: subscription?.trialActive ?? false,
+    trialDaysRemaining: subscription?.trialDaysRemaining ?? 0,
+    paidUntil: subscription?.paidUntil ?? null,
+    lastWebhookAt: subscription?.lastWebhookAt ?? null,
+    subscriptionUpdatedAt: subscription?.subscriptionUpdatedAt ?? null,
   };
 }
 
-async function assertPaymentAllowed(client: Client, user: any, res: any) {
-  const subscription = await getSubscription(client, user);
-  if (subscription && !subscription.active) {
-    sendJson(res, 402, {
-      success: false,
-      message: "Sistema aguardando pagamento. Regularize sua assinatura para acessar o Perfil.",
-    });
-    return false;
+async function cancelProviderSubscription(subscription: any) {
+  if (!subscription) return { provider: null, resource: null, cancelled: false };
+  const provider = String(subscription.provider || "");
+  if (provider !== "asaas") return { provider, resource: null, cancelled: false };
+
+  const subscriptionId = String(subscription.providerSubscriptionId || "").trim();
+  const paymentId = String(subscription.lastPaymentId || "").trim();
+
+  if (subscriptionId) {
+    return {
+      provider,
+      resource: "subscription",
+      cancelled: await deleteAsaasResource(`/subscriptions/${encodeURIComponent(subscriptionId)}`, "a assinatura"),
+    };
   }
-  return true;
+
+  if (paymentId && ["pending_payment", "past_due"].includes(String(subscription.status))) {
+    return {
+      provider,
+      resource: "payment",
+      cancelled: await deleteAsaasResource(`/payments/${encodeURIComponent(paymentId)}`, "a cobrança pendente"),
+    };
+  }
+
+  return { provider, resource: null, cancelled: false };
+}
+
+async function cancelOwnSubscription(client: Client, req: any, res: any, user: any, body: any) {
+  if (user.loginMethod !== "commercial_signup") {
+    return sendJson(res, 403, {
+      success: false,
+      message: "Somente o contratante principal pode cancelar o plano.",
+    });
+  }
+
+  const currentPassword = String(body?.currentPassword ?? "");
+  if (!currentPassword || !user.passwordHash) {
+    return sendJson(res, 400, { success: false, message: "Informe sua senha atual para cancelar o plano." });
+  }
+  if (!(await bcrypt.compare(currentPassword, String(user.passwordHash)))) {
+    return sendJson(res, 401, { success: false, message: "Senha atual incorreta." });
+  }
+
+  const subscription = await getSubscription(client, user);
+  if (!subscription) {
+    return sendJson(res, 404, { success: false, message: "Nenhum plano comercial foi encontrado para esta conta." });
+  }
+  if (subscription.status === "canceled") {
+    return sendJson(res, 200, {
+      success: true,
+      profile: await getProfile(client, user),
+      message: "Seu plano já está cancelado.",
+    });
+  }
+
+  const providerResult = await cancelProviderSubscription(subscription);
+  await client.query(
+    `UPDATE commercial_subscriptions
+        SET status = 'canceled', "providerStatus" = 'CANCELED_BY_USER', "updatedAt" = NOW()
+      WHERE "userId" = $1`,
+    [user.id]
+  );
+
+  await client.query(
+    `INSERT INTO "auditLogs"
+      ("userId", username, action, entity, "entityId", details, status, "createdAt")
+     VALUES ($1, $2, 'cancel_own_subscription', 'commercial_subscriptions', $1, $3, 'success', NOW())`,
+    [
+      user.id,
+      user.username || user.email || "Contratante",
+      JSON.stringify({
+        previousStatus: subscription.status,
+        provider: subscription.provider,
+        billingMethod: subscription.billingMethod,
+        providerResource: providerResult.resource,
+        providerResourceCancelled: providerResult.cancelled,
+        trialEndsAt: subscription.trialEndsAt,
+        paidUntil: subscription.paidUntil,
+      }),
+    ]
+  );
+
+  return sendJson(res, 200, {
+    success: true,
+    profile: await getProfile(client, user),
+    message: "Plano cancelado. Nenhuma nova cobrança recorrente será realizada por este plano.",
+  });
 }
 
 async function updateProfile(client: Client, req: any, res: any, user: any) {
@@ -143,6 +281,10 @@ async function updateProfile(client: Client, req: any, res: any, user: any) {
   }
 
   const body = await readJsonBody(req);
+  if (String(body?.action || "") === "cancel_subscription") {
+    return await cancelOwnSubscription(client, req, res, user, body);
+  }
+
   const name = String(body?.name ?? "").trim();
   const username = String(body?.username ?? "").trim();
   const email = String(body?.email ?? "").trim().toLowerCase();
@@ -287,6 +429,9 @@ async function deleteCommercialAccount(client: Client, req: any, res: any, user:
     return sendJson(res, 401, { success: false, message: "Senha atual incorreta." });
   }
 
+  const subscription = await getSubscription(client, user);
+  const providerResult = await cancelProviderSubscription(subscription);
+
   await client.query(`
     CREATE TABLE IF NOT EXISTS database_memory_backups (
       id bigserial PRIMARY KEY,
@@ -320,6 +465,9 @@ async function deleteCommercialAccount(client: Client, req: any, res: any, user:
           ownedDatabaseIds: databases.rows.map((row: any) => Number(row.id)),
           additionalUsers: memberIds.length,
           requestedByOwner: true,
+          subscriptionProvider: subscription?.provider || null,
+          providerResourceCancelled: providerResult.cancelled,
+          providerResource: providerResult.resource,
         }),
       ]
     );
@@ -367,7 +515,7 @@ async function deleteCommercialAccount(client: Client, req: any, res: any, user:
     clearSessionCookie(res);
     return sendJson(res, 200, {
       success: true,
-      message: "Sua conta e os dados pertencentes a ela foram excluídos do Note Note.",
+      message: "Seu plano foi cancelado e sua conta, junto com os dados pertencentes a ela, foi excluída do Note Note.",
     });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -394,7 +542,6 @@ export async function handleCommercialProfile(req: any, res: any) {
     if (!user) {
       return sendJson(res, 401, { success: false, message: "Sessão inválida ou expirada." });
     }
-    if (!(await assertPaymentAllowed(client, user, res))) return;
 
     if (req.method === "GET") {
       return sendJson(res, 200, { success: true, profile: await getProfile(client, user) });
