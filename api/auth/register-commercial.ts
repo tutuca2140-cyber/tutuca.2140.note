@@ -169,8 +169,8 @@ async function createMercadoPagoPix(args: {
   plan: CommercialPlan;
   trialEndsAt: Date;
 }) {
-  const accessToken = String(process.env.MERCADOPAGO_ACCESS_TOKEN ?? "").trim();
-  if (!accessToken) throw Object.assign(new Error("Mercado Pago ainda não está configurado no servidor."), { statusCode: 503 });
+  const accessToken = String(process.env.MERCADOPAGO_PIX_ACCESS_TOKEN ?? "").trim();
+  if (!accessToken) throw Object.assign(new Error("Mercado Pago Pix ainda não está configurado no servidor."), { statusCode: 503 });
 
   const externalReference = `notenote:${args.userId}:${args.plan}:pix_annual`;
   const nameParts = args.name.trim().split(/\s+/);
