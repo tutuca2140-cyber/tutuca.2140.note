@@ -6,8 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCommercialContext } from "@/hooks/useCommercialContext";
 import { trpc } from "@/lib/trpc";
 import {
-  Activity, CalendarDays, Car, ChevronRight, ClipboardList, CreditCard, Database,
-  FileText, LayoutDashboard, LogOut, Mail, Menu, MoreHorizontal, Package, Settings, Shield,
+  Activity, Building2, CalendarDays, Car, ChevronRight, ClipboardList, CreditCard, Database,
+  FileText, KeyRound, LayoutDashboard, LogOut, Mail, Menu, MoreHorizontal, Package, Settings, Shield,
   UserRound, UserRoundCog, Users, Wallet, X,
 } from "lucide-react";
 import { Children, cloneElement, isValidElement, useEffect, useState, type ReactElement, type ReactNode } from "react";
@@ -50,6 +50,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     { name: "Empréstimos", href: "/emprestimos", icon: CreditCard, show: Boolean(user?.canView && regularAccess) },
     { name: "Veículos", href: "/veiculos", icon: Car, show: Boolean(user?.canView && regularAccess) },
     { name: "Produtos", href: "/produtos", icon: Package, show: Boolean(user?.canView && regularAccess) },
+    { name: "Imóveis", href: "/imoveis", icon: Building2, show: Boolean(user?.canView && regularAccess) },
+    { name: "Aluguéis", href: "/alugueis", icon: KeyRound, show: Boolean(user?.canView && regularAccess) },
     { name: "Pagamentos", href: "/pagamentos", icon: Wallet, show: Boolean(user?.canView && regularAccess) },
     { name: "Financiamentos", href: "/financiamentos", icon: ClipboardList, show: Boolean(user?.canView && regularAccess) },
     { name: "Contas a receber", href: "/contas-a-receber", icon: CalendarDays, show: Boolean(user?.canView && regularAccess) },
