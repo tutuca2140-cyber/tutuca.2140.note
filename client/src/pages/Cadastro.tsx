@@ -52,6 +52,7 @@ export default function Cadastro() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [checkoutUrl, setCheckoutUrl] = useState("");
   const [error, setError] = useState("");
   const [notRobot, setNotRobot] = useState(false);
   const [captcha, setCaptcha] = useState({ question: "", token: "" });
@@ -132,7 +133,15 @@ export default function Cadastro() {
       if (!response.ok || !result?.success) {
         throw new Error(result?.message || "Não foi possível concluir o cadastro.");
       }
+
+      const paymentUrl = String(result?.subscription?.checkoutUrl ?? "").trim();
+      if (!paymentUrl.startsWith("https://")) {
+        throw new Error("Cadastro criado, mas o Mercado Pago não retornou o link de assinatura.");
+      }
+
+      setCheckoutUrl(paymentUrl);
       setSuccess(true);
+      window.location.assign(paymentUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível concluir o cadastro.");
       setCaptchaAnswer("");
@@ -159,10 +168,18 @@ export default function Cadastro() {
                 <strong>{name.trim()}</strong>, sua conta foi criada para o plano <strong>{plans[plan].name}</strong> — {plans[plan].price} — com acesso a <strong>{plans[plan].databaseAccess}</strong>.
               </p>
               <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4 text-left text-sm text-blue-950">
-                O acesso ao sistema permanece pendente até a confirmação da assinatura. Depois da aprovação, os bancos do plano serão preparados no seu primeiro login.
+                Agora falta autorizar a assinatura no Mercado Pago. Assim que o Mercado Pago confirmar a assinatura, o Note Note libera sua conta automaticamente.
               </div>
+              {checkoutUrl ? (
+                <a
+                  href={checkoutUrl}
+                  className="mt-6 inline-flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-5 font-bold text-white transition hover:bg-blue-700"
+                >
+                  Continuar no Mercado Pago
+                </a>
+              ) : null}
               <Link href="/login">
-                <a className="mt-6 inline-flex h-11 items-center justify-center rounded-xl border border-blue-200 px-5 font-bold text-blue-700 transition hover:bg-blue-50">
+                <a className="mt-3 inline-flex h-11 items-center justify-center rounded-xl border border-blue-200 px-5 font-bold text-blue-700 transition hover:bg-blue-50">
                   Ir para o login
                 </a>
               </Link>
@@ -374,7 +391,7 @@ export default function Cadastro() {
               )}
 
               <Button type="submit" className="h-12 w-full" disabled={loading || !plan}>
-                {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Criando cadastro...</> : "Criar cadastro"}
+                {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Preparando assinatura...</> : "Criar cadastro e assinar"}
               </Button>
 
               <p className="text-center text-sm text-slate-500">
