@@ -5,6 +5,7 @@ import {
   sendJson,
   SESSION_COOKIE_NAME,
 } from "./auth/_shared.js";
+import { handleMercadoPagoWebhook } from "../server/mercadopago-webhook.js";
 
 let accessTablePromise: Promise<void> | null = null;
 
@@ -45,6 +46,13 @@ function cleanPath(value: unknown) {
 }
 
 export default async function handler(req: any, res: any) {
+  const scope = String(Array.isArray(req?.query?.scope) ? req.query.scope[0] : req?.query?.scope ?? "")
+    .trim()
+    .toLowerCase();
+  if (scope === "mercadopago-webhook") {
+    return handleMercadoPagoWebhook(req, res);
+  }
+
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return sendJson(res, 405, { success: false, message: "Método não permitido." });
