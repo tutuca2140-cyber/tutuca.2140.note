@@ -2,6 +2,9 @@ import bcrypt from "bcrypt";
 import { ensureAuthUserColumns, getSql, readJsonBody, sendJson } from "./_shared.js";
 import { verifyLoginCaptcha } from "../../shared/login-captcha.js";
 
+const MERCADO_PAGO_API = "https://api.mercadopago.com";
+const CHECKOUT_RETURN_URL = "https://notenote.com.br/login?assinatura=retorno";
+
 const PLAN_PRICES = {
   basic: 2990,
   plus: 4990,
@@ -10,6 +13,11 @@ const PLAN_PRICES = {
 const PLAN_DATABASE_LIMITS = {
   basic: 1,
   plus: 3,
+} as const;
+
+const PLAN_LABELS = {
+  basic: "Basic",
+  plus: "Plus",
 } as const;
 
 type CommercialPlan = keyof typeof PLAN_PRICES;
@@ -63,6 +71,24 @@ async function ensureCommercialSubscriptionTable() {
       "createdAt" timestamptz NOT NULL DEFAULT NOW(),
       "updatedAt" timestamptz NOT NULL DEFAULT NOW()
     )
+  `;
+
+  await sql`
+    ALTER TABLE commercial_subscriptions
+      ADD COLUMN IF NOT EXISTS provider varchar(40),
+      ADD COLUMN IF NOT EXISTS "providerSubscriptionId" varchar(120),
+      ADD COLUMN IF NOT EXISTS "providerStatus" varchar(40),
+      ADD COLUMN IF NOT EXISTS "checkoutUrl" text,
+      ADD COLUMN IF NOT EXISTS "externalReference" varchar(160),
+      ADD COLUMN IF NOT EXISTS "lastPaymentStatus" varchar(40),
+      ADD COLUMN IF NOT EXISTS "lastPaymentId" varchar(120),
+      ADD COLUMN IF NOT EXISTS "lastWebhookAt" timestamptz
+  `;
+
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS commercial_subscriptions_provider_subscription_uidx
+      ON commercial_subscriptions ("providerSubscriptionId")
+      WHERE "providerSubscriptionId" IS NOT NULL
   `;
 
   await sql`
@@ -129,6 +155,56 @@ async function ensureCommercialSubscriptionTable() {
   `;
 }
 
+async function createMercadoPagoSubscription(args: {
+  userId: number;
+  email: string;
+  plan: CommercialPlan;
+}) {
+  const accessToken = String(process.env.MERCADOPAGO_ACCESS_TOKEN ?? "").trim();
+  if (!accessToken) {
+    throw Object.assign(new Error("Mercado Pago ainda não está configurado no servidor."), {
+      statusCode: 503,
+    });
+  }
+
+  const externalReference = `notenote:${args.userId}:${args.plan}`;
+  const response = await fetch(`${MERCADO_PAGO_API}/preapproval`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      reason: `Note Note - Plano ${PLAN_LABELS[args.plan]}`,
+      external_reference: externalReference,
+      payer_email: args.email,
+      auto_recurring: {
+        frequency: 1,
+        frequency_type: "months",
+        transaction_amount: PLAN_PRICES[args.plan] / 100,
+        currency_id: "BRL",
+      },
+      back_url: CHECKOUT_RETURN_URL,
+      status: "pending",
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.id || !data?.init_point) {
+    console.error("[mercadopago/create-subscription]", data);
+    throw Object.assign(new Error("Não foi possível iniciar a assinatura no Mercado Pago."), {
+      statusCode: 502,
+    });
+  }
+
+  return {
+    id: String(data.id),
+    status: String(data.status ?? "pending"),
+    checkoutUrl: String(data.init_point),
+    externalReference,
+  };
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
     return sendJson(res, 405, {
@@ -136,6 +212,8 @@ export default async function handler(req: any, res: any) {
       message: "Método não permitido.",
     });
   }
+
+  let createdUserId: number | null = null;
 
   try {
     const body = await readJsonBody(req);
@@ -273,19 +351,32 @@ export default async function handler(req: any, res: any) {
     `;
 
     const user = created[0] as any;
+    createdUserId = Number(user.id);
 
-    try {
-      await sql`
-        INSERT INTO commercial_subscriptions (
-          "userId", plan, "priceCents", status, source, "createdAt", "updatedAt"
-        ) VALUES (
-          ${user.id}, ${plan}, ${PLAN_PRICES[plan]}, 'pending_payment', 'commercial_signup', NOW(), NOW()
-        )
-      `;
-    } catch (error) {
-      await sql`DELETE FROM users WHERE id = ${user.id} AND "loginMethod" = 'commercial_signup'`;
-      throw error;
-    }
+    await sql`
+      INSERT INTO commercial_subscriptions (
+        "userId", plan, "priceCents", status, source, provider, "createdAt", "updatedAt"
+      ) VALUES (
+        ${user.id}, ${plan}, ${PLAN_PRICES[plan]}, 'pending_payment', 'commercial_signup',
+        'mercadopago', NOW(), NOW()
+      )
+    `;
+
+    const mercadoPago = await createMercadoPagoSubscription({
+      userId: Number(user.id),
+      email: String(user.email),
+      plan,
+    });
+
+    await sql`
+      UPDATE commercial_subscriptions
+         SET "providerSubscriptionId" = ${mercadoPago.id},
+             "providerStatus" = ${mercadoPago.status},
+             "checkoutUrl" = ${mercadoPago.checkoutUrl},
+             "externalReference" = ${mercadoPago.externalReference},
+             "updatedAt" = NOW()
+       WHERE "userId" = ${user.id}
+    `;
 
     return sendJson(res, 201, {
       success: true,
@@ -299,20 +390,38 @@ export default async function handler(req: any, res: any) {
         databaseLimit: PLAN_DATABASE_LIMITS[plan],
         status: "pending_payment",
       },
-      message:
-        "Cadastro realizado. O acesso será liberado após a confirmação da assinatura.",
+      subscription: {
+        provider: "mercadopago",
+        providerSubscriptionId: mercadoPago.id,
+        providerStatus: mercadoPago.status,
+        checkoutUrl: mercadoPago.checkoutUrl,
+      },
+      message: "Cadastro realizado. Continue no Mercado Pago para autorizar sua assinatura.",
     });
   } catch (error: any) {
     console.error("[auth/register-commercial]", error);
+
+    if (createdUserId) {
+      try {
+        const sql = getSql();
+        await sql`DELETE FROM users WHERE id = ${createdUserId} AND "loginMethod" = 'commercial_signup'`;
+      } catch (cleanupError) {
+        console.error("[auth/register-commercial/cleanup]", cleanupError);
+      }
+    }
+
     if (error?.code === "23505") {
       return sendJson(res, 409, {
         success: false,
         message: "Nome de usuário ou e-mail já cadastrado.",
       });
     }
-    return sendJson(res, 500, {
+    return sendJson(res, Number(error?.statusCode || 500), {
       success: false,
-      message: "Não foi possível concluir o cadastro agora.",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Não foi possível concluir o cadastro agora.",
     });
   }
 }
