@@ -4,6 +4,7 @@ import { verifyLoginCaptcha } from "../../shared/login-captcha.js";
 
 const MERCADO_PAGO_API = "https://api.mercadopago.com";
 const CHECKOUT_RETURN_URL = "https://notenote.com.br/login?assinatura=retorno";
+const MERCADO_PAGO_TEST_PAYER_EMAIL = "test@testuser.com";
 
 const PLAN_PRICES = {
   basic: 2990,
@@ -155,6 +156,37 @@ async function ensureCommercialSubscriptionTable() {
   `;
 }
 
+async function postMercadoPagoSubscription(args: {
+  accessToken: string;
+  payerEmail: string;
+  externalReference: string;
+  plan: CommercialPlan;
+}) {
+  const response = await fetch(`${MERCADO_PAGO_API}/preapproval`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${args.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      reason: `Note Note - Plano ${PLAN_LABELS[args.plan]}`,
+      external_reference: args.externalReference,
+      payer_email: args.payerEmail,
+      auto_recurring: {
+        frequency: 1,
+        frequency_type: "months",
+        transaction_amount: PLAN_PRICES[args.plan] / 100,
+        currency_id: "BRL",
+      },
+      back_url: CHECKOUT_RETURN_URL,
+      status: "pending",
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  return { response, data };
+}
+
 async function createMercadoPagoSubscription(args: {
   userId: number;
   email: string;
@@ -168,30 +200,38 @@ async function createMercadoPagoSubscription(args: {
   }
 
   const externalReference = `notenote:${args.userId}:${args.plan}`;
-  const response = await fetch(`${MERCADO_PAGO_API}/preapproval`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      reason: `Note Note - Plano ${PLAN_LABELS[args.plan]}`,
-      external_reference: externalReference,
-      payer_email: args.email,
-      auto_recurring: {
-        frequency: 1,
-        frequency_type: "months",
-        transaction_amount: PLAN_PRICES[args.plan] / 100,
-        currency_id: "BRL",
-      },
-      back_url: CHECKOUT_RETURN_URL,
-      status: "pending",
-    }),
+  let payerEmail = args.email;
+  let result = await postMercadoPagoSubscription({
+    accessToken,
+    payerEmail,
+    externalReference,
+    plan: args.plan,
   });
 
-  const data = await response.json().catch(() => ({}));
+  // No sandbox do Mercado Pago, o pagador também precisa pertencer ao ambiente de teste.
+  // Se a API detectar que o e-mail real do cadastro pertence a outro site/ambiente,
+  // repetimos somente o checkout de teste com o e-mail sandbox oficial. A conta Note Note
+  // continua vinculada ao e-mail real e é reconciliada pelo external_reference.
+  if (
+    !result.response.ok &&
+    String(result.data?.code ?? "") === "guest_site_mismatch"
+  ) {
+    payerEmail = MERCADO_PAGO_TEST_PAYER_EMAIL;
+    result = await postMercadoPagoSubscription({
+      accessToken,
+      payerEmail,
+      externalReference,
+      plan: args.plan,
+    });
+  }
+
+  const { response, data } = result;
   if (!response.ok || !data?.id || !data?.init_point) {
-    console.error("[mercadopago/create-subscription]", data);
+    console.error("[mercadopago/create-subscription]", {
+      status: response.status,
+      code: data?.code,
+      message: data?.message,
+    });
     throw Object.assign(new Error("Não foi possível iniciar a assinatura no Mercado Pago."), {
       statusCode: 502,
     });
@@ -202,6 +242,7 @@ async function createMercadoPagoSubscription(args: {
     status: String(data.status ?? "pending"),
     checkoutUrl: String(data.init_point),
     externalReference,
+    sandboxPayer: payerEmail === MERCADO_PAGO_TEST_PAYER_EMAIL,
   };
 }
 
@@ -395,6 +436,7 @@ export default async function handler(req: any, res: any) {
         providerSubscriptionId: mercadoPago.id,
         providerStatus: mercadoPago.status,
         checkoutUrl: mercadoPago.checkoutUrl,
+        sandbox: mercadoPago.sandboxPayer,
       },
       message: "Cadastro realizado. Continue no Mercado Pago para autorizar sua assinatura.",
     });
