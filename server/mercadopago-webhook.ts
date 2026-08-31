@@ -58,7 +58,11 @@ async function ensureMercadoPagoColumns() {
       ADD COLUMN IF NOT EXISTS "lastPaymentId" varchar(120),
       ADD COLUMN IF NOT EXISTS "lastWebhookAt" timestamptz,
       ADD COLUMN IF NOT EXISTS "billingMethod" varchar(30) NOT NULL DEFAULT 'card_monthly',
-      ADD COLUMN IF NOT EXISTS "trialEndsAt" timestamptz
+      ADD COLUMN IF NOT EXISTS "trialEndsAt" timestamptz,
+      ADD COLUMN IF NOT EXISTS "paidUntil" timestamptz,
+      ADD COLUMN IF NOT EXISTS "pixQrCode" text,
+      ADD COLUMN IF NOT EXISTS "pixQrCodeBase64" text,
+      ADD COLUMN IF NOT EXISTS "pixExpiresAt" timestamptz
   `;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS commercial_subscriptions_provider_subscription_uidx ON commercial_subscriptions ("providerSubscriptionId") WHERE "providerSubscriptionId" IS NOT NULL`;
 }
@@ -111,13 +115,31 @@ async function syncPreapproval(subscriptionId: string) {
 
 async function applyPaymentStatus(filters: { preapprovalId?: string; externalReference?: string }, paymentId: string, paymentStatus: string) {
   const sql = getSql();
+  const current = await sql`
+    SELECT "userId", "billingMethod", "trialEndsAt", status
+    FROM commercial_subscriptions
+    WHERE (${filters.preapprovalId || "__none__"} <> '__none__' AND "providerSubscriptionId"=${filters.preapprovalId || "__none__"})
+       OR (${filters.externalReference || "__none__"} <> '__none__' AND "externalReference"=${filters.externalReference || "__none__"})
+    LIMIT 1
+  `;
+  const existing = current[0] as any;
+  if (!existing) return;
+
+  const trialActive = existing?.trialEndsAt && new Date(existing.trialEndsAt).getTime() > Date.now();
+  const isFailure = paymentStatus === "rejected" || paymentStatus === "cancelled" || paymentStatus === "canceled";
+  const nextStatus = paymentStatus === "approved" ? "active" : isFailure ? (trialActive ? "active" : "past_due") : String(existing.status || "pending_payment");
+  const annualPixApproved = paymentStatus === "approved" && String(existing.billingMethod) === "pix_annual";
+
   const rows = await sql`
     UPDATE commercial_subscriptions SET
       "lastPaymentStatus"=${paymentStatus}, "lastPaymentId"=${paymentId}, "lastWebhookAt"=NOW(),
-      status=${paymentStatus === "approved" ? "active" : paymentStatus === "rejected" || paymentStatus === "cancelled" || paymentStatus === "canceled" ? "past_due" : status},
+      "providerStatus"=${paymentStatus}, status=${nextStatus},
+      "paidUntil"=CASE
+        WHEN ${annualPixApproved} THEN COALESCE("trialEndsAt", NOW()) + INTERVAL '1 year'
+        ELSE "paidUntil"
+      END,
       "updatedAt"=NOW()
-    WHERE (${filters.preapprovalId || "__none__"} <> '__none__' AND "providerSubscriptionId"=${filters.preapprovalId || "__none__"})
-       OR (${filters.externalReference || "__none__"} <> '__none__' AND "externalReference"=${filters.externalReference || "__none__"})
+    WHERE "userId"=${Number(existing.userId)}
     RETURNING "userId", status
   `;
   const row = rows[0] as any;
