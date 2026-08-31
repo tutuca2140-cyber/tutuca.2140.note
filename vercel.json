@@ -4,6 +4,7 @@
   "buildCommand": "pnpm build",
   "outputDirectory": "dist/public",
   "rewrites": [
+    { "source": "/api/webhooks/mercadopago", "destination": "/api/site-access?scope=mercadopago-webhook" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
