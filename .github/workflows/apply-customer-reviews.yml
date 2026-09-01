@@ -1,0 +1,30 @@
+name: Apply Customer Reviews
+on:
+  push:
+    branches: ["feat/customer-reviews-2026-09-01"]
+    paths:
+      - ".github/workflows/apply-customer-reviews.yml"
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: python .github/scripts/apply-customer-reviews.py
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit tested changes
+        run: |
+          rm .github/workflows/apply-customer-reviews.yml .github/scripts/apply-customer-reviews.py
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add api/site-access.ts server/reviews.ts client/src/App.tsx client/src/components/DashboardLayout.tsx client/src/pages/Perfil.tsx client/src/pages/Home.tsx client/src/pages/admin/Avaliacoes.tsx .github
+          git commit -m "feat: add customer ratings and published testimonials [skip ci]"
+          git push
