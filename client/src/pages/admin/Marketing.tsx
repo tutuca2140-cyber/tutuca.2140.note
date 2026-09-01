@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { CheckSquare, Image, Mail, Send, Square, Trash2, Upload, Users } from "lucide-react";
 
-type Recipient = { id:number; name?:string; username?:string; email:string; whatsapp?:string; plan?:string; status?:string; marketingState:"current"|"overdue"|"other" };
+type Recipient = { id:number; supportId?:string|null; name?:string; username?:string; email:string; whatsapp?:string; plan?:string; status?:string; marketingState:"current"|"overdue"|"other" };
 
 export default function Marketing() {
   const [recipients,setRecipients]=useState<Recipient[]>([]);
@@ -57,7 +57,7 @@ export default function Marketing() {
 
     <div className="grid gap-6 xl:grid-cols-[1fr_1.05fr]">
       <section className="rounded-2xl border bg-background p-5 space-y-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="font-semibold">Destinatários</h2><p className="text-xs text-muted-foreground">Use um grupo inteiro ou selecione clientes individualmente.</p></div><div className="flex gap-2"><Button size="sm" variant="outline" onClick={selectVisible}>Selecionar exibidos</Button><Button size="sm" variant="ghost" onClick={clear}>Limpar</Button></div></div>
-        <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">{loading?<p className="py-8 text-center text-muted-foreground">Carregando...</p>:visible.map(r=><label key={r.id} className="flex cursor-pointer items-center gap-3 rounded-xl border p-3 hover:bg-muted/40"><input type="checkbox" checked={selected.includes(r.id)} onChange={()=>toggle(r.id)} className="h-4 w-4"/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{r.name||r.username||"Cliente"}</p><p className="truncate text-xs text-muted-foreground">{r.email}{r.whatsapp?` • ${r.whatsapp}`:""}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${r.marketingState==="current"?"bg-emerald-100 text-emerald-700":r.marketingState==="overdue"?"bg-red-100 text-red-700":"bg-slate-100 text-slate-600"}`}>{r.marketingState==="current"?"EM DIA":r.marketingState==="overdue"?"ATRASADO":"OUTRO"}</span></label>)}</div>
+        <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">{loading?<p className="py-8 text-center text-muted-foreground">Carregando...</p>:visible.map(r=><label key={r.id} className="flex cursor-pointer items-center gap-3 rounded-xl border p-3 hover:bg-muted/40"><input type="checkbox" checked={selected.includes(r.id)} onChange={()=>toggle(r.id)} className="h-4 w-4"/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{r.name||r.username||"Cliente"}</p><p className="font-mono text-[11px] font-semibold text-primary">ID de usuário: {r.supportId||"—"}</p><p className="truncate text-xs text-muted-foreground">{r.email}{r.whatsapp?` • ${r.whatsapp}`:""}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${r.marketingState==="current"?"bg-emerald-100 text-emerald-700":r.marketingState==="overdue"?"bg-red-100 text-red-700":"bg-slate-100 text-slate-600"}`}>{r.marketingState==="current"?"EM DIA":r.marketingState==="overdue"?"ATRASADO":"OUTRO"}</span></label>)}</div>
         <Button variant={segment==="selected"?"default":"outline"} onClick={()=>setSegment("selected")} disabled={!selected.length} className="w-full">Usar somente os {selected.length} selecionado(s)</Button>
       </section>
 

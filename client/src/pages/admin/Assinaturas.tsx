@@ -331,7 +331,7 @@ export default function AdminAssinaturas() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />Exclusivo do Super Administrador</div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />Administração de Assinaturas</div>
             <h1 className="mt-2 text-3xl font-black tracking-tight">Assinaturas</h1>
             <p className="mt-2 text-muted-foreground">Visão comercial completa: plano, cobrança, pagamento, teste, validade, Asaas e acesso do cliente.</p>
           </div>

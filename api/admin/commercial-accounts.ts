@@ -362,6 +362,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const body = await readJsonBody(req);
+    if (admin.role !== "super_admin") return sendJson(res, 403, { success: false, message: "Somente o Super Admin pode alterar assinaturas." });
     const action = String(body?.action ?? "approve");
     const userId = Number(body?.userId);
     if (!Number.isInteger(userId) || userId <= 0) return sendJson(res, 400, { success: false, message: "Usuário inválido." });

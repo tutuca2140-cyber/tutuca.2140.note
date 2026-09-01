@@ -92,6 +92,13 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   return next({ ctx });
 });
 
+const usersAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "super_admin" && !ctx.user.adminCanUsers) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Sem autorização para administrar usuários." });
+  }
+  return next({ ctx });
+});
+
 const superAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "super_admin") {
     throw new TRPCError({
@@ -329,11 +336,11 @@ export const appRouter = router({
 
   // ==================== USERS ====================
   users: router({
-    list: adminProcedure.query(async () => {
+    list: usersAdminProcedure.query(async () => {
       return await db.getAllUsers();
     }),
 
-    getById: adminProcedure
+    getById: usersAdminProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         return await db.getUserById(input.id);

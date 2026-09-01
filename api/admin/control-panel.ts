@@ -120,6 +120,7 @@ export default async function handler(req: any, res: any) {
     await ensureTables();
 
     if (req.method === "POST") {
+      if (currentUser.role !== "super_admin") return sendJson(res, 403, { success: false, message: "Somente o Super Admin pode excluir usuários internos." });
       const body = await readJsonBody(req);
       const action = String(body?.action ?? "").trim();
       const userId = Number(body?.userId);

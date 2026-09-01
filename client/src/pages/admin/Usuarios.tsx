@@ -1,3 +1,4 @@
+import { useAuth } from "@/_core/hooks/useAuth";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -103,6 +104,7 @@ const isCommercialAccount = (loginMethod: string | null | undefined) =>
   loginMethod === "commercial_signup" || loginMethod === "commercial_subuser";
 
 export default function AdminUsuarios() {
+  const { user: currentUser } = useAuth();
   const utils = trpc.useUtils();
   const { data: users = [], isLoading } = trpc.users.list.useQuery();
   const { data: databases = [] } = trpc.databases.list.useQuery();
@@ -240,7 +242,7 @@ export default function AdminUsuarios() {
               if (!value) setDraft(makeEmptyDraft());
             }}
           >
-            {activeTab === "super_admin" && (
+            {activeTab === "super_admin" && currentUser?.role === "super_admin" && (
               <DialogTrigger asChild>
                 <Button className="w-full sm:w-auto"><Plus className="mr-2 h-4 w-4" />Novo usuário</Button>
               </DialogTrigger>
@@ -400,7 +402,7 @@ export default function AdminUsuarios() {
           </button>
         </div>
 
-        {activeTab === "super_admin" && (
+        {activeTab === "super_admin" && currentUser?.role === "super_admin" && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
             <strong>Exclusão de usuários:</strong> o Super Admin pode excluir contas criadas por ele. A exclusão remove o login e seus vínculos de acesso, mas preserva bancos e dados operacionais existentes.
           </div>
@@ -453,7 +455,7 @@ export default function AdminUsuarios() {
                     ) : (
                       <>
                         <div className="flex flex-wrap gap-2">
-                          <Button variant="outline" size="sm" onClick={() => edit(user)}><Pencil className="mr-2 h-4 w-4" />Editar</Button>
+                          <Button variant="outline" size="sm" onClick={() => currentUser?.role === "super_admin" && edit(user)}><Pencil className="mr-2 h-4 w-4" />Editar</Button>
                           <Button variant="outline" size="sm" onClick={() => toggle(user.id, !user.isActive)}><UserRoundX className="mr-2 h-4 w-4" />{user.isActive ? "Desativar" : "Ativar"}</Button>
                           {activeTab === "super_admin" && !isCommercialAccount(user.loginMethod) && (
                             <Button variant="destructive" size="sm" onClick={() => removeInternalUser(user)} disabled={deletingId === user.id}>

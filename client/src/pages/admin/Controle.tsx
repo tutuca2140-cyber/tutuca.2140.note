@@ -261,7 +261,7 @@ export default function AdminControle() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />Exclusivo do Super Administrador</div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />Administração do sistema</div>
             <h1 className="mt-2 text-3xl font-black tracking-tight">Painel de Controle</h1>
             <p className="mt-2 max-w-3xl text-muted-foreground">Visão central dos acessos ao Note Note, usuários, assinaturas, valores, bancos e movimentação operacional.</p>
           </div>
