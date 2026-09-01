@@ -1,3 +1,4 @@
+// Monthly closing snapshots are immutable per bank and reference month.
 import { getSql, readCookie, readJsonBody, sendJson, SESSION_COOKIE_NAME } from "../api/auth/_shared.js";
 
 type User={id:number;role:string;name?:string|null;username?:string|null};
