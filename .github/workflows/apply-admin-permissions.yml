@@ -1,0 +1,29 @@
+name: Apply Admin Permissions
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/apply-admin-permissions.yml"
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: python .github/scripts/admin-permissions-and-support-id.py
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit tested changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add api/auth/_shared.ts api/auth/me.ts api/admin/commercial-accounts.ts api/admin/control-panel.ts drizzle/schema.ts server/admin-access.ts server/marketing.ts server/support-chat.ts server/routers.ts client/src/_core/hooks/useAuth.ts client/src/components/DashboardLayout.tsx client/src/pages/admin/Usuarios.tsx client/src/pages/admin/Assinaturas.tsx client/src/pages/admin/Controle.tsx client/src/pages/admin/Marketing.tsx client/src/pages/admin/Suporte.tsx
+          git commit -m "feat: add delegated admin permissions and user IDs [skip ci]"
+          git push
