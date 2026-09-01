@@ -1,0 +1,27 @@
+name: Apply Admin Delegated Permissions
+on:
+  push:
+    branches: ["feat/admin-delegated-permissions-2026-09-01"]
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: python .github/scripts/apply-admin-delegated-permissions.py
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add drizzle/schema.ts api/auth/_shared.ts server/routers.ts client/src/pages/admin/Usuarios.tsx client/src/components/DashboardLayout.tsx api/admin/commercial-accounts.ts client/src/pages/admin/Assinaturas.tsx api/admin/control-panel.ts client/src/pages/admin/Controle.tsx server/marketing.ts client/src/pages/admin/Marketing.tsx server/support-chat.ts client/src/pages/admin/Suporte.tsx
+          git commit -m "feat: add delegated admin permissions and subscriber IDs [skip ci]" || exit 0
+          git push
