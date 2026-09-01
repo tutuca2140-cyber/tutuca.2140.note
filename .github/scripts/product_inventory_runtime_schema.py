@@ -20,7 +20,7 @@ async function ensureProductInventorySchema(db: any) {
 export async function getProductsByDatabase(databaseId: number) {'''
 if marker not in t: raise SystemExit('products section marker not found')
 t=t.replace(marker,helper,1)
-for old,new in [
+replacements=[
 ('''export async function getProductsByDatabase(databaseId: number) {
   const db = await getDb();
   if (!db) return [];
@@ -44,16 +44,8 @@ for old,new in [
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await ensureProductInventorySchema(db);
-  const [created] = await db'''),
-('''  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  const [updated] = await db
-    .update(products)''','''  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  await ensureProductInventorySchema(db);
-  const [updated] = await db
-    .update(products)''')
-]:
+  const [created] = await db''')]
+for old,new in replacements:
     if old not in t: raise SystemExit('expected product function snippet not found')
     t=t.replace(old,new,1)
 p.write_text(t)
