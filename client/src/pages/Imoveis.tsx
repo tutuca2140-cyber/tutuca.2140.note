@@ -7,59 +7,176 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Building2, Home, MapPin, Plus, Trash2, WalletCards, BadgeDollarSign, ReceiptText, Percent, UserRound } from "lucide-react";
+import { BadgeDollarSign, Building2, Home, MapPin, Percent, Plus, ReceiptText, Trash2, UserRound, WalletCards } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-const API="/api/site-access?scope=properties";
-const money=(v:any)=>Number(v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-const typeLabel:Record<string,string>={casa:"Casa",apartamento:"Apartamento",terreno:"Terreno",loja:"Loja"};
-const emptyProperty=()=>({title:"",type:"casa",address:"",neighborhood:"",city:"",state:"",zipCode:"",areaM2:"",rooms:"0",bedrooms:"0",livingRooms:"0",kitchens:"0",bathrooms:"0",garages:"0",hasGarage:false,salePrice:"",notes:""});
-const emptyFinancing=()=>({propertyId:"",clientId:"",salePrice:"",downPayment:"0",interestRate:"",installmentAmount:"",installments:"",startDate:new Date().toISOString().slice(0,10),agentId:"",commissionPercentage:"",notes:""});
-const emptySale=()=>({propertyId:"",clientId:"",amount:"",agentId:"",commissionPercentage:"",notes:""});
+const API = "/api/site-access?scope=properties";
+const money = (value: any) => Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const typeLabel: Record<string, string> = { casa: "Casa", apartamento: "Apartamento", terreno: "Terreno", loja: "Loja" };
+const today = () => new Date().toISOString().slice(0, 10);
+const emptyProperty = () => ({ title: "", type: "casa", address: "", neighborhood: "", city: "", state: "", zipCode: "", areaM2: "", rooms: "0", bedrooms: "0", livingRooms: "0", kitchens: "0", bathrooms: "0", garages: "0", hasGarage: false, salePrice: "", notes: "" });
+const emptyFinancing = () => ({ propertyId: "", clientId: "", salePrice: "", downPayment: "0", interestRate: "", installmentAmount: "", installments: "", startDate: today(), agentId: "", commissionPercentage: "", notes: "" });
+const emptySale = () => ({ propertyId: "", clientId: "", amount: "", agentId: "", commissionPercentage: "", notes: "" });
 
-export default function Imoveis(){
-  const {user}=useAuth();
-  const [data,setData]=useState<any>({properties:[],clients:[],financings:[],financingPayments:[],sales:[],agents:[]});
-  const [loading,setLoading]=useState(true);
-  const [open,setOpen]=useState(false),[openFinance,setOpenFinance]=useState(false),[openSale,setOpenSale]=useState(false);
-  const [form,setForm]=useState(emptyProperty),[finance,setFinance]=useState(emptyFinancing),[sale,setSale]=useState(emptySale);
-  const load=async()=>{setLoading(true);try{const r=await fetch(API,{credentials:"include"});const j=await r.json();if(!r.ok)throw new Error(j.message);setData(j);}catch(e){toast.error(e instanceof Error?e.message:"Erro ao carregar imóveis.");}finally{setLoading(false);}};
-  useEffect(()=>{void load();},[]);
-  const post=async(body:any)=>{const r=await fetch(API,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error(j.message||"Operação não concluída.");return j;};
-  const summary=useMemo(()=>({total:data.properties.length,available:data.properties.filter((p:any)=>p.status==="disponivel").length,rented:data.properties.filter((p:any)=>p.status==="alugado").length,financed:data.properties.filter((p:any)=>p.status==="financiado").length,sold:data.properties.filter((p:any)=>p.status==="vendido").length}),[data.properties]);
-  const save=async(e:React.FormEvent)=>{e.preventDefault();try{await post({action:"create_property",...form});toast.success("Imóvel cadastrado.");setOpen(false);setForm(emptyProperty());await load();}catch(e){toast.error(e instanceof Error?e.message:"Erro ao cadastrar imóvel.");}};
-  const remove=async(id:number)=>{if(!confirm("Excluir este imóvel?"))return;try{await post({action:"delete_property",id});toast.success("Imóvel excluído.");await load();}catch(e){toast.error(e instanceof Error?e.message:"Erro ao excluir.");}};
-  const startFinance=(p:any)=>{setFinance({...emptyFinancing(),propertyId:String(p.id),salePrice:String(p.salePrice||"")});setOpenFinance(true);};
-  const startSale=(p:any)=>{setSale({...emptySale(),propertyId:String(p.id),amount:String(p.salePrice||"")});setOpenSale(true);};
-  const saveFinance=async(e:React.FormEvent)=>{e.preventDefault();if(!finance.interestRate&&!finance.installmentAmount)return toast.error("Informe a taxa de juros ou o valor desejado da parcela.");try{const result=await post({action:"create_financing",...finance});const rate=Number(result.calculatedInterestRate??finance.interestRate||0);const installment=Number(result.calculatedInstallmentAmount??finance.installmentAmount||0);toast.success(`Financiamento criado: ${rate.toFixed(2)}% a.m. · parcela ${money(installment)}.`);setOpenFinance(false);setFinance(emptyFinancing());await load();}catch(e){toast.error(e instanceof Error?e.message:"Erro ao financiar imóvel.");}};
-  const saveSale=async(e:React.FormEvent)=>{e.preventDefault();try{await post({action:"sell_cash",...sale});toast.success("Venda registrada e valor lançado no caixa.");setOpenSale(false);setSale(emptySale());await load();}catch(e){toast.error(e instanceof Error?e.message:"Erro ao vender imóvel.");}};
-  const payFinancing=async(f:any)=>{const paid=(data.financingPayments||[]).filter((p:any)=>Number(p.financingId)===Number(f.id)).map((p:any)=>Number(p.installmentNumber));let next=1;while(paid.includes(next)&&next<=Number(f.installments))next++;if(next>Number(f.installments))return toast.info("Todas as parcelas já foram pagas.");if(!confirm(`Registrar pagamento da parcela ${next}/${f.installments} no valor de ${money(f.installmentAmount)}?`))return;try{await post({action:"pay_financing",financingId:f.id,installmentNumber:next,amount:f.installmentAmount});toast.success("Parcela recebida e lançada no caixa.");await load();}catch(e){toast.error(e instanceof Error?e.message:"Erro ao registrar parcela.");}};
-  const calc=useMemo(()=>{const saleValue=Number(finance.salePrice),down=Number(finance.downPayment),n=Number(finance.installments),principal=Math.max(0,saleValue-down),rateText=finance.interestRate.trim(),installmentText=finance.installmentAmount.trim();if(!(principal>0&&n>0))return {principal,total:0,installment:0,rate:0,mode:""};if(rateText!==""){const rate=Math.max(0,Number(rateText)||0),total=principal+(principal*rate/100)*n;return {principal,total,installment:total/n,rate,mode:"rate"};}if(installmentText!==""){const installment=Math.max(0,Number(installmentText)||0),total=installment*n,rate=principal>0?Math.max(0,((total/principal)-1)*100/n):0;return {principal,total,installment,rate,mode:"installment"};}return {principal,total:principal,installment:0,rate:0,mode:""};},[finance.salePrice,finance.downPayment,finance.interestRate,finance.installmentAmount,finance.installments]);
-  const chooseAgent=(target:"finance"|"sale",value:string)=>{const agent=data.agents?.find((a:any)=>String(a.id)===value);if(target==="finance")setFinance({...finance,agentId:value==="none"?"":value,commissionPercentage:agent?String(agent.defaultCommissionPercentage||0):""});else setSale({...sale,agentId:value==="none"?"":value,commissionPercentage:agent?String(agent.defaultCommissionPercentage||0):""});};
+export default function Imoveis() {
+  const { user } = useAuth();
+  const [data, setData] = useState<any>({ properties: [], clients: [], financings: [], financingPayments: [], sales: [], agents: [] });
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [openFinance, setOpenFinance] = useState(false);
+  const [openSale, setOpenSale] = useState(false);
+  const [form, setForm] = useState(emptyProperty);
+  const [finance, setFinance] = useState(emptyFinancing);
+  const [sale, setSale] = useState(emptySale);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(API, { credentials: "include" });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.message);
+      setData(json);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao carregar imóveis.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); }, []);
+
+  const post = async (body: any) => {
+    const response = await fetch(API, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const json = await response.json();
+    if (!response.ok) throw new Error(json.message || "Operação não concluída.");
+    return json;
+  };
+
+  const summary = useMemo(() => ({
+    total: data.properties.length,
+    available: data.properties.filter((p: any) => p.status === "disponivel").length,
+    rented: data.properties.filter((p: any) => p.status === "alugado").length,
+    financed: data.properties.filter((p: any) => p.status === "financiado").length,
+    sold: data.properties.filter((p: any) => p.status === "vendido").length,
+  }), [data.properties]);
+
+  const calculation = useMemo(() => {
+    const price = Number(finance.salePrice || 0);
+    const down = Number(finance.downPayment || 0);
+    const installments = Number(finance.installments || 0);
+    const principal = Math.max(0, price - down);
+    if (!(principal > 0 && installments > 0)) return { principal, rate: 0, installment: 0, total: 0, mode: "" };
+    if (finance.interestRate.trim() !== "") {
+      const rate = Math.max(0, Number(finance.interestRate) || 0);
+      const total = principal + (principal * rate / 100) * installments;
+      return { principal, rate, installment: total / installments, total, mode: "rate" };
+    }
+    if (finance.installmentAmount.trim() !== "") {
+      const installment = Math.max(0, Number(finance.installmentAmount) || 0);
+      const total = installment * installments;
+      const rate = Math.max(0, ((total / principal) - 1) * 100 / installments);
+      return { principal, rate, installment, total, mode: "installment" };
+    }
+    return { principal, rate: 0, installment: 0, total: principal, mode: "" };
+  }, [finance]);
+
+  const chooseAgent = (target: "finance" | "sale", value: string) => {
+    const agent = data.agents?.find((item: any) => String(item.id) === value);
+    const agentId = value === "none" ? "" : value;
+    const commissionPercentage = agent ? String(agent.defaultCommissionPercentage || 0) : "";
+    target === "finance" ? setFinance(current => ({ ...current, agentId, commissionPercentage })) : setSale(current => ({ ...current, agentId, commissionPercentage }));
+  };
+
+  const saveProperty = async (event: React.FormEvent) => {
+    event.preventDefault();
+    try { await post({ action: "create_property", ...form }); toast.success("Imóvel cadastrado."); setOpen(false); setForm(emptyProperty()); await load(); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Erro ao cadastrar imóvel."); }
+  };
+  const removeProperty = async (id: number) => {
+    if (!window.confirm("Excluir este imóvel?")) return;
+    try { await post({ action: "delete_property", id }); toast.success("Imóvel excluído."); await load(); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Erro ao excluir imóvel."); }
+  };
+  const startFinance = (property: any) => { setFinance({ ...emptyFinancing(), propertyId: String(property.id), salePrice: String(property.salePrice || "") }); setOpenFinance(true); };
+  const startSale = (property: any) => { setSale({ ...emptySale(), propertyId: String(property.id), amount: String(property.salePrice || "") }); setOpenSale(true); };
+
+  const saveFinance = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!finance.interestRate && !finance.installmentAmount) return toast.error("Informe a taxa de juros ou o valor desejado da parcela.");
+    if (finance.installmentAmount && calculation.total < calculation.principal) return toast.error("O valor da parcela não cobre o principal financiado.");
+    try {
+      const result = await post({ action: "create_financing", ...finance });
+      const rate = Number(result.calculatedInterestRate ?? (finance.interestRate || 0));
+      const installment = Number(result.calculatedInstallmentAmount ?? (finance.installmentAmount || 0));
+      toast.success(`Financiamento criado: ${rate.toFixed(4)}% a.m. · parcela ${money(installment)}.`);
+      setOpenFinance(false); setFinance(emptyFinancing()); await load();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Erro ao financiar imóvel."); }
+  };
+
+  const saveSale = async (event: React.FormEvent) => {
+    event.preventDefault();
+    try { await post({ action: "sell_cash", ...sale }); toast.success("Venda registrada e valor lançado no caixa."); setOpenSale(false); setSale(emptySale()); await load(); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Erro ao vender imóvel."); }
+  };
+
+  const payFinancing = async (financing: any) => {
+    const paid = (data.financingPayments || []).filter((p: any) => Number(p.financingId) === Number(financing.id)).map((p: any) => Number(p.installmentNumber));
+    let next = 1; while (paid.includes(next) && next <= Number(financing.installments)) next++;
+    if (next > Number(financing.installments)) return toast.info("Todas as parcelas já foram pagas.");
+    if (!window.confirm(`Registrar a parcela ${next}/${financing.installments} de ${money(financing.installmentAmount)}?`)) return;
+    try { await post({ action: "pay_financing", financingId: financing.id, installmentNumber: next, amount: financing.installmentAmount }); toast.success("Parcela recebida e lançada no caixa."); await load(); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Erro ao registrar parcela."); }
+  };
+
+  const AgentFields = ({ target }: { target: "finance" | "sale" }) => {
+    const value = target === "finance" ? finance : sale;
+    return <>
+      <div><Label>Agente comissionado</Label><Select value={value.agentId || "none"} onValueChange={selected => chooseAgent(target, selected)}><SelectTrigger><SelectValue placeholder="Sem agente" /></SelectTrigger><SelectContent><SelectItem value="none">Sem agente comissionado</SelectItem>{data.agents?.map((agent: any) => <SelectItem key={agent.id} value={String(agent.id)}>{agent.name} · {Number(agent.defaultCommissionPercentage || 0).toFixed(2)}%</SelectItem>)}</SelectContent></Select></div>
+      <div><Label>Comissão (%)</Label><Input type="number" min="0" max="100" step="0.01" value={value.commissionPercentage} disabled={!value.agentId} onChange={event => target === "finance" ? setFinance(current => ({ ...current, commissionPercentage: event.target.value })) : setSale(current => ({ ...current, commissionPercentage: event.target.value }))} /></div>
+    </>;
+  };
 
   return <DashboardLayout><div className="space-y-6">
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex items-center gap-2"><Building2 className="h-7 w-7 text-primary"/><h1 className="text-3xl font-bold">Imóveis</h1></div><p className="mt-1 text-muted-foreground">Casas, apartamentos, terrenos e lojas para aluguel, venda à vista ou financiamento.</p></div>{user?.canInsert&&<Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4"/>Novo imóvel</Button></DialogTrigger><DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto"><DialogHeader><DialogTitle>Cadastrar imóvel</DialogTitle></DialogHeader><form onSubmit={save} className="grid gap-4 sm:grid-cols-2">
-      <div><Label>Identificação *</Label><Input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="Ex.: Casa Centro" required/></div>
-      <div><Label>Categoria do imóvel *</Label><Select value={form.type} onValueChange={v=>setForm({...form,type:v})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="casa">Casa</SelectItem><SelectItem value="apartamento">Apartamento</SelectItem><SelectItem value="terreno">Terreno</SelectItem><SelectItem value="loja">Loja</SelectItem></SelectContent></Select></div>
-      <div className="sm:col-span-2"><Label>Endereço *</Label><Input value={form.address} onChange={e=>setForm({...form,address:e.target.value})} placeholder="Rua, número e complemento" required/></div>
-      <div><Label>Bairro</Label><Input value={form.neighborhood} onChange={e=>setForm({...form,neighborhood:e.target.value})}/></div><div><Label>Cidade</Label><Input value={form.city} onChange={e=>setForm({...form,city:e.target.value})}/></div>
-      <div><Label>Estado</Label><Input maxLength={2} value={form.state} onChange={e=>setForm({...form,state:e.target.value.toUpperCase()})}/></div><div><Label>CEP</Label><Input value={form.zipCode} onChange={e=>setForm({...form,zipCode:e.target.value})}/></div>
-      <div><Label>Tamanho (m²)</Label><Input type="number" min="0" step="0.01" value={form.areaM2} onChange={e=>setForm({...form,areaM2:e.target.value})}/></div><div><Label>Valor de venda</Label><Input type="number" min="0" step="0.01" value={form.salePrice} onChange={e=>setForm({...form,salePrice:e.target.value})}/></div>
-      {[["rooms","Cômodos"],["bedrooms","Quartos"],["livingRooms","Salas"],["kitchens","Cozinhas"],["bathrooms","Banheiros"],["garages","Vagas de garagem"]].map(([key,label])=><div key={key}><Label>{label}</Label><Input type="number" min="0" step="1" value={(form as any)[key]} onChange={e=>setForm({...form,[key]:e.target.value})}/></div>)}
-      <label className="flex items-center gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" checked={form.hasGarage} onChange={e=>setForm({...form,hasGarage:e.target.checked})}/> Possui garagem</label>
-      <div className="sm:col-span-2"><Label>Outras informações</Label><Textarea rows={4} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Condomínio, IPTU, área externa, estado de conservação, documentação..."/></div>
-      <div className="sm:col-span-2 flex justify-end gap-2"><Button type="button" variant="outline" onClick={()=>setOpen(false)}>Cancelar</Button><Button type="submit">Salvar imóvel</Button></div>
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex items-center gap-2"><Building2 className="h-7 w-7 text-primary" /><h1 className="text-3xl font-bold">Imóveis</h1></div><p className="mt-1 text-muted-foreground">Casas, apartamentos, terrenos e lojas para aluguel, venda ou financiamento.</p></div>{user?.canInsert && <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4" />Novo imóvel</Button></DialogTrigger><DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto"><DialogHeader><DialogTitle>Cadastrar imóvel</DialogTitle></DialogHeader><form onSubmit={saveProperty} className="grid gap-4 sm:grid-cols-2">
+      <div><Label>Identificação *</Label><Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></div>
+      <div><Label>Categoria *</Label><Select value={form.type} onValueChange={value => setForm({ ...form, type: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="casa">Casa</SelectItem><SelectItem value="apartamento">Apartamento</SelectItem><SelectItem value="terreno">Terreno</SelectItem><SelectItem value="loja">Loja</SelectItem></SelectContent></Select></div>
+      <div className="sm:col-span-2"><Label>Endereço *</Label><Input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} required /></div>
+      <div><Label>Bairro</Label><Input value={form.neighborhood} onChange={e => setForm({ ...form, neighborhood: e.target.value })} /></div><div><Label>Cidade</Label><Input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} /></div>
+      <div><Label>Estado</Label><Input maxLength={2} value={form.state} onChange={e => setForm({ ...form, state: e.target.value.toUpperCase() })} /></div><div><Label>CEP</Label><Input value={form.zipCode} onChange={e => setForm({ ...form, zipCode: e.target.value })} /></div>
+      <div><Label>Área (m²)</Label><Input type="number" min="0" step="0.01" value={form.areaM2} onChange={e => setForm({ ...form, areaM2: e.target.value })} /></div><div><Label>Valor de venda</Label><Input type="number" min="0" step="0.01" value={form.salePrice} onChange={e => setForm({ ...form, salePrice: e.target.value })} /></div>
+      {[["rooms","Cômodos"],["bedrooms","Quartos"],["livingRooms","Salas"],["kitchens","Cozinhas"],["bathrooms","Banheiros"],["garages","Vagas de garagem"]].map(([key,label]) => <div key={key}><Label>{label}</Label><Input type="number" min="0" step="1" value={(form as any)[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} /></div>)}
+      <label className="flex items-center gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" checked={form.hasGarage} onChange={e => setForm({ ...form, hasGarage: e.target.checked })} /> Possui garagem</label>
+      <div className="sm:col-span-2"><Label>Observações</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
+      <div className="sm:col-span-2 flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button><Button type="submit">Salvar imóvel</Button></div>
     </form></DialogContent></Dialog>}</div>
 
-    <div className="grid gap-3 sm:grid-cols-5">{[["Cadastrados",summary.total],["Disponíveis",summary.available],["Alugados",summary.rented],["Financiados",summary.financed],["Vendidos",summary.sold]].map(([l,v])=><Card key={String(l)}><CardContent className="p-4"><p className="text-sm text-muted-foreground">{l}</p><p className="text-2xl font-bold">{v}</p></CardContent></Card>)}</div>
+    <div className="grid gap-3 sm:grid-cols-5">{[["Cadastrados",summary.total],["Disponíveis",summary.available],["Alugados",summary.rented],["Financiados",summary.financed],["Vendidos",summary.sold]].map(([label,value]) => <Card key={String(label)}><CardContent className="p-4"><p className="text-sm text-muted-foreground">{label}</p><p className="text-2xl font-bold">{value}</p></CardContent></Card>)}</div>
 
-    {loading?<div className="py-16 text-center text-muted-foreground">Carregando imóveis...</div>:data.properties.length===0?<Card><CardContent className="py-16 text-center"><Home className="mx-auto mb-3 h-10 w-10 text-muted-foreground"/><p className="font-semibold">Nenhum imóvel cadastrado</p></CardContent></Card>:<div className="grid gap-4 lg:grid-cols-2">{data.properties.map((p:any)=><Card key={p.id}><CardContent className="p-5"><div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2"><h3 className="text-lg font-bold">{p.title}</h3><span className="rounded-full bg-muted px-2 py-1 text-[10px] font-bold uppercase">{p.status}</span></div><p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground"><MapPin className="h-4 w-4"/>{p.address}</p></div><span className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">{typeLabel[p.type]||p.type}</span></div><div className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4"><div><span className="text-muted-foreground">Área</span><b className="block">{p.areaM2?`${p.areaM2} m²`:"—"}</b></div><div><span className="text-muted-foreground">Quartos</span><b className="block">{p.bedrooms}</b></div><div><span className="text-muted-foreground">Banheiros</span><b className="block">{p.bathrooms}</b></div><div><span className="text-muted-foreground">Garagem</span><b className="block">{p.hasGarage?`${p.garages||1} vaga(s)`:"Não"}</b></div></div>{p.salePrice&&<div className="mt-4 rounded-xl bg-muted/40 p-3"><span className="text-xs text-muted-foreground">Valor de venda</span><div className="text-xl font-bold">{money(p.salePrice)}</div></div>}<div className="mt-4 flex flex-wrap gap-2">{user?.canInsert&&p.status==="disponivel"&&<><Button size="sm" onClick={()=>startFinance(p)}><WalletCards className="mr-2 h-4 w-4"/>Financiar</Button><Button size="sm" variant="secondary" onClick={()=>startSale(p)}><BadgeDollarSign className="mr-2 h-4 w-4"/>Vender à vista</Button></>}{user?.canDelete&&<Button size="sm" variant="outline" className="text-destructive" onClick={()=>remove(p.id)}><Trash2 className="mr-2 h-4 w-4"/>Excluir</Button>}</div></CardContent></Card>)}</div>}
+    {loading ? <div className="py-16 text-center text-muted-foreground">Carregando imóveis...</div> : data.properties.length === 0 ? <Card><CardContent className="py-16 text-center"><Home className="mx-auto mb-3 h-10 w-10 text-muted-foreground" /><p className="font-semibold">Nenhum imóvel cadastrado</p></CardContent></Card> : <div className="grid gap-4 lg:grid-cols-2">{data.properties.map((property: any) => <Card key={property.id}><CardContent className="p-5"><div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2"><h3 className="text-lg font-bold">{property.title}</h3><span className="rounded-full bg-muted px-2 py-1 text-[10px] font-bold uppercase">{property.status}</span></div><p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground"><MapPin className="h-4 w-4" />{property.address}</p></div><span className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">{typeLabel[property.type] || property.type}</span></div>{property.salePrice && <div className="mt-4 rounded-xl bg-muted/40 p-3"><span className="text-xs text-muted-foreground">Valor de venda</span><div className="text-xl font-bold">{money(property.salePrice)}</div></div>}<div className="mt-4 flex flex-wrap gap-2">{user?.canInsert && property.status === "disponivel" && <><Button size="sm" onClick={() => startFinance(property)}><WalletCards className="mr-2 h-4 w-4" />Financiar</Button><Button size="sm" variant="secondary" onClick={() => startSale(property)}><BadgeDollarSign className="mr-2 h-4 w-4" />Vender à vista</Button></>}{user?.canDelete && <Button size="sm" variant="outline" className="text-destructive" onClick={() => removeProperty(property.id)}><Trash2 className="mr-2 h-4 w-4" />Excluir</Button>}</div></CardContent></Card>)}</div>}
 
-    {data.financings?.length>0&&<Card><CardHeader><CardTitle className="flex items-center gap-2"><ReceiptText className="h-5 w-5 text-primary"/>Financiamentos de imóveis</CardTitle></CardHeader><CardContent className="space-y-3">{data.financings.map((f:any)=>{const paid=(data.financingPayments||[]).filter((p:any)=>Number(p.financingId)===Number(f.id)).length;const totalReceived=Number(f.downPayment||0)+Number(f.totalPaid||0);return <div key={f.id} className="rounded-xl border p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-bold">{f.propertyTitle} <span className="text-xs font-normal text-muted-foreground">· {typeLabel[f.propertyType]||f.propertyType}</span></p><p className="text-sm text-muted-foreground">Cliente: {f.clientName} · {paid}/{f.installments} parcelas pagas</p>{f.agentName&&<p className="mt-1 flex items-center gap-1 text-xs text-primary"><UserRound className="h-3.5 w-3.5"/>Agente: {f.agentName} · {Number(f.commissionPercentage||0).toFixed(2)}%</p>}</div><div className="text-right"><p className="font-semibold">{money(f.installmentAmount)} / parcela</p><p className="text-xs text-muted-foreground">Taxa: {Number(f.interestRate||0).toFixed(2)}% a.m. · Recebido: {money(totalReceived)}</p></div></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{width:`${Math.min(100,(paid/Math.max(1,Number(f.installments)))*100)}%`}}/></div>{user?.canEdit&&f.status==="ativo"&&<div className="mt-3 flex justify-end"><Button size="sm" onClick={()=>payFinancing(f)}>Registrar próxima parcela</Button></div>}</div>})}</CardContent></Card>}
+    {data.financings?.length > 0 && <Card><CardHeader><CardTitle className="flex items-center gap-2"><ReceiptText className="h-5 w-5 text-primary" />Financiamentos de imóveis</CardTitle></CardHeader><CardContent className="space-y-3">{data.financings.map((financing: any) => { const paid = (data.financingPayments || []).filter((p: any) => Number(p.financingId) === Number(financing.id)).length; return <div key={financing.id} className="rounded-xl border p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-bold">{financing.propertyTitle}</p><p className="text-sm text-muted-foreground">Cliente: {financing.clientName} · {paid}/{financing.installments} parcelas pagas</p>{financing.agentName && <p className="mt-1 flex items-center gap-1 text-xs text-primary"><UserRound className="h-3.5 w-3.5" />Agente: {financing.agentName} · {Number(financing.commissionPercentage || 0).toFixed(2)}%</p>}</div><div className="text-right"><p className="font-semibold">{money(financing.installmentAmount)} / parcela</p><p className="text-xs text-muted-foreground">Taxa: {Number(financing.interestRate || 0).toFixed(4)}% a.m.</p></div></div>{user?.canEdit && financing.status === "ativo" && <div className="mt-3 flex justify-end"><Button size="sm" onClick={() => payFinancing(financing)}>Registrar próxima parcela</Button></div>}</div>; })}</CardContent></Card>}
 
-    <Dialog open={openFinance} onOpenChange={setOpenFinance}><DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto"><DialogHeader><DialogTitle>Financiamento de imóvel</DialogTitle></DialogHeader><form onSubmit={saveFinance} className="grid gap-4 sm:grid-cols-2"><div><Label>Cliente *</Label><Select value={finance.clientId} onValueChange={v=>setFinance({...finance,clientId:v})}><SelectTrigger><SelectValue placeholder="Selecionar cliente"/></SelectTrigger><SelectContent>{data.clients.map((c:any)=><SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent></Select></div><div><Label>Valor da venda *</Label><Input type="number" min="0.01" step="0.01" value={finance.salePrice} onChange={e=>setFinance({...finance,salePrice:e.target.value})} required/></div><div><Label>Entrada *</Label><Input type="number" min="0" step="0.01" value={finance.downPayment} onChange={e=>setFinance({...finance,downPayment:e.target.value})} required/></div><div><Label>Parcelas *</Label><Input type="number" min="1" step="1" value={finance.installments} onChange={e=>setFinance({...finance,installments:e.target.value})} required/></div><div><Label>Juros ao mês (%)</Label><Input type="number" min="0" step="0.0001" value={finance.interestRate} onChange={e=>setFinance({...finance,interestRate:e.target.value,installmentAmount:e.target.value!==""?"":finance.installmentAmount})} placeholder="Ex.: 2,5"/></div><div><Label>Ou valor desejado da parcela</Label><Input type="number" min="0.01" step="0.01" value={finance.installmentAmount} onChange={e=>setFinance({...finance,installmentAmount:e.target.value,interestRate:e.target.value!==""?"":finance.interestRate})} placeholder="Ex.: 1.500,00"/></div><div><Label>Data inicial *</Label><Input type="date" value={finance.startDate} onChange={e=>setFinance({...finance,startDate:e.target.value})} required/></div><div className="sm:col-span-2 rounded-xl border border-blue-200 bg-blue-50/50 p-4 text-sm"><div className="flex items-center gap-2 font-semibold text-blue-800"><Percent className="h-4 w-4"/>Cálculo inteligente</div><p className="mt-1 text-blue-700">Preencha <b>a taxa</b> para o sistema calcular a parcela ou deixe a taxa vazia e informe <b>o valor da parcela</b> para o sistema descobrir a taxa mensal equivalente.</p></div><div className="sm:col-span-2 grid gap-2 rounded-xl border bg-muted/30 p-4 sm:grid-cols-4"><div><span className="text-xs text-muted-foreground">Financiado</span><b className="block">{money(calc.principal)}</b></div><div><span className="text-xs text-muted-foreground">Taxa calculada</span><b className="block">{calc.rate.toFixed(4)}% a.m.</b></div><div><span className="text-xs text-muted-foreground">Total</span><b className="block">{money(calc.total)}</b></div><div><span className="text-xs text-muted-foreground">Parcela</span><b className="block">{money(calc.installment)}</b></div></div><div><Label>Agente comissionado</Label><Select value={finance.agentId||"none"} onValueChange={v=>chooseAgent("finance",v)}><SelectTrigger><SelectValue placeholder="Sem agente"/></SelectTrigger><SelectContent><SelectItem value="none">Sem agente comissionado</SelectItem>{data.agents?.map((a:any)=><SelectItem key={a.id} value={String(a.id)}>{a.name} · {Number(a.defaultCommissionPercentage||0).toFixed(2)}%</SelectItem>)}</SelectContent></Select></div><div><Label>Comissão (%)</Label><Input type="number" min="0" max="100" step="0.01" value={finance.commissionPercentage} onChange={e=>setFinance({...finance,commissionPercentage:e.target.value})} disabled={!finance.agentId}/></div><div className="sm:col-span-2"><Label>Observações</Label><Textarea value={finance.notes} onChange={e=>setFinance({...finance,notes:e.target.value})}/></div><div className="sm:col-span-2 flex justify-end gap-2"><Button type="button" variant="outline" onClick={()=>setOpenFinance(false)}>Cancelar</Button><Button type="submit">Criar financiamento</Button></div></form></DialogContent></Dialog>
+    <Dialog open={openFinance} onOpenChange={setOpenFinance}><DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto"><DialogHeader><DialogTitle>Financiamento de imóvel</DialogTitle></DialogHeader><form onSubmit={saveFinance} className="grid gap-4 sm:grid-cols-2">
+      <div><Label>Cliente *</Label><Select value={finance.clientId} onValueChange={value => setFinance({ ...finance, clientId: value })}><SelectTrigger><SelectValue placeholder="Selecionar cliente" /></SelectTrigger><SelectContent>{data.clients.map((client: any) => <SelectItem key={client.id} value={String(client.id)}>{client.name}</SelectItem>)}</SelectContent></Select></div>
+      <div><Label>Valor da venda *</Label><Input type="number" min="0.01" step="0.01" value={finance.salePrice} onChange={e => setFinance({ ...finance, salePrice: e.target.value })} required /></div>
+      <div><Label>Entrada *</Label><Input type="number" min="0" step="0.01" value={finance.downPayment} onChange={e => setFinance({ ...finance, downPayment: e.target.value })} required /></div>
+      <div><Label>Número de parcelas *</Label><Input type="number" min="1" step="1" value={finance.installments} onChange={e => setFinance({ ...finance, installments: e.target.value })} required /></div>
+      <div><Label>Juros ao mês (%)</Label><Input type="number" min="0" step="0.0001" value={finance.interestRate} onChange={e => setFinance({ ...finance, interestRate: e.target.value, installmentAmount: e.target.value ? "" : finance.installmentAmount })} placeholder="Informe a taxa" /></div>
+      <div><Label>Ou valor desejado da parcela</Label><Input type="number" min="0.01" step="0.01" value={finance.installmentAmount} onChange={e => setFinance({ ...finance, installmentAmount: e.target.value, interestRate: e.target.value ? "" : finance.interestRate })} placeholder="Informe a parcela" /></div>
+      <div><Label>Data inicial *</Label><Input type="date" value={finance.startDate} onChange={e => setFinance({ ...finance, startDate: e.target.value })} required /></div>
+      <div className="sm:col-span-2 rounded-xl border border-blue-200 bg-blue-50/50 p-4 text-sm"><div className="flex items-center gap-2 font-semibold text-blue-800"><Percent className="h-4 w-4" />Cálculo inteligente</div><p className="mt-1 text-blue-700">Informe <b>a taxa</b> e o Note Note calcula a parcela. Ou deixe a taxa vazia, informe <b>a parcela que deseja receber</b> e o sistema calcula a taxa mensal equivalente.</p></div>
+      <div className="sm:col-span-2 grid gap-2 rounded-xl border bg-muted/30 p-4 sm:grid-cols-4"><div><span className="text-xs text-muted-foreground">Financiado</span><b className="block">{money(calculation.principal)}</b></div><div><span className="text-xs text-muted-foreground">Taxa</span><b className="block">{calculation.rate.toFixed(4)}% a.m.</b></div><div><span className="text-xs text-muted-foreground">Total</span><b className="block">{money(calculation.total)}</b></div><div><span className="text-xs text-muted-foreground">Parcela</span><b className="block">{money(calculation.installment)}</b></div></div>
+      <AgentFields target="finance" />
+      <div className="sm:col-span-2"><Label>Observações</Label><Textarea value={finance.notes} onChange={e => setFinance({ ...finance, notes: e.target.value })} /></div>
+      <div className="sm:col-span-2 flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setOpenFinance(false)}>Cancelar</Button><Button type="submit">Criar financiamento</Button></div>
+    </form></DialogContent></Dialog>
 
-    <Dialog open={openSale} onOpenChange={setOpenSale}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle>Venda de imóvel à vista</DialogTitle></DialogHeader><form onSubmit={saveSale} className="space-y-4"><div><Label>Cliente *</Label><Select value={sale.clientId} onValueChange={v=>setSale({...sale,clientId:v})}><SelectTrigger><SelectValue placeholder="Selecionar cliente"/></SelectTrigger><SelectContent>{data.clients.map((c:any)=><SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent></Select></div><div><Label>Valor da venda *</Label><Input type="number" min="0.01" step="0.01" value={sale.amount} onChange={e=>setSale({...sale,amount:e.target.value})} required/></div><div><Label>Agente comissionado</Label><Select value={sale.agentId||"none"} onValueChange={v=>chooseAgent("sale",v)}><SelectTrigger><SelectValue placeholder="Sem agente"/></SelectTrigger><SelectContent><SelectItem value="none">Sem agente comissionado</SelectItem>{data.agents?.map((a:any)=><SelectItem key={a.id} value={String(a.id)}>{a.name} · {Number(a.defaultCommissionPercentage||0).toFixed(2)}%</SelectItem>)}</SelectContent></Select></div>{sale.agentId&&<div><Label>Comissão (%)</Label><Input type="number" min="0" max="100" step="0.01" value={sale.commissionPercentage} onChange={e=>setSale({...sale,commissionPercentage:e.target.value})}/></div>}<div><Label>Observações</Label><Textarea value={sale.notes} onChange={e=>setSale({...sale,notes:e.target.value})}/></div><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={()=>setOpenSale(false)}>Cancelar</Button><Button type="submit">Confirmar venda</Button></div></form></DialogContent></Dialog>
+    <Dialog open={openSale} onOpenChange={setOpenSale}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle>Venda de imóvel à vista</DialogTitle></DialogHeader><form onSubmit={saveSale} className="grid gap-4 sm:grid-cols-2">
+      <div className="sm:col-span-2"><Label>Cliente *</Label><Select value={sale.clientId} onValueChange={value => setSale({ ...sale, clientId: value })}><SelectTrigger><SelectValue placeholder="Selecionar cliente" /></SelectTrigger><SelectContent>{data.clients.map((client: any) => <SelectItem key={client.id} value={String(client.id)}>{client.name}</SelectItem>)}</SelectContent></Select></div>
+      <div className="sm:col-span-2"><Label>Valor da venda *</Label><Input type="number" min="0.01" step="0.01" value={sale.amount} onChange={e => setSale({ ...sale, amount: e.target.value })} required /></div>
+      <AgentFields target="sale" />
+      <div className="sm:col-span-2"><Label>Observações</Label><Textarea value={sale.notes} onChange={e => setSale({ ...sale, notes: e.target.value })} /></div>
+      <div className="sm:col-span-2 flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setOpenSale(false)}>Cancelar</Button><Button type="submit">Confirmar venda</Button></div>
+    </form></DialogContent></Dialog>
   </div></DashboardLayout>;
 }
