@@ -104,7 +104,31 @@ export async function handlePropertiesV2(req:any,res:any){
       const rows=await sql`INSERT INTO properties ("databaseId",title,type,address,neighborhood,city,state,"zipCode","areaM2",rooms,bedrooms,"livingRooms",kitchens,bathrooms,garages,"hasGarage","salePrice",notes,"createdBy") VALUES (${databaseId},${title},${type},${address},${text(body.neighborhood,120)||null},${text(body.city,120)||null},${text(body.state,2).toUpperCase()||null},${text(body.zipCode,12)||null},${body.areaM2===""||body.areaM2==null?null:num(body.areaM2)},${Math.max(0,Math.trunc(num(body.rooms)||0))},${Math.max(0,Math.trunc(num(body.bedrooms)||0))},${Math.max(0,Math.trunc(num(body.livingRooms)||0))},${Math.max(0,Math.trunc(num(body.kitchens)||0))},${Math.max(0,Math.trunc(num(body.bathrooms)||0))},${garages},${Boolean(body.hasGarage)||garages>0},${body.salePrice===""||body.salePrice==null?null:num(body.salePrice)},${text(body.notes,4000)||null},${user.id}) RETURNING *`;return sendJson(res,201,{success:true,property:rows[0]});
     }
     if(action==="delete_property"){
-      requirePerm(user,"canDelete");const id=Math.trunc(num(body.id));const linked=await sql`SELECT (SELECT COUNT(*) FROM property_rentals WHERE "propertyId"=${id} AND status='ativo')::int rentals,(SELECT COUNT(*) FROM property_financings WHERE "propertyId"=${id} AND status='ativo')::int financings`;if(Number((linked[0] as any)?.rentals)>0||Number((linked[0] as any)?.financings)>0)return sendJson(res,409,{success:false,message:"Encerre o aluguel ou financiamento ativo antes de excluir o imóvel."});await sql`DELETE FROM properties WHERE id=${id} AND "databaseId"=${databaseId}`;return sendJson(res,200,{success:true});
+      requirePerm(user,"canDelete");
+      const id=Math.trunc(num(body.id));
+      const propRows=await sql`SELECT id,title FROM properties WHERE id=${id} AND "databaseId"=${databaseId} LIMIT 1`;
+      if(!propRows[0])return sendJson(res,404,{success:false,message:"Imóvel não encontrado."});
+      const linked=await sql`SELECT
+        (SELECT COUNT(*) FROM property_rentals WHERE "propertyId"=${id} AND status='ativo')::int rentals,
+        (SELECT COUNT(*) FROM property_financings WHERE "propertyId"=${id} AND status='ativo')::int financings,
+        (SELECT COUNT(*) FROM property_rentals WHERE "propertyId"=${id})::int all_rentals,
+        (SELECT COUNT(*) FROM property_financings WHERE "propertyId"=${id})::int all_financings,
+        (SELECT COUNT(*) FROM property_sales WHERE "propertyId"=${id})::int all_sales`;
+      const refs=linked[0] as any;
+      if(Number(refs?.rentals)>0||Number(refs?.financings)>0)return sendJson(res,409,{success:false,message:"Encerre o aluguel ou financiamento ativo antes de excluir o imóvel."});
+      const hasHistory=Number(refs?.all_rentals)>0||Number(refs?.all_financings)>0||Number(refs?.all_sales)>0;
+      if(hasHistory&&user.role!=="super_admin")return sendJson(res,409,{success:false,message:"Este imóvel possui histórico de aluguel, financiamento ou venda. Somente o Super Admin pode excluí-lo definitivamente."});
+      if(user.role==="super_admin"&&hasHistory){
+        const cashRows=await sql`SELECT "cashFlowId" FROM property_rental_payments WHERE "rentalId" IN (SELECT id FROM property_rentals WHERE "propertyId"=${id}) UNION ALL SELECT "cashFlowId" FROM property_financing_payments WHERE "financingId" IN (SELECT id FROM property_financings WHERE "propertyId"=${id}) UNION ALL SELECT "cashFlowId" FROM property_sales WHERE "propertyId"=${id}`;
+        for(const row of cashRows as any[]){const cashId=Number(row.cashFlowId||0);if(cashId>0)await sql`DELETE FROM cash_flow WHERE id=${cashId} AND "databaseId"=${databaseId}`;}
+        await sql`DELETE FROM property_rental_payments WHERE "rentalId" IN (SELECT id FROM property_rentals WHERE "propertyId"=${id})`;
+        await sql`DELETE FROM property_financing_payments WHERE "financingId" IN (SELECT id FROM property_financings WHERE "propertyId"=${id})`;
+        await sql`DELETE FROM property_rentals WHERE "propertyId"=${id}`;
+        await sql`DELETE FROM property_financings WHERE "propertyId"=${id}`;
+        await sql`DELETE FROM property_sales WHERE "propertyId"=${id}`;
+      }
+      await sql`DELETE FROM properties WHERE id=${id} AND "databaseId"=${databaseId}`;
+      return sendJson(res,200,{success:true});
     }
     if(action==="create_rental"){
       requirePerm(user,"canInsert");const propertyId=Math.trunc(num(body.propertyId)),clientId=Math.trunc(num(body.clientId)),monthlyRent=num(body.monthlyRent),dueDay=Math.trunc(num(body.dueDay)),startDate=text(body.startDate,10),agentId=body.agentId?Math.trunc(num(body.agentId)):null;const agent=await validateAgent(databaseId,agentId);if(agentId&&!agent)return sendJson(res,400,{success:false,message:"Agente comissionado inválido ou inativo."});const commission=validCommission(body.commissionPercentage??agent?.defaultCommissionPercentage);if(commission===null)return sendJson(res,400,{success:false,message:"A comissão deve estar entre 0% e 100%."});if(!propertyId||!clientId||monthlyRent<=0||dueDay<1||dueDay>31||!startDate)return sendJson(res,400,{success:false,message:"Preencha imóvel, cliente, valor, dia de pagamento e data inicial."});const prop=await sql`SELECT status FROM properties WHERE id=${propertyId} AND "databaseId"=${databaseId} LIMIT 1`;if(!prop[0])return sendJson(res,404,{success:false,message:"Imóvel não encontrado."});if(String((prop[0] as any).status)!=="disponivel")return sendJson(res,409,{success:false,message:"Este imóvel não está disponível para aluguel."});const rows=await sql`INSERT INTO property_rentals ("databaseId","propertyId","clientId","monthlyRent","dueDay","startDate","agentId","commissionPercentage",notes,"createdBy") VALUES (${databaseId},${propertyId},${clientId},${monthlyRent},${dueDay},${startDate},${agentId},${commission},${text(body.notes,4000)||null},${user.id}) RETURNING *`;await sql`UPDATE properties SET status='alugado',"updatedAt"=NOW() WHERE id=${propertyId}`;return sendJson(res,201,{success:true,rental:rows[0]});
