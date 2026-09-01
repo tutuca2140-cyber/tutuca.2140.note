@@ -329,6 +329,8 @@ export default async function handler(req: any, res: any) {
     const passwordHash = await bcrypt.hash(password, 12);
     const whatsapp = formatStoredWhatsapp(whatsappInput);
     const trialEndsAt = trialEndDate();
+    const initialAccessActive = billingMethod === "card_monthly";
+    const subscriptionTrialEndsAt = initialAccessActive ? trialEndsAt.toISOString() : null;
     const created = await sql`
       INSERT INTO users (
         username, "passwordHash", name, email, whatsapp, "loginMethod", role,
@@ -337,7 +339,7 @@ export default async function handler(req: any, res: any) {
         "emailVerified", "createdAt", "updatedAt", "lastSignedIn"
       ) VALUES (
         ${username}, ${passwordHash}, ${name}, ${email}, ${whatsapp}, 'commercial_signup', 'user',
-        true, true, true, true, true, false, false, 0, true, false, NOW(), NOW(), NOW()
+        true, true, true, true, true, false, false, 0, ${initialAccessActive}, false, NOW(), NOW(), NOW()
       ) RETURNING id, username, email, name, whatsapp
     `;
     const user = created[0] as any;
@@ -348,8 +350,8 @@ export default async function handler(req: any, res: any) {
       INSERT INTO commercial_subscriptions (
         "userId", plan, "priceCents", status, source, provider, "billingMethod", "trialEndsAt", "createdAt", "updatedAt"
       ) VALUES (
-        ${user.id}, ${plan}, ${selectedPrice}, 'active', 'commercial_signup', 'asaas',
-        ${billingMethod}, ${trialEndsAt.toISOString()}, NOW(), NOW()
+        ${user.id}, ${plan}, ${selectedPrice}, ${initialAccessActive ? "active" : "pending_payment"}, 'commercial_signup', 'asaas',
+        ${billingMethod}, ${subscriptionTrialEndsAt}, NOW(), NOW()
       )
     `;
 
