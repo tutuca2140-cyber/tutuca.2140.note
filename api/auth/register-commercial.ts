@@ -329,8 +329,8 @@ export default async function handler(req: any, res: any) {
     const passwordHash = await bcrypt.hash(password, 12);
     const whatsapp = formatStoredWhatsapp(whatsappInput);
     const trialEndsAt = trialEndDate();
-    const initialAccessActive = billingMethod === "card_monthly";
-    const subscriptionTrialEndsAt = initialAccessActive ? trialEndsAt.toISOString() : null;
+    const initialAccessActive = false;
+    const subscriptionTrialEndsAt = billingMethod === "card_monthly" ? trialEndsAt.toISOString() : null;
     const created = await sql`
       INSERT INTO users (
         username, "passwordHash", name, email, whatsapp, "loginMethod", role,
@@ -381,7 +381,7 @@ export default async function handler(req: any, res: any) {
         registration: {
           name: user.name, username: user.username, email: user.email, whatsapp: user.whatsapp,
           plan, billingMethod, priceCents: selectedPrice, databaseLimit: PLAN_DATABASE_LIMITS[plan],
-          status: "active", trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString(), marketingOptIn,
+          status: "pending_payment", trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString(), marketingOptIn,
         },
         subscription: {
           provider: "asaas", providerStatus: pix.status, checkoutUrl: pix.checkoutUrl,
@@ -405,7 +405,7 @@ export default async function handler(req: any, res: any) {
       registration: {
         name: user.name, username: user.username, email: user.email, whatsapp: user.whatsapp,
         plan, billingMethod, priceCents: selectedPrice, databaseLimit: PLAN_DATABASE_LIMITS[plan],
-        status: "active", trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString(), marketingOptIn,
+        status: "pending_payment", trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString(), marketingOptIn,
       },
       subscription: {
         provider: "asaas", providerCheckoutId: checkout.checkoutId,

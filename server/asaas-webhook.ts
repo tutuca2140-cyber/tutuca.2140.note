@@ -120,7 +120,8 @@ async function handleSubscriptionEvent(event: string, subscription: any) {
 
   const trialActive = row?.trialEndsAt && new Date(row.trialEndsAt).getTime() > Date.now();
   const inactive = event === "SUBSCRIPTION_INACTIVATED" || event === "SUBSCRIPTION_DELETED";
-  const nextStatus = inactive ? (trialActive ? "active" : "canceled") : String(row.status || "active");
+  const cardSetupCompleted = !inactive && String(row.billingMethod) === "card_monthly" && Boolean(subscriptionId);
+  const nextStatus = inactive ? (trialActive ? "active" : "canceled") : cardSetupCompleted ? "active" : String(row.status || "pending_payment");
   const sql = getSql();
   const updated = await sql`
     UPDATE commercial_subscriptions SET

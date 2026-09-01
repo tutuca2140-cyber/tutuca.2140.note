@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckCircle2, Loader2, Mail, ShieldCheck } from "lucide-react";
+import { CheckCircle2, CreditCard, Loader2, Mail, QrCode, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
@@ -29,6 +29,7 @@ export default function Login() {
   const [notRobot, setNotRobot] = useState(false);
   const [captcha, setCaptcha] = useState({ question: "", token: "" });
   const [captchaAnswer, setCaptchaAnswer] = useState("");
+  const [pendingPayment, setPendingPayment] = useState<any>(null);
 
   const refreshCaptcha = useCallback(async () => {
     try {
@@ -85,9 +86,8 @@ export default function Login() {
       });
 
       const result = await response.json();
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Usuário ou senha inválidos.");
-      }
+      if (result?.paymentPending) { setPendingPayment(result.payment || {}); toast.info(result?.message || "Conclua o pagamento para liberar o primeiro acesso."); return; }
+      if (!response.ok || !result?.success) { throw new Error(result?.message || "Usuário ou senha inválidos."); }
 
       toast.success("Login realizado com sucesso!");
       setLocation("/dashboard");
@@ -334,6 +334,8 @@ export default function Login() {
                   </Button>
                 </form>
               )
+            ) : pendingPayment ? (
+              <div className="space-y-5"><div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-700">{pendingPayment.billingMethod === "pix_annual" ? <QrCode className="h-7 w-7" /> : <CreditCard className="h-7 w-7" />}</div><p className="mt-4 text-lg font-black text-slate-900">Continue de onde parou</p><p className="mt-2 text-sm leading-6 text-slate-600">Seu cadastro já está salvo, mas o primeiro acesso só será liberado depois que todas as etapas de pagamento forem concluídas.</p></div><div className="rounded-xl border bg-white p-4 text-sm"><p><strong>Plano:</strong> {String(pendingPayment.plan || "").toUpperCase()}</p><p className="mt-1"><strong>Etapa:</strong> {pendingPayment.billingMethod === "pix_annual" ? "Pagamento anual via Pix" : "Cadastro/validação do cartão"}</p><p className="mt-1"><strong>Status:</strong> {pendingPayment.providerStatus || pendingPayment.status || "Pendente"}</p></div>{pendingPayment.billingMethod === "pix_annual" && pendingPayment.pixQrCodeBase64 ? <img src={`data:image/png;base64,${pendingPayment.pixQrCodeBase64}`} alt="QR Code Pix" className="mx-auto h-56 w-56 rounded-xl border bg-white p-2" /> : null}{pendingPayment.billingMethod === "pix_annual" && pendingPayment.pixQrCode ? <div className="space-y-2"><Label>Código Pix copia e cola</Label><Input readOnly value={pendingPayment.pixQrCode} onFocus={e=>e.currentTarget.select()} /><Button type="button" variant="outline" className="w-full" onClick={()=>navigator.clipboard.writeText(pendingPayment.pixQrCode)}>Copiar código Pix</Button></div> : null}{pendingPayment.checkoutUrl ? <Button type="button" className="w-full" onClick={()=>window.location.href=pendingPayment.checkoutUrl}>{pendingPayment.billingMethod === "pix_annual" ? "Abrir cobrança no Asaas" : "Continuar cadastro do cartão"}</Button> : null}<Button type="button" variant="outline" className="w-full" onClick={()=>{setPendingPayment(null); resetCaptcha();}}>Voltar ao login</Button></div>
             ) : (
               <>
                 <form onSubmit={handleLogin} className="space-y-4">

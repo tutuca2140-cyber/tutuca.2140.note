@@ -626,10 +626,13 @@ export default async function handler(req: any, res: any) {
     }
 
     if (!user.isActive) {
-      return sendJson(res, 403, {
-        success: false,
-        message: "Usuário desativado.",
-      });
+      if (user.loginMethod === "commercial_signup") {
+        const pendingRows = await sql`SELECT plan,status,"billingMethod","checkoutUrl","providerStatus","pixQrCode","pixQrCodeBase64","pixExpiresAt","trialEndsAt" FROM commercial_subscriptions WHERE "userId"=${user.id} LIMIT 1`;
+        const pending = pendingRows[0] as any;
+        if (pending && ["active", "paid"].includes(String(pending.status))) { await sql`UPDATE users SET "isActive"=true,"updatedAt"=NOW() WHERE id=${user.id}`; user.isActive=true; }
+        else if (pending) return sendJson(res,402,{success:false,paymentPending:true,message:"Seu cadastro foi encontrado. Conclua a etapa de pagamento para liberar o primeiro acesso.",payment:{plan:pending.plan,status:pending.status,billingMethod:pending.billingMethod,checkoutUrl:pending.checkoutUrl,providerStatus:pending.providerStatus,pixQrCode:pending.pixQrCode,pixQrCodeBase64:pending.pixQrCodeBase64,pixExpiresAt:pending.pixExpiresAt,trialEndsAt:pending.trialEndsAt}});
+      }
+      if (!user.isActive) return sendJson(res,403,{success:false,message:"Usuário desativado."});
     }
 
     if (user.loginMethod === "commercial_signup") {
