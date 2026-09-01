@@ -1,0 +1,258 @@
+name: Support Chat User ID
+on:
+  push:
+    paths:
+      - '.github/workflows/support-chat-user-id.yml'
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Apply support chat and subscriber ID changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p=Path(path); s=p.read_text()
+              if old not in s:
+                  raise SystemExit(f'Pattern not found in {path}: {old[:100]}')
+              p.write_text(s.replace(old,new,1))
+
+          # Shared auth schema: immutable 9-digit support ID + backfill existing commercial subscribers.
+          p=Path('api/auth/_shared.ts'); s=p.read_text()
+          needle='    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp varchar(20)`;\n'
+          insert='''    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp varchar(20)`;\n    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "supportId" varchar(9)`;\n    await sql`CREATE UNIQUE INDEX IF NOT EXISTS users_support_id_uidx ON users ("supportId") WHERE "supportId" IS NOT NULL`;\n    await sql`\n      DO $$\n      DECLARE rec RECORD; candidate text;\n      BEGIN\n        FOR rec IN SELECT id FROM users WHERE "loginMethod"='commercial_signup' AND "supportId" IS NULL LOOP\n          LOOP\n            candidate := (100000000 + floor(random() * 900000000)::bigint)::text;\n            BEGIN\n              UPDATE users SET "supportId"=candidate WHERE id=rec.id;\n              EXIT;\n            EXCEPTION WHEN unique_violation THEN\n              NULL;\n            END;\n          END LOOP;\n        END LOOP;\n      END $$\n    `;\n'''
+          if 'users_support_id_uidx' not in s:
+              if needle not in s: raise SystemExit('auth shared insertion point missing')
+              s=s.replace(needle,insert,1)
+              p.write_text(s)
+
+          # Registration: generate and persist a unique 9-digit ID for every new commercial subscriber.
+          p=Path('api/auth/register-commercial.ts'); s=p.read_text()
+          if 'node:crypto' not in s:
+              s=s.replace('import bcrypt from "bcrypt";','import bcrypt from "bcrypt";\nimport crypto from "node:crypto";',1)
+          if 'async function generateSupportId' not in s:
+              marker='function asaasDateTime(date: Date) {\n  return date.toISOString().replace("T", " ").replace(/\\.\\d{3}Z$/, "");\n}\n'
+              helper='''function asaasDateTime(date: Date) {\n  return date.toISOString().replace("T", " ").replace(/\\.\\d{3}Z$/, "");\n}\n\nasync function generateSupportId(sql: any) {\n  for (let attempt = 0; attempt < 30; attempt += 1) {\n    const candidate = String(crypto.randomInt(100000000, 1000000000));\n    const existing = await sql`SELECT id FROM users WHERE "supportId"=${candidate} LIMIT 1`;\n    if (!existing[0]) return candidate;\n  }\n  throw Object.assign(new Error("Não foi possível gerar o ID do assinante."), { statusCode: 503 });\n}\n'''
+              if marker not in s: raise SystemExit('register helper insertion point missing')
+              s=s.replace(marker,helper,1)
+          if 'const supportId = await generateSupportId(sql);' not in s:
+              s=s.replace('    const passwordHash = await bcrypt.hash(password, 12);\n','    const supportId = await generateSupportId(sql);\n    const passwordHash = await bcrypt.hash(password, 12);\n',1)
+          old='''        username, "passwordHash", name, email, whatsapp, "loginMethod", role,\n        "canView", "canInsert", "canEdit", "canDelete", "canGenerateReports",'''
+          new='''        username, "passwordHash", name, email, whatsapp, "supportId", "loginMethod", role,\n        "canView", "canInsert", "canEdit", "canDelete", "canGenerateReports",'''
+          if 'whatsapp, "supportId", "loginMethod"' not in s:
+              if old not in s: raise SystemExit('register columns insertion point missing')
+              s=s.replace(old,new,1)
+          oldv='''        ${username}, ${passwordHash}, ${name}, ${email}, ${whatsapp}, 'commercial_signup', 'user','''
+          newv='''        ${username}, ${passwordHash}, ${name}, ${email}, ${whatsapp}, ${supportId}, 'commercial_signup', 'user','''
+          if '${whatsapp}, ${supportId},' not in s:
+              if oldv not in s: raise SystemExit('register values insertion point missing')
+              s=s.replace(oldv,newv,1)
+          s=s.replace('RETURNING id, username, email, name, whatsapp','RETURNING id, username, email, name, whatsapp, "supportId"')
+          s=s.replace('name: user.name, username: user.username, email: user.email, whatsapp: user.whatsapp,\n          plan, billingMethod,', 'name: user.name, username: user.username, email: user.email, whatsapp: user.whatsapp, supportId: user.supportId,\n          plan, billingMethod,')
+          p.write_text(s)
+
+          # Support backend via shared site-access function to avoid adding another Vercel function.
+          Path('server/support-chat.ts').write_text(r'''import { ensureAuthUserColumns, getSql, readCookie, readJsonBody, sendJson, SESSION_COOKIE_NAME } from "../api/auth/_shared.js";
+
+type UserRow = { id:number; name?:string; username?:string; email?:string; role:string; isActive:boolean; loginMethod?:string; accountOwnerId?:number|null; supportId?:string|null };
+let tablesPromise: Promise<void> | null = null;
+function ensureTables() {
+  if (tablesPromise) return tablesPromise;
+  const sql=getSql();
+  tablesPromise=(async()=>{
+    await ensureAuthUserColumns();
+    await sql`CREATE TABLE IF NOT EXISTS support_threads (
+      id bigserial PRIMARY KEY,
+      "subscriberUserId" integer NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      status varchar(20) NOT NULL DEFAULT 'open',
+      "lastUserMessageAt" timestamptz NOT NULL DEFAULT NOW(),
+      "createdAt" timestamptz NOT NULL DEFAULT NOW(),
+      "updatedAt" timestamptz NOT NULL DEFAULT NOW()
+    )`;
+    await sql`CREATE TABLE IF NOT EXISTS support_messages (
+      id bigserial PRIMARY KEY,
+      "threadId" bigint NOT NULL REFERENCES support_threads(id) ON DELETE CASCADE,
+      "senderUserId" integer REFERENCES users(id) ON DELETE SET NULL,
+      "senderRole" varchar(20) NOT NULL,
+      message text NOT NULL,
+      "readAt" timestamptz,
+      "createdAt" timestamptz NOT NULL DEFAULT NOW()
+    )`;
+    await sql`CREATE INDEX IF NOT EXISTS support_threads_arrival_idx ON support_threads ("lastUserMessageAt" DESC)`;
+    await sql`CREATE INDEX IF NOT EXISTS support_messages_thread_idx ON support_messages ("threadId", "createdAt")`;
+  })().catch(e=>{tablesPromise=null;throw e});
+  return tablesPromise;
+}
+function text(v:any,max=5000){return String(v??"").trim().slice(0,max)}
+async function sessionUser(req:any):Promise<UserRow|null>{
+  const token=readCookie(req,SESSION_COOKIE_NAME); if(!token)return null; const sql=getSql();
+  const rows=await sql`SELECT id,name,username,email,role,"isActive","loginMethod","accountOwnerId","supportId" FROM users WHERE id=(SELECT "userId" FROM local_sessions WHERE token=${token} AND "expiresAt">NOW() LIMIT 1) LIMIT 1`;
+  return (rows[0] as any)||null;
+}
+async function subscriberFor(user:UserRow){
+  const sql=getSql();
+  if(user.loginMethod==='commercial_signup') return user;
+  if(user.accountOwnerId){const rows=await sql`SELECT id,name,username,email,role,"isActive","loginMethod","accountOwnerId","supportId" FROM users WHERE id=${Number(user.accountOwnerId)} AND "loginMethod"='commercial_signup' LIMIT 1`;return (rows[0] as any)||null;}
+  return null;
+}
+async function threadPayload(subscriberId:number){
+  const sql=getSql();
+  const threadRows=await sql`SELECT * FROM support_threads WHERE "subscriberUserId"=${subscriberId} LIMIT 1`;
+  const thread=threadRows[0] as any;
+  if(!thread)return {thread:null,messages:[]};
+  const messages=await sql`SELECT m.id,m."senderRole",m.message,m."createdAt",u.name AS "senderName" FROM support_messages m LEFT JOIN users u ON u.id=m."senderUserId" WHERE m."threadId"=${Number(thread.id)} ORDER BY m."createdAt" ASC,m.id ASC`;
+  return {thread,messages};
+}
+export async function handleSupportChat(req:any,res:any){
+  try{
+    await ensureTables(); const user=await sessionUser(req); if(!user)return sendJson(res,401,{success:false,message:'Sessão expirada.'}); const sql=getSql();
+    const action=text(Array.isArray(req?.query?.action)?req.query.action[0]:req?.query?.action,50).toLowerCase();
+    if(user.role==='super_admin'){
+      if(req.method==='GET' && (!action||action==='list')){
+        const threads=await sql`SELECT t.id,t.status,t."lastUserMessageAt",t."createdAt",t."updatedAt",u.id AS "subscriberUserId",u.name,u.username,u.email,u."supportId",u."isActive" AS "accountActive",EXISTS(SELECT 1 FROM local_sessions s WHERE s."userId"=u.id AND s."expiresAt">NOW()) AS "sessionActive",(SELECT COUNT(*)::int FROM support_messages m WHERE m."threadId"=t.id AND m."senderRole"='user' AND m."readAt" IS NULL) AS "unreadCount",(SELECT m2.message FROM support_messages m2 WHERE m2."threadId"=t.id ORDER BY m2."createdAt" DESC,m2.id DESC LIMIT 1) AS "lastMessage" FROM support_threads t JOIN users u ON u.id=t."subscriberUserId" ORDER BY t."lastUserMessageAt" DESC,t.id DESC`;
+        return sendJson(res,200,{success:true,threads});
+      }
+      if(req.method==='GET' && action==='thread'){
+        const threadId=Math.trunc(Number(req?.query?.threadId)); if(!threadId)return sendJson(res,400,{success:false,message:'Atendimento inválido.'});
+        const rows=await sql`SELECT t.*,u.name,u.username,u.email,u."supportId",u."isActive" AS "accountActive",EXISTS(SELECT 1 FROM local_sessions s WHERE s."userId"=u.id AND s."expiresAt">NOW()) AS "sessionActive" FROM support_threads t JOIN users u ON u.id=t."subscriberUserId" WHERE t.id=${threadId} LIMIT 1`;
+        if(!rows[0])return sendJson(res,404,{success:false,message:'Atendimento não encontrado.'});
+        await sql`UPDATE support_messages SET "readAt"=COALESCE("readAt",NOW()) WHERE "threadId"=${threadId} AND "senderRole"='user'`;
+        const messages=await sql`SELECT m.id,m."senderRole",m.message,m."createdAt",u.name AS "senderName" FROM support_messages m LEFT JOIN users u ON u.id=m."senderUserId" WHERE m."threadId"=${threadId} ORDER BY m."createdAt" ASC,m.id ASC`;
+        return sendJson(res,200,{success:true,thread:rows[0],messages});
+      }
+      if(req.method==='POST'){
+        const body=await readJsonBody(req); const postAction=text(body?.action,30).toLowerCase(); const threadId=Math.trunc(Number(body?.threadId));
+        if(!threadId)return sendJson(res,400,{success:false,message:'Atendimento inválido.'});
+        const thread=await sql`SELECT id FROM support_threads WHERE id=${threadId} LIMIT 1`; if(!thread[0])return sendJson(res,404,{success:false,message:'Atendimento não encontrado.'});
+        if(postAction==='reply'){
+          const message=text(body?.message,5000); if(!message)return sendJson(res,400,{success:false,message:'Digite uma mensagem.'});
+          await sql`INSERT INTO support_messages ("threadId","senderUserId","senderRole",message,"readAt") VALUES (${threadId},${user.id},'super_admin',${message},NOW())`;
+          await sql`UPDATE support_threads SET status='open',"updatedAt"=NOW() WHERE id=${threadId}`;
+          return sendJson(res,201,{success:true});
+        }
+        if(postAction==='close'||postAction==='reopen'){
+          const status=postAction==='close'?'closed':'open'; await sql`UPDATE support_threads SET status=${status},"updatedAt"=NOW() WHERE id=${threadId}`; return sendJson(res,200,{success:true});
+        }
+      }
+      return sendJson(res,400,{success:false,message:'Ação de suporte inválida.'});
+    }
+
+    const subscriber=await subscriberFor(user); if(!subscriber)return sendJson(res,403,{success:false,message:'O chat de suporte está disponível para contas assinantes do Note Note.'});
+    if(req.method==='GET'){
+      const payload=await threadPayload(Number(subscriber.id));
+      if(payload.thread)await sql`UPDATE support_messages SET "readAt"=COALESCE("readAt",NOW()) WHERE "threadId"=${Number((payload.thread as any).id)} AND "senderRole"='super_admin'`;
+      return sendJson(res,200,{success:true,supportId:subscriber.supportId,name:subscriber.name||subscriber.username,...payload});
+    }
+    if(req.method==='POST'){
+      const body=await readJsonBody(req); const message=text(body?.message,5000); if(!message)return sendJson(res,400,{success:false,message:'Digite uma mensagem para o suporte.'});
+      const rows=await sql`INSERT INTO support_threads ("subscriberUserId",status,"lastUserMessageAt","updatedAt") VALUES (${Number(subscriber.id)},'open',NOW(),NOW()) ON CONFLICT ("subscriberUserId") DO UPDATE SET status='open',"lastUserMessageAt"=NOW(),"updatedAt"=NOW() RETURNING id`;
+      const threadId=Number((rows[0] as any).id); await sql`INSERT INTO support_messages ("threadId","senderUserId","senderRole",message) VALUES (${threadId},${user.id},'user',${message})`;
+      return sendJson(res,201,{success:true,threadId});
+    }
+    return sendJson(res,405,{success:false,message:'Método não permitido.'});
+  }catch(e:any){console.error('[support-chat]',e);return sendJson(res,Number(e?.statusCode||500),{success:false,message:e instanceof Error?e.message:'Erro no suporte.'});}
+}
+''')
+
+          # Route shared API.
+          p=Path('api/site-access.ts'); s=p.read_text()
+          if 'handleSupportChat' not in s:
+              s=s.replace('import { handleLegalConsents } from "../server/legal-consents.js";','import { handleLegalConsents } from "../server/legal-consents.js";\nimport { handleSupportChat } from "../server/support-chat.js";',1)
+              s=s.replace('  if(scope==="legal-consents")return handleLegalConsents(req,res);','  if(scope==="legal-consents")return handleLegalConsents(req,res);\n  if(scope==="support")return handleSupportChat(req,res);',1)
+              p.write_text(s)
+
+          # Subscriber support chat component inside Tutorial.
+          Path('client/src/components/SupportChat.tsx').write_text(r'''import { Button } from "@/components/ui/button";
+import { MessageCircle, Send, ShieldCheck } from "lucide-react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+
+type Msg={id:number;senderRole:'user'|'super_admin';message:string;createdAt:string;senderName?:string};
+export default function SupportChat(){
+  const [loading,setLoading]=useState(true); const [sending,setSending]=useState(false); const [text,setText]=useState(''); const [supportId,setSupportId]=useState(''); const [messages,setMessages]=useState<Msg[]>([]); const endRef=useRef<HTMLDivElement>(null);
+  const load=useCallback(async(silent=false)=>{try{const r=await fetch('/api/site-access?scope=support',{credentials:'include',cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d?.message||'Não foi possível abrir o suporte.');setSupportId(String(d.supportId||''));setMessages(Array.isArray(d.messages)?d.messages:[]);}catch(e){if(!silent)toast.error(e instanceof Error?e.message:'Erro ao abrir suporte.');}finally{if(!silent)setLoading(false)}},[]);
+  useEffect(()=>{load();const t=window.setInterval(()=>load(true),10000);return()=>window.clearInterval(t)},[load]);
+  useEffect(()=>{endRef.current?.scrollIntoView({behavior:'smooth'})},[messages.length]);
+  const send=async(e:FormEvent)=>{e.preventDefault();const message=text.trim();if(!message||sending)return;setSending(true);try{const r=await fetch('/api/site-access?scope=support',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({message})});const d=await r.json();if(!r.ok)throw new Error(d?.message||'Não foi possível enviar.');setText('');await load(true);}catch(e){toast.error(e instanceof Error?e.message:'Erro ao enviar mensagem.')}finally{setSending(false)}};
+  return <section id="suporte" className="rounded-3xl border bg-card shadow-sm overflow-hidden">
+    <div className="border-b bg-gradient-to-r from-primary/10 via-background to-cyan-500/10 p-5 sm:p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><div className="rounded-2xl bg-primary p-3 text-primary-foreground"><MessageCircle className="h-6 w-6"/></div><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Suporte Note Note</p><h2 className="text-xl font-bold">Fale com o suporte</h2><p className="text-sm text-muted-foreground">Envie sua dúvida. A mensagem chega diretamente ao painel do Super Admin.</p></div></div>{supportId?<div className="rounded-xl border bg-background px-4 py-2 text-right"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Seu ID de suporte</p><p className="font-mono text-lg font-bold tracking-widest">{supportId}</p><p className="text-[10px] text-muted-foreground">Gerado pelo sistema • não editável</p></div>:null}</div></div>
+    <div className="p-4 sm:p-6"><div className="h-72 overflow-y-auto rounded-2xl border bg-muted/20 p-3 space-y-3">{loading?<p className="text-sm text-muted-foreground">Carregando atendimento...</p>:messages.length===0?<div className="grid h-full place-items-center text-center"><div><ShieldCheck className="mx-auto h-8 w-8 text-primary"/><p className="mt-2 font-semibold">Como podemos ajudar?</p><p className="text-sm text-muted-foreground">Escreva sua primeira mensagem abaixo.</p></div></div>:messages.map(m=><div key={m.id} className={`flex ${m.senderRole==='user'?'justify-end':'justify-start'}`}><div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ${m.senderRole==='user'?'bg-primary text-primary-foreground':'border bg-background'}`}><p className="whitespace-pre-wrap">{m.message}</p><p className={`mt-1 text-[10px] ${m.senderRole==='user'?'text-primary-foreground/70':'text-muted-foreground'}`}>{m.senderRole==='user'?'Você':'Suporte'} • {new Date(m.createdAt).toLocaleString('pt-BR')}</p></div></div>)}<div ref={endRef}/></div>
+    <form onSubmit={send} className="mt-3 flex gap-2"><textarea value={text} onChange={e=>setText(e.target.value)} maxLength={5000} rows={2} placeholder="Digite sua mensagem para o suporte..." className="min-h-11 flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"/><Button type="submit" disabled={sending||!text.trim()} className="self-stretch rounded-xl"><Send className="mr-2 h-4 w-4"/>{sending?'Enviando...':'Enviar'}</Button></form></div>
+  </section>;
+}
+''')
+
+          # Add SupportChat to tutorial page.
+          p=Path('client/src/pages/Tutorial.tsx'); s=p.read_text()
+          if 'SupportChat' not in s:
+              s=s.replace('import DashboardLayout from "@/components/DashboardLayout";','import DashboardLayout from "@/components/DashboardLayout";\nimport SupportChat from "@/components/SupportChat";',1)
+              marker='''        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">'''
+              s=s.replace(marker,'        <SupportChat />\n\n'+marker,1)
+              p.write_text(s)
+
+          # Super Admin support inbox.
+          Path('client/src/pages/admin/Suporte.tsx').write_text(r'''import DashboardLayout from "@/components/DashboardLayout";
+import { Button } from "@/components/ui/button";
+import { Circle, MessageCircle, RefreshCw, Send, UserRound } from "lucide-react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+
+type Thread={id:number;status:string;lastUserMessageAt:string;name?:string;username?:string;email?:string;supportId?:string;accountActive:boolean;sessionActive:boolean;unreadCount:number;lastMessage?:string};
+type Msg={id:number;senderRole:'user'|'super_admin';message:string;createdAt:string;senderName?:string};
+export default function AdminSuporte(){
+  const [threads,setThreads]=useState<Thread[]>([]);const [selected,setSelected]=useState<number|null>(null);const [detail,setDetail]=useState<any>(null);const [messages,setMessages]=useState<Msg[]>([]);const [reply,setReply]=useState('');const [sending,setSending]=useState(false);const endRef=useRef<HTMLDivElement>(null);
+  const loadList=useCallback(async(silent=false)=>{try{const r=await fetch('/api/site-access?scope=support&action=list',{credentials:'include',cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d?.message||'Erro ao carregar suporte.');setThreads(Array.isArray(d.threads)?d.threads:[]);setSelected(v=>v??(d.threads?.[0]?.id?Number(d.threads[0].id):null));}catch(e){if(!silent)toast.error(e instanceof Error?e.message:'Erro no suporte.')}},[]);
+  const loadThread=useCallback(async(id:number,silent=false)=>{try{const r=await fetch(`/api/site-access?scope=support&action=thread&threadId=${id}`,{credentials:'include',cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d?.message||'Erro ao abrir atendimento.');setDetail(d.thread);setMessages(Array.isArray(d.messages)?d.messages:[]);}catch(e){if(!silent)toast.error(e instanceof Error?e.message:'Erro ao abrir atendimento.')}},[]);
+  useEffect(()=>{loadList();const t=window.setInterval(()=>loadList(true),10000);return()=>window.clearInterval(t)},[loadList]);
+  useEffect(()=>{if(selected)loadThread(selected);else{setDetail(null);setMessages([])}},[selected,loadThread]);
+  useEffect(()=>{if(!selected)return;const t=window.setInterval(()=>loadThread(selected,true),10000);return()=>window.clearInterval(t)},[selected,loadThread]);
+  useEffect(()=>{endRef.current?.scrollIntoView({behavior:'smooth'})},[messages.length]);
+  const send=async(e:FormEvent)=>{e.preventDefault();if(!selected||!reply.trim()||sending)return;setSending(true);try{const r=await fetch('/api/site-access?scope=support',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({action:'reply',threadId:selected,message:reply.trim()})});const d=await r.json();if(!r.ok)throw new Error(d?.message||'Erro ao responder.');setReply('');await Promise.all([loadThread(selected,true),loadList(true)]);}catch(e){toast.error(e instanceof Error?e.message:'Erro ao responder.')}finally{setSending(false)}};
+  const toggle=async()=>{if(!selected||!detail)return;const action=detail.status==='closed'?'reopen':'close';const r=await fetch('/api/site-access?scope=support',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({action,threadId:selected})});const d=await r.json();if(!r.ok)return toast.error(d?.message||'Erro ao alterar atendimento.');await Promise.all([loadThread(selected,true),loadList(true)]);};
+  return <DashboardLayout><div className="space-y-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Super Admin</p><h1 className="text-2xl font-bold">Suporte aos assinantes</h1><p className="text-sm text-muted-foreground">Mensagens organizadas pela chegada mais recente do cliente.</p></div><Button variant="outline" onClick={()=>loadList()}><RefreshCw className="mr-2 h-4 w-4"/>Atualizar</Button></div>
+  <div className="grid min-h-[620px] gap-4 lg:grid-cols-[360px_1fr]"><section className="overflow-hidden rounded-2xl border bg-card"><div className="border-b p-3 font-semibold">Caixa de entrada ({threads.length})</div><div className="max-h-[680px] overflow-y-auto">{threads.length===0?<p className="p-5 text-sm text-muted-foreground">Nenhuma mensagem recebida.</p>:threads.map(t=><button key={t.id} onClick={()=>setSelected(Number(t.id))} className={`w-full border-b p-4 text-left transition hover:bg-muted/50 ${selected===Number(t.id)?'bg-primary/8':''}`}><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-semibold">{t.name||t.username||'Assinante'}</p><p className="font-mono text-xs text-muted-foreground">ID {t.supportId||'—'}</p></div>{Number(t.unreadCount)>0?<span className="rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-primary-foreground">{t.unreadCount}</span>:null}</div><p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{t.lastMessage||'Sem mensagem'}</p><div className="mt-2 flex flex-wrap gap-2 text-[10px]"><span className={`rounded-full px-2 py-1 ${t.accountActive?'bg-emerald-500/10 text-emerald-700':'bg-destructive/10 text-destructive'}`}>Conta {t.accountActive?'ativa':'inativa'}</span><span className={`rounded-full px-2 py-1 ${t.sessionActive?'bg-emerald-500/10 text-emerald-700':'bg-muted text-muted-foreground'}`}>{t.sessionActive?'Sessão ativa':'Offline'}</span></div><p className="mt-2 text-[10px] text-muted-foreground">Chegada: {new Date(t.lastUserMessageAt).toLocaleString('pt-BR')}</p></button>)}</div></section>
+  <section className="flex min-h-[620px] flex-col overflow-hidden rounded-2xl border bg-card">{!detail?<div className="grid flex-1 place-items-center text-center text-muted-foreground"><div><MessageCircle className="mx-auto h-10 w-10"/><p className="mt-2">Selecione um atendimento.</p></div></div>:<><div className="border-b p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-center gap-3"><div className="rounded-full bg-primary/10 p-2"><UserRound className="h-5 w-5 text-primary"/></div><div><h2 className="font-bold">{detail.name||detail.username}</h2><p className="text-xs text-muted-foreground">{detail.email}</p><p className="font-mono text-xs font-bold">ID {detail.supportId||'—'}</p></div></div><div className="flex items-center gap-2"><span className="flex items-center gap-1 text-xs"><Circle className={`h-2.5 w-2.5 ${detail.sessionActive?'fill-emerald-500 text-emerald-500':'fill-muted text-muted'}`}/>{detail.sessionActive?'Sessão ativa':'Offline'}</span><Button size="sm" variant="outline" onClick={toggle}>{detail.status==='closed'?'Reabrir':'Encerrar'}</Button></div></div></div><div className="flex-1 overflow-y-auto bg-muted/15 p-4 space-y-3">{messages.map(m=><div key={m.id} className={`flex ${m.senderRole==='super_admin'?'justify-end':'justify-start'}`}><div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ${m.senderRole==='super_admin'?'bg-primary text-primary-foreground':'border bg-background'}`}><p className="whitespace-pre-wrap">{m.message}</p><p className={`mt-1 text-[10px] ${m.senderRole==='super_admin'?'text-primary-foreground/70':'text-muted-foreground'}`}>{m.senderRole==='super_admin'?'Super Admin':detail.name||'Cliente'} • {new Date(m.createdAt).toLocaleString('pt-BR')}</p></div></div>)}<div ref={endRef}/></div><form onSubmit={send} className="border-t p-3 flex gap-2"><textarea value={reply} onChange={e=>setReply(e.target.value)} maxLength={5000} rows={2} placeholder="Responder ao assinante..." className="flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"/><Button type="submit" disabled={sending||!reply.trim()}><Send className="mr-2 h-4 w-4"/>{sending?'Enviando...':'Responder'}</Button></form></>}</section></div></div></DashboardLayout>;
+}
+''')
+
+          # App route.
+          p=Path('client/src/App.tsx'); s=p.read_text()
+          if 'AdminSuporte' not in s:
+              s=s.replace('const AdminMarketing = lazy(() => import("./pages/admin/Marketing"));','const AdminMarketing = lazy(() => import("./pages/admin/Marketing"));\nconst AdminSuporte = lazy(() => import("./pages/admin/Suporte"));',1)
+              s=s.replace('<Route path={"/admin/marketing"} component={AdminMarketing} />','<Route path={"/admin/marketing"} component={AdminMarketing} />\n      <Route path={"/admin/suporte"} component={AdminSuporte} />',1)
+              p.write_text(s)
+
+          # Admin navigation.
+          p=Path('client/src/components/DashboardLayout.tsx'); s=p.read_text()
+          if 'MessageCircle' not in s.split('} from "lucide-react";')[0]:
+              s=s.replace('FileText, KeyRound, LayoutDashboard, LogOut, Mail, Menu, MoreHorizontal, Package, Settings, Shield,','FileText, KeyRound, LayoutDashboard, LogOut, Mail, Menu, MessageCircle, MoreHorizontal, Package, Settings, Shield,',1)
+          if 'href: "/admin/suporte"' not in s:
+              s=s.replace('{ name: "Marketing", href: "/admin/marketing", icon: Mail, show: isSuperAdmin },','{ name: "Marketing", href: "/admin/marketing", icon: Mail, show: isSuperAdmin },\n    { name: "Suporte", href: "/admin/suporte", icon: MessageCircle, show: isSuperAdmin },',1)
+          p.write_text(s)
+          PY
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add api/auth/_shared.ts api/auth/register-commercial.ts api/site-access.ts server/support-chat.ts client/src/components/SupportChat.tsx client/src/pages/Tutorial.tsx client/src/pages/admin/Suporte.tsx client/src/App.tsx client/src/components/DashboardLayout.tsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "feat: add subscriber IDs and support chat [skip ci]"
+          git push origin HEAD:main
