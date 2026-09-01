@@ -1,12 +1,14 @@
 import {
   ArrowRight,
   BarChart3,
+  Building2,
   CalendarClock,
   CarFront,
   CheckCircle2,
   ClipboardList,
   Cloud,
   HandCoins,
+  KeyRound,
   Package,
   PlayCircle,
   ShieldCheck,
@@ -43,6 +45,18 @@ const features = [
     iconClass: "bg-orange-50 text-orange-600",
   },
   {
+    title: "Imóveis",
+    description: "Cadastre casas, apartamentos, terrenos e lojas, com endereço, área, cômodos, garagem, preço e outras informações.",
+    icon: Building2,
+    iconClass: "bg-indigo-50 text-indigo-600",
+  },
+  {
+    title: "Aluguéis",
+    description: "Selecione o imóvel e o cliente, defina aluguel, vencimento e acompanhe os recebimentos mensais.",
+    icon: KeyRound,
+    iconClass: "bg-teal-50 text-teal-600",
+  },
+  {
     title: "Pagamentos",
     description: "Registre pagamentos recebidos e acompanhe o que já foi quitado.",
     icon: WalletCards,
@@ -50,7 +64,7 @@ const features = [
   },
   {
     title: "Financiamentos",
-    description: "Acompanhe vendas financiadas, parcelas, saldos e vencimentos.",
+    description: "Acompanhe vendas financiadas de veículos, produtos e imóveis, com parcelas, saldos e vencimentos.",
     icon: ClipboardList,
     iconClass: "bg-rose-50 text-rose-600",
   },
@@ -62,7 +76,7 @@ const features = [
   },
   {
     title: "Caixa",
-    description: "Tenha controle das entradas, saídas e do dinheiro disponível.",
+    description: "Tenha controle das entradas, saídas e do dinheiro disponível em toda a operação.",
     icon: Wallet,
     iconClass: "bg-amber-50 text-amber-600",
   },
@@ -77,7 +91,7 @@ const features = [
 const benefits = [
   {
     title: "Organize seus rolos e negociações",
-    description: "Tenha clientes, vendas, empréstimos e acordos registrados e fáceis de encontrar.",
+    description: "Tenha clientes, vendas, empréstimos, imóveis e acordos registrados e fáceis de encontrar.",
     icon: CheckCircle2,
   },
   {
@@ -91,9 +105,9 @@ const benefits = [
     icon: HandCoins,
   },
   {
-    title: "Entenda o que está em atraso",
-    description: "Acompanhe vencimentos e tenha uma visão clara das contas a receber.",
-    icon: WalletCards,
+    title: "Administre imóveis e aluguéis",
+    description: "Controle imóveis disponíveis, alugados, financiados, vendidos e os recebimentos de cada contrato.",
+    icon: Building2,
   },
   {
     title: "Tenha visão do caixa",
@@ -123,7 +137,7 @@ function DemoPanel() {
               <div className="mb-3 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">
                 Painel
               </div>
-              {["Clientes", "Empréstimos", "Veículos", "Produtos", "Pagamentos", "Financiamentos", "Contas a receber", "Caixa", "Relatórios"].map(item => (
+              {["Clientes", "Empréstimos", "Veículos", "Produtos", "Imóveis", "Aluguéis", "Financiamentos", "Caixa", "Relatórios"].map(item => (
                 <div key={item} className="px-2 py-1.5 text-[10px] font-medium text-slate-500 sm:text-[11px]">
                   {item}
                 </div>
@@ -144,7 +158,7 @@ function DemoPanel() {
               <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                 {[
                   ["A receber", "R$ 48.750", "24 parcelas"],
-                  ["Atrasado", "R$ 6.320", "7 parcelas"],
+                  ["Aluguéis", "R$ 8.420", "no mês"],
                   ["Recebido", "R$ 22.180", "no mês"],
                   ["Caixa", "R$ 12.450", "disponível"],
                 ].map(([label, value, note]) => (
@@ -164,9 +178,9 @@ function DemoPanel() {
                   </div>
                   {[
                     ["Carlos Silva", "Empréstimo", "R$ 850"],
-                    ["Maria Oliveira", "Financiamento", "R$ 630"],
-                    ["João Santos", "Venda financiada", "R$ 1.250"],
-                    ["Ana Paula", "Empréstimo", "R$ 980"],
+                    ["Maria Oliveira", "Aluguel", "R$ 1.800"],
+                    ["João Santos", "Financiamento de imóvel", "R$ 2.250"],
+                    ["Ana Paula", "Venda financiada", "R$ 980"],
                   ].map(([name, type, value]) => (
                     <div key={name} className="flex items-center justify-between border-t border-slate-50 py-2 first:border-0">
                       <div>
@@ -186,7 +200,7 @@ function DemoPanel() {
                   <div className="space-y-1.5 text-[9px] text-slate-500">
                     <div className="flex justify-between"><span>Recebido</span><strong className="text-slate-700">R$ 22.180</strong></div>
                     <div className="flex justify-between"><span>A receber</span><strong className="text-slate-700">R$ 48.750</strong></div>
-                    <div className="flex justify-between"><span>Atrasado</span><strong className="text-slate-700">R$ 6.320</strong></div>
+                    <div className="flex justify-between"><span>Aluguéis</span><strong className="text-slate-700">R$ 8.420</strong></div>
                   </div>
                 </div>
               </div>
@@ -204,15 +218,12 @@ export default function Home() {
       <header className="sticky top-0 z-50 border-b border-blue-100/70 bg-white/95 backdrop-blur-xl">
         <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between px-5 lg:px-8">
           <a href="#inicio" className="flex items-center">
-            <img
-              src="/brand/note-note-logo-official.png"
-              alt="Note Note"
-              className="h-11 w-auto max-w-[190px] object-contain"
-            />
+            <img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-11 w-auto max-w-[190px] object-contain" />
           </a>
 
           <nav className="hidden items-center gap-8 text-sm font-semibold text-slate-700 md:flex">
             <a href="#recursos" className="transition hover:text-blue-600">Recursos</a>
+            <a href="#imoveis" className="transition hover:text-blue-600">Imóveis</a>
             <a href="#funcionalidades" className="transition hover:text-blue-600">Funcionalidades</a>
             <a href="#sobre" className="transition hover:text-blue-600">Sobre</a>
             <Link href="/planos"><a className="transition hover:text-blue-600">Planos</a></Link>
@@ -221,8 +232,7 @@ export default function Home() {
 
           <Link href="/login">
             <a className="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700">
-              Login
-              <ArrowRight className="h-4 w-4" />
+              Login <ArrowRight className="h-4 w-4" />
             </a>
           </Link>
         </div>
@@ -237,7 +247,7 @@ export default function Home() {
             <div>
               <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white/80 px-4 py-2 text-sm font-semibold text-blue-900 shadow-sm">
                 <span className="text-blue-600">★</span>
-                Feito para quem vende, empresta e negocia no dia a dia
+                Feito para quem vende, empresta, aluga e negocia no dia a dia
               </div>
 
               <h1 className="max-w-3xl text-4xl font-black leading-[1.04] tracking-tight text-slate-950 sm:text-5xl lg:text-[64px]">
@@ -245,23 +255,12 @@ export default function Home() {
               </h1>
 
               <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-                O Note Note ajuda quem faz seus rolos na rua a controlar clientes, empréstimos, veículos, produtos, pagamentos, financiamentos, contas a receber, caixa e relatórios sem depender de caderno ou planilha espalhada.
+                O Note Note reúne clientes, empréstimos, veículos, produtos, imóveis, aluguéis, vendas financiadas, pagamentos, contas a receber, caixa e relatórios em uma única plataforma.
               </p>
 
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <Link href="/planos">
-                  <a className="inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-blue-600 px-7 text-base font-bold text-white shadow-xl shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700">
-                    Ver planos
-                    <ArrowRight className="h-5 w-5" />
-                  </a>
-                </Link>
-                <a
-                  href="#recursos"
-                  className="inline-flex h-14 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-7 text-base font-bold text-blue-700 shadow-sm transition hover:bg-blue-50"
-                >
-                  <PlayCircle className="h-5 w-5" />
-                  Ver como funciona
-                </a>
+                <Link href="/planos"><a className="inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-blue-600 px-7 text-base font-bold text-white shadow-xl shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700">Ver planos <ArrowRight className="h-5 w-5" /></a></Link>
+                <a href="#recursos" className="inline-flex h-14 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-7 text-base font-bold text-blue-700 shadow-sm transition hover:bg-blue-50"><PlayCircle className="h-5 w-5" />Ver como funciona</a>
               </div>
 
               <div className="mt-9 grid gap-3 text-sm font-medium text-slate-600 sm:grid-cols-3">
@@ -270,7 +269,6 @@ export default function Home() {
                 <div className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-blue-600" /> Simples de usar</div>
               </div>
             </div>
-
             <DemoPanel />
           </div>
         </section>
@@ -279,99 +277,69 @@ export default function Home() {
           <div className="mx-auto max-w-7xl px-5 lg:px-8">
             <div className="mx-auto max-w-3xl text-center">
               <p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-600">Seu negócio organizado</p>
-              <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
-                Tudo o que você precisa para acompanhar seus negócios
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-600">
-                Uma visão simples do que você vendeu, emprestou, financiou, recebeu e ainda tem para receber.
-              </p>
+              <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Tudo o que você precisa para acompanhar seus negócios</h2>
+              <p className="mt-4 text-base leading-7 text-slate-600">Uma visão simples do que você vendeu, emprestou, alugou, financiou, recebeu e ainda tem para receber.</p>
             </div>
 
             <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {features.map(feature => {
-                const Icon = feature.icon;
-                return (
-                  <article key={feature.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg">
-                    <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${feature.iconClass}`}>
-                      <Icon className="h-6 w-6" />
-                    </div>
-                    <h3 className="mt-4 text-base font-extrabold text-slate-900">{feature.title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-500">{feature.description}</p>
-                  </article>
-                );
-              })}
+              {features.map(feature => { const Icon = feature.icon; return (
+                <article key={feature.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg">
+                  <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${feature.iconClass}`}><Icon className="h-6 w-6" /></div>
+                  <h3 className="mt-4 text-base font-extrabold text-slate-900">{feature.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">{feature.description}</p>
+                </article>
+              );})}
             </div>
           </div>
         </section>
 
-        <section id="funcionalidades" className="scroll-mt-24 border-y border-blue-100 bg-slate-50/70 py-20">
+        <section id="imoveis" className="scroll-mt-24 border-y border-blue-100 bg-gradient-to-br from-slate-50 to-blue-50/60 py-20">
           <div className="mx-auto max-w-7xl px-5 lg:px-8">
-            <div className="text-center">
-              <p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-600">Na rotina de verdade</p>
-              <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Mais controle. Menos dor de cabeça.</h2>
-            </div>
+            <div className="grid items-center gap-10 lg:grid-cols-[.85fr_1.15fr]">
+              <div>
+                <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/20"><Building2 className="h-7 w-7" /></div>
+                <p className="mt-6 text-sm font-bold uppercase tracking-[0.18em] text-blue-600">Gestão de imóveis</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Venda, financie e alugue imóveis dentro do Note Note.</h2>
+                <p className="mt-5 text-base leading-8 text-slate-600">Cadastre o patrimônio, acompanhe o cliente, registre contratos e mantenha os recebimentos ligados ao seu caixa.</p>
+              </div>
 
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><Building2 className="h-6 w-6 text-blue-600"/><h3 className="mt-4 font-extrabold text-slate-900">Cadastro completo</h3><p className="mt-2 text-sm leading-6 text-slate-500">Casa, apartamento, terreno ou loja, com endereço, tamanho, cômodos, quartos, salas, cozinha, banheiros, garagem, preço e observações.</p></div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><KeyRound className="h-6 w-6 text-emerald-600"/><h3 className="mt-4 font-extrabold text-slate-900">Controle de aluguéis</h3><p className="mt-2 text-sm leading-6 text-slate-500">Vincule imóvel e cliente, defina valor e dia de pagamento e acompanhe mensalmente o que foi pago, pendente ou atrasado.</p></div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><ClipboardList className="h-6 w-6 text-violet-600"/><h3 className="mt-4 font-extrabold text-slate-900">Venda e financiamento</h3><p className="mt-2 text-sm leading-6 text-slate-500">Venda à vista ou financie casas, apartamentos, terrenos e lojas, com entrada, juros, parcelas, saldo e acompanhamento do contrato.</p></div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><Wallet className="h-6 w-6 text-amber-600"/><h3 className="mt-4 font-extrabold text-slate-900">Tudo movimenta o caixa</h3><p className="mt-2 text-sm leading-6 text-slate-500">Recebimentos de aluguel, entradas, parcelas de financiamento e vendas de imóveis entram no controle financeiro da operação.</p></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="funcionalidades" className="scroll-mt-24 bg-white py-20">
+          <div className="mx-auto max-w-7xl px-5 lg:px-8">
+            <div className="text-center"><p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-600">Na rotina de verdade</p><h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Mais controle. Menos dor de cabeça.</h2></div>
             <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-5">
-              {benefits.map(benefit => {
-                const Icon = benefit.icon;
-                return (
-                  <div key={benefit.title} className="text-center lg:text-left">
-                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-blue-700 lg:mx-0">
-                      <Icon className="h-6 w-6" />
-                    </div>
-                    <h3 className="mt-4 text-sm font-extrabold leading-5 text-slate-900">{benefit.title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-500">{benefit.description}</p>
-                  </div>
-                );
-              })}
+              {benefits.map(benefit => { const Icon = benefit.icon; return (
+                <div key={benefit.title} className="text-center lg:text-left"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-blue-700 lg:mx-0"><Icon className="h-6 w-6" /></div><h3 className="mt-4 text-sm font-extrabold leading-5 text-slate-900">{benefit.title}</h3><p className="mt-2 text-sm leading-6 text-slate-500">{benefit.description}</p></div>
+              );})}
             </div>
           </div>
         </section>
 
-        <section id="sobre" className="scroll-mt-24 bg-white py-20">
+        <section id="sobre" className="scroll-mt-24 border-t border-blue-100 bg-slate-50/70 py-20">
           <div className="mx-auto grid max-w-7xl gap-12 px-5 lg:grid-cols-2 lg:px-8">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-600">Para quem é o Note Note?</p>
-              <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
-                Para quem trabalha fazendo negócio e precisa saber onde o dinheiro está.
-              </h2>
-            </div>
-            <div className="space-y-5 text-base leading-8 text-slate-600">
-              <p>
-                O Note Note foi pensado para quem vende produtos, negocia veículos, faz empréstimos pessoais ou trabalha com vendas parceladas e precisa enxergar quanto tem investido, quanto já recebeu e quanto ainda falta voltar.
-              </p>
-              <p>
-                Em vez de espalhar informação em caderno, conversa de WhatsApp e planilhas diferentes, você concentra a operação em um único sistema e acompanha cada cliente e negociação de forma organizada.
-              </p>
-            </div>
+            <div><p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-600">Para quem é o Note Note?</p><h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Para quem trabalha fazendo negócio e precisa saber onde o dinheiro está.</h2></div>
+            <div className="space-y-5 text-base leading-8 text-slate-600"><p>O Note Note foi pensado para quem vende produtos, negocia veículos e imóveis, administra aluguéis, faz empréstimos pessoais ou trabalha com vendas parceladas e precisa enxergar quanto tem investido, quanto já recebeu e quanto ainda falta voltar.</p><p>Em vez de espalhar informação em caderno, conversa de WhatsApp e planilhas diferentes, você concentra a operação em um único sistema e acompanha cada cliente e negociação de forma organizada.</p></div>
           </div>
         </section>
 
-        <section id="suporte" className="scroll-mt-24 px-5 pb-20 lg:px-8">
+        <section id="suporte" className="scroll-mt-24 px-5 py-20 lg:px-8">
           <div className="mx-auto max-w-7xl overflow-hidden rounded-[2rem] bg-gradient-to-r from-blue-700 to-blue-600 px-7 py-10 text-white shadow-2xl shadow-blue-700/20 sm:px-10 lg:flex lg:items-center lg:justify-between lg:px-14">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-100">Escolha seu acesso</p>
-              <h2 className="mt-2 text-3xl font-black">Comece com Basic ou Plus.</h2>
-              <p className="mt-3 max-w-2xl text-blue-100">
-                Veja os planos do Note Note e escolha a opção mensal que combina com você.
-              </p>
-            </div>
-            <Link href="/planos">
-              <a className="mt-7 inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-white px-7 font-extrabold text-blue-700 shadow-lg transition hover:-translate-y-0.5 lg:mt-0">
-                Ver planos
-                <ArrowRight className="h-5 w-5" />
-              </a>
-            </Link>
+            <div><p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-100">Escolha seu acesso</p><h2 className="mt-2 text-3xl font-black">Comece com Basic ou Plus.</h2><p className="mt-3 max-w-2xl text-blue-100">Controle clientes, vendas, imóveis, aluguéis, financiamentos e caixa no mesmo sistema.</p></div>
+            <Link href="/planos"><a className="mt-7 inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-white px-7 font-extrabold text-blue-700 shadow-lg transition hover:-translate-y-0.5 lg:mt-0">Ver planos <ArrowRight className="h-5 w-5" /></a></Link>
           </div>
         </section>
       </main>
 
-      <footer className="border-t border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-8 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between lg:px-8">
-          <img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-9 w-auto object-contain" />
-          <p>Note Note — gestão simples para quem vende, empresta e negocia.</p>
-        </div>
-      </footer>
+      <footer className="border-t border-slate-200 bg-white"><div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-8 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between lg:px-8"><img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-9 w-auto object-contain" /><p>Note Note — gestão simples para quem vende, empresta, aluga e negocia.</p></div></footer>
     </div>
   );
 }
