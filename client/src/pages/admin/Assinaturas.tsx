@@ -380,7 +380,7 @@ export default function AdminAssinaturas() {
                             {paymentBadge(account)}
                             <Badge variant={account.plan === "plus" ? "default" : "secondary"}>{account.plan === "plus" ? "Plus" : "Basic"}</Badge>
                           </div>
-                          <p className="mt-1 text-xs text-muted-foreground">@{account.username} · {lifecycleLabel(account)}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">@{account.username} · <span className="font-mono font-semibold text-primary">ID {account.supportId || "—"}</span> · {lifecycleLabel(account)}</p>
                           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
                             <span className="flex items-center gap-1"><Mail className="h-3.5 w-3.5" />{account.email || "—"}</span>
                             <span className="flex items-center gap-1"><MessageCircle className="h-3.5 w-3.5" />{account.whatsapp || "—"}</span>
