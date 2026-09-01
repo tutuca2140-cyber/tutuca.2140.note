@@ -23,6 +23,47 @@ export function ensureAuthUserColumns() {
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canManageDatabases" boolean DEFAULT false NOT NULL`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canDeleteCashFlow" boolean DEFAULT false NOT NULL`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp varchar(20)`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "supportId" varchar(9)`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS users_support_id_uidx ON users ("supportId") WHERE "supportId" IS NOT NULL`;
+    await sql`
+      CREATE OR REPLACE FUNCTION assign_commercial_support_id()
+      RETURNS trigger AS $$
+      DECLARE candidate text;
+      BEGIN
+        IF NEW."loginMethod" = 'commercial_signup' AND NEW."supportId" IS NULL THEN
+          LOOP
+            candidate := (100000000 + floor(random() * 900000000)::bigint)::text;
+            EXIT WHEN NOT EXISTS (SELECT 1 FROM users WHERE "supportId" = candidate);
+          END LOOP;
+          NEW."supportId" := candidate;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `;
+    await sql`DROP TRIGGER IF EXISTS assign_commercial_support_id_trigger ON users`;
+    await sql`
+      CREATE TRIGGER assign_commercial_support_id_trigger
+      BEFORE INSERT ON users
+      FOR EACH ROW EXECUTE FUNCTION assign_commercial_support_id()
+    `;
+    await sql`
+      DO $$
+      DECLARE rec RECORD; candidate text;
+      BEGIN
+        FOR rec IN SELECT id FROM users WHERE "loginMethod"='commercial_signup' AND "supportId" IS NULL LOOP
+          LOOP
+            candidate := (100000000 + floor(random() * 900000000)::bigint)::text;
+            BEGIN
+              UPDATE users SET "supportId"=candidate WHERE id=rec.id;
+              EXIT;
+            EXCEPTION WHEN unique_violation THEN
+              NULL;
+            END;
+          END LOOP;
+        END LOOP;
+      END $$
+    `;
     await sql`CREATE INDEX IF NOT EXISTS users_account_owner_idx ON users ("accountOwnerId")`;
     await sql`
       CREATE TABLE IF NOT EXISTS password_reset_tokens (
