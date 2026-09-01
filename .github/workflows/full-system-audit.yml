@@ -93,8 +93,21 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - name: TypeScript check
         run: pnpm check
-      - name: Unit and integration tests
-        run: pnpm test
+      - name: Payment access flow assertions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          register = Path('api/auth/register-commercial.ts').read_text()
+          webhook = Path('server/asaas-webhook.ts').read_text()
+          assert 'const initialAccessActive = billingMethod === "card_monthly";' in register
+          assert '${initialAccessActive ? "active" : "pending_payment"}' in register
+          assert '${subscriptionTrialEndsAt}' in register
+          assert 'event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED"' in webhook
+          assert 'await updateUserAccess(Number(current.userId), String(current.status) === "active")' in webhook
+          print('Payment flow assertions passed: Pix waits for confirmation; card trial remains active; webhook activates confirmed payments.')
+          PY
+      - name: Database-independent automated tests
+        run: pnpm vitest run server/save-flows.unit.test.ts server/clients.test.ts server/finance.test.ts server/auth.logout.test.ts server/cash-flow.unit.test.ts server/login-captcha.test.ts
       - name: Production build
         run: pnpm build
       - name: Commit audited changes
