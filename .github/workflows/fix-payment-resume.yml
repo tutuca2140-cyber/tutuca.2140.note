@@ -42,7 +42,7 @@ jobs:
           if marker not in t: raise SystemExit('Login render marker not found')
           p.write_text(t.replace(marker,replacement,1))
           PY
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
       - run: pnpm check
       - run: pnpm build
       - name: Commit fixes
