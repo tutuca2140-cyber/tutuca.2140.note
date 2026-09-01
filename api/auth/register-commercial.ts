@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import { ensureAuthUserColumns, getSql, readJsonBody, sendJson } from "./_shared.js";
 import { verifyLoginCaptcha } from "../../shared/login-captcha.js";
+import { recordLegalConsent } from "../../server/legal-consents.js";
 
 const ASAAS_API = "https://api.asaas.com/v3";
 const RETURN_BASE = "https://notenote.com.br";
@@ -299,6 +300,10 @@ export default async function handler(req: any, res: any) {
     const billingMethodInput = String(body?.billingMethod ?? "card_monthly").trim().toLowerCase();
     const captchaToken = String(body?.captchaToken ?? "");
     const captchaAnswer = String(body?.captchaAnswer ?? "");
+    const termsAccepted = body?.termsAccepted === true;
+    const privacyAccepted = body?.privacyAccepted === true;
+    const trialCancellationAccepted = body?.trialCancellationAccepted === true;
+    const marketingOptIn = body?.marketingOptIn === true;
 
     if (!isCommercialPlan(plan)) return sendJson(res, 400, { success: false, message: "Escolha um plano Basic ou Plus antes de se cadastrar." });
     if (!isBillingMethod(billingMethodInput)) return sendJson(res, 400, { success: false, message: "Escolha pagamento mensal no cartão ou anual no Pix." });
@@ -309,6 +314,7 @@ export default async function handler(req: any, res: any) {
     if (!isValidCommercialPassword(password)) return sendJson(res, 400, { success: false, message: "A senha deve ter no mínimo 8 caracteres, pelo menos uma letra maiúscula e pelo menos um número." });
     if (!isValidBrazilWhatsapp(whatsappInput)) return sendJson(res, 400, { success: false, message: "Informe um WhatsApp brasileiro válido com DDD e número iniciado por 9." });
     if (billingMethod === "pix_annual" && !isValidCpf(cpf)) return sendJson(res, 400, { success: false, message: "Informe um CPF válido para gerar o Pix do Asaas." });
+    if (!termsAccepted || !privacyAccepted || !trialCancellationAccepted) return sendJson(res, 400, { success: false, message: "Para contratar o Note Note, aceite os Termos de Uso, a Política de Privacidade e as condições do teste gratuito/cancelamento." });
     if (!verifyLoginCaptcha(captchaToken, captchaAnswer)) return sendJson(res, 400, { success: false, message: "Confirme corretamente que você não é um robô." });
 
     await ensureAuthUserColumns();
@@ -347,6 +353,14 @@ export default async function handler(req: any, res: any) {
       )
     `;
 
+    const forwarded = String(req?.headers?.["x-forwarded-for"] ?? "");
+    const ipAddress = (forwarded.split(",")[0]?.trim() || String(req?.socket?.remoteAddress ?? "")).slice(0,120) || null;
+    const userAgent = String(req?.headers?.["user-agent"] ?? "").slice(0,2000) || null;
+    await recordLegalConsent({
+      userId:Number(user.id), email:String(user.email), username:String(user.username), name:String(user.name), plan,
+      billingMethod, termsAccepted, privacyAccepted, trialCancellationAccepted, marketingOptIn, ipAddress, userAgent,
+    });
+
     if (billingMethod === "pix_annual") {
       const pix = await createAsaasPix({
         userId: Number(user.id), name: String(user.name), email: String(user.email), whatsapp: String(user.whatsapp), cpf, plan, trialEndsAt,
@@ -365,7 +379,7 @@ export default async function handler(req: any, res: any) {
         registration: {
           name: user.name, username: user.username, email: user.email, whatsapp: user.whatsapp,
           plan, billingMethod, priceCents: selectedPrice, databaseLimit: PLAN_DATABASE_LIMITS[plan],
-          status: "active", trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString(),
+          status: "active", trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString(), marketingOptIn,
         },
         subscription: {
           provider: "asaas", providerStatus: pix.status, checkoutUrl: pix.checkoutUrl,
@@ -389,7 +403,7 @@ export default async function handler(req: any, res: any) {
       registration: {
         name: user.name, username: user.username, email: user.email, whatsapp: user.whatsapp,
         plan, billingMethod, priceCents: selectedPrice, databaseLimit: PLAN_DATABASE_LIMITS[plan],
-        status: "active", trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString(),
+        status: "active", trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString(), marketingOptIn,
       },
       subscription: {
         provider: "asaas", providerCheckoutId: checkout.checkoutId,
