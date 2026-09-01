@@ -126,6 +126,7 @@ async function notifyOwner(payload) {
 }
 
 // server/_core/trpc.ts
+import { neon } from "@neondatabase/serverless";
 import { initTRPC, TRPCError as TRPCError2 } from "@trpc/server";
 import superjson from "superjson";
 var t = initTRPC.context().create({
@@ -133,10 +134,50 @@ var t = initTRPC.context().create({
 });
 var router = t.router;
 var publicProcedure = t.procedure;
+var paymentStateCache = /* @__PURE__ */ new Map();
+async function getPaymentState(userId) {
+  const cached = paymentStateCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    return { commercial: false, active: true, status: null };
+  }
+  const sql2 = neon(databaseUrl);
+  const rows = await sql2`
+    SELECT
+      u."loginMethod",
+      COALESCE(owner_sub.status, parent_sub.status) AS status
+    FROM users u
+    LEFT JOIN commercial_subscriptions owner_sub
+      ON owner_sub."userId" = u.id
+    LEFT JOIN commercial_subscriptions parent_sub
+      ON parent_sub."userId" = u."accountOwnerId"
+    WHERE u.id = ${userId}
+    LIMIT 1
+  `;
+  const row = rows[0];
+  const loginMethod = String(row?.loginMethod || "");
+  const commercial = loginMethod === "commercial_signup" || loginMethod === "commercial_subuser";
+  const status = row?.status == null ? null : String(row.status);
+  const active = !commercial || status === "active" || status === "paid";
+  const value = { commercial, active, status };
+  paymentStateCache.set(userId, { expiresAt: Date.now() + 5e3, value });
+  return value;
+}
 var requireUser = t.middleware(async (opts) => {
-  const { ctx, next } = opts;
+  const { ctx, next, path } = opts;
   if (!ctx.user) {
     throw new TRPCError2({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+  const dashboardAllowed = path.startsWith("dashboard.") || ["databases.list", "databases.getActive", "databases.setActive"].includes(path);
+  if (ctx.user.role !== "super_admin") {
+    const payment = await getPaymentState(ctx.user.id);
+    if (payment.commercial && !payment.active && !dashboardAllowed) {
+      throw new TRPCError2({
+        code: "FORBIDDEN",
+        message: "Sistema aguardando pagamento. Regularize sua assinatura para voltar a utilizar esta \xE1rea."
+      });
+    }
   }
   return next({
     ctx: {
@@ -194,7 +235,18 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import WebSocket from "ws";
 
 // drizzle/schema.ts
-import { integer, serial, pgTable, text, timestamp, varchar, numeric, boolean, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  integer,
+  serial,
+  pgTable,
+  text,
+  timestamp,
+  varchar,
+  numeric,
+  boolean,
+  jsonb,
+  uniqueIndex
+} from "drizzle-orm/pg-core";
 var users = pgTable("users", {
   id: serial("id").primaryKey(),
   openId: varchar("openId", { length: 64 }).unique(),
@@ -238,21 +290,30 @@ var databases = pgTable("databases", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 255 }).notNull().unique(),
   description: text("description"),
-  type: varchar("type", { length: 64, enum: ["novo", "copia", "existente"] }).notNull(),
+  type: varchar("type", {
+    length: 64,
+    enum: ["novo", "copia", "existente"]
+  }).notNull(),
   isActive: boolean("isActive").default(false).notNull(),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull()
 });
-var userDatabaseAccess = pgTable("user_database_access", {
-  id: serial("id").primaryKey(),
-  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
-  databaseId: integer("databaseId").notNull().references(() => databases.id, { onDelete: "cascade" }),
-  isActive: boolean("isActive").default(false).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
-}, (table) => ({
-  userDatabaseUnique: uniqueIndex("user_database_access_user_database_unique").on(table.userId, table.databaseId)
-}));
+var userDatabaseAccess = pgTable(
+  "user_database_access",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    databaseId: integer("databaseId").notNull().references(() => databases.id, { onDelete: "cascade" }),
+    isActive: boolean("isActive").default(false).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull()
+  },
+  (table) => ({
+    userDatabaseUnique: uniqueIndex(
+      "user_database_access_user_database_unique"
+    ).on(table.userId, table.databaseId)
+  })
+);
 var clients = pgTable("clients", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(),
@@ -283,13 +344,22 @@ var loans = pgTable("loans", {
   // Isolamento por banco
   clientId: integer("clientId").notNull(),
   amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
-  interestType: varchar("interestType", { length: 64, enum: ["simple", "compound"] }).default("simple").notNull(),
+  interestType: varchar("interestType", {
+    length: 64,
+    enum: ["simple", "compound"]
+  }).default("simple").notNull(),
   interestRate: numeric("interestRate", { precision: 8, scale: 4 }).notNull(),
   // Taxa de juros (%)
-  ratePeriod: varchar("ratePeriod", { length: 64, enum: ["day", "week", "month", "year"] }).default("month").notNull(),
+  ratePeriod: varchar("ratePeriod", {
+    length: 64,
+    enum: ["day", "week", "month", "year"]
+  }).default("month").notNull(),
   installments: integer("installments").notNull(),
   // Número de parcelas/períodos
-  installmentAmount: numeric("installmentAmount", { precision: 15, scale: 2 }).notNull(),
+  installmentAmount: numeric("installmentAmount", {
+    precision: 15,
+    scale: 2
+  }).notNull(),
   // Valor da parcela
   totalAmount: numeric("totalAmount", { precision: 15, scale: 2 }).notNull(),
   // Valor total com juros
@@ -300,32 +370,56 @@ var loans = pgTable("loans", {
   lastInterestPeriod: varchar("lastInterestPeriod", { length: 20 }),
   startDate: timestamp("startDate").notNull(),
   endDate: timestamp("endDate").notNull(),
-  status: varchar("status", { length: 64, enum: ["ativo", "pago", "atrasado", "cancelado"] }).default("ativo").notNull(),
+  status: varchar("status", {
+    length: 64,
+    enum: ["ativo", "pago", "atrasado", "cancelado"]
+  }).default("ativo").notNull(),
   description: text("description"),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull()
 });
-var loanInterestHistory = pgTable("loan_interest_history", {
-  id: serial("id").primaryKey(),
-  databaseId: integer("databaseId").notNull(),
-  loanId: integer("loanId").notNull().references(() => loans.id),
-  periodReference: varchar("periodReference", { length: 20 }).notNull(),
-  previousPrincipalBalance: numeric("previousPrincipalBalance", { precision: 15, scale: 2 }).notNull(),
-  interestGenerated: numeric("interestGenerated", { precision: 15, scale: 2 }).notNull(),
-  paymentAmount: numeric("paymentAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  interestPaid: numeric("interestPaid", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  principalAmortized: numeric("principalAmortized", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  updatedPrincipalBalance: numeric("updatedPrincipalBalance", { precision: 15, scale: 2 }).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
-}, (table) => ({
-  loanPeriodUnique: uniqueIndex("loan_interest_history_loan_period_unique").on(table.loanId, table.periodReference)
-}));
+var loanInterestHistory = pgTable(
+  "loan_interest_history",
+  {
+    id: serial("id").primaryKey(),
+    databaseId: integer("databaseId").notNull(),
+    loanId: integer("loanId").notNull().references(() => loans.id),
+    periodReference: varchar("periodReference", { length: 20 }).notNull(),
+    previousPrincipalBalance: numeric("previousPrincipalBalance", {
+      precision: 15,
+      scale: 2
+    }).notNull(),
+    interestGenerated: numeric("interestGenerated", {
+      precision: 15,
+      scale: 2
+    }).notNull(),
+    paymentAmount: numeric("paymentAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
+    interestPaid: numeric("interestPaid", { precision: 15, scale: 2 }).default("0.00").notNull(),
+    principalAmortized: numeric("principalAmortized", {
+      precision: 15,
+      scale: 2
+    }).default("0.00").notNull(),
+    updatedPrincipalBalance: numeric("updatedPrincipalBalance", {
+      precision: 15,
+      scale: 2
+    }).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull()
+  },
+  (table) => ({
+    loanPeriodUnique: uniqueIndex(
+      "loan_interest_history_loan_period_unique"
+    ).on(table.loanId, table.periodReference)
+  })
+);
 var agents = pgTable("agents", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
-  defaultCommissionPercentage: numeric("defaultCommissionPercentage", { precision: 5, scale: 2 }).default("0.00").notNull(),
+  defaultCommissionPercentage: numeric("defaultCommissionPercentage", {
+    precision: 5,
+    scale: 2
+  }).default("0.00").notNull(),
   status: varchar("status", { length: 64, enum: ["ACTIVE", "INACTIVE"] }).default("ACTIVE").notNull(),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -336,13 +430,18 @@ var payments = pgTable("payments", {
   databaseId: integer("databaseId").notNull(),
   // Isolamento por banco
   loanId: integer("loanId"),
-  vehicleFinancingId: integer("vehicleFinancingId").references(() => vehicleFinancings.id),
+  vehicleFinancingId: integer("vehicleFinancingId").references(
+    () => vehicleFinancings.id
+  ),
   installmentNumber: integer("installmentNumber").notNull(),
   // Número da parcela
   amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
   paymentDate: timestamp("paymentDate").notNull(),
   dueDate: timestamp("dueDate").notNull(),
-  status: varchar("status", { length: 64, enum: ["pago", "pendente", "atrasado"] }).default("pendente").notNull(),
+  status: varchar("status", {
+    length: 64,
+    enum: ["pago", "pendente", "atrasado"]
+  }).default("pendente").notNull(),
   lateFee: numeric("lateFee", { precision: 15, scale: 2 }).default("0.00"),
   // Multa por atraso
   interest: numeric("interest", { precision: 15, scale: 2 }).default("0.00"),
@@ -352,41 +451,63 @@ var payments = pgTable("payments", {
   remainingBalance: numeric("remainingBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
   notes: text("notes"),
   agentId: integer("agentId").references(() => agents.id),
-  commissionPercentage: numeric("commissionPercentage", { precision: 5, scale: 2 }).default("0.00").notNull(),
+  commissionPercentage: numeric("commissionPercentage", {
+    precision: 5,
+    scale: 2
+  }).default("0.00").notNull(),
   commissionAmount: numeric("commissionAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
   netAmount: numeric("netAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull()
 });
-var cashFlow = pgTable("cash_flow", {
-  id: serial("id").primaryKey(),
-  databaseId: integer("databaseId").notNull(),
-  type: varchar("type", { length: 64, enum: ["ENTRADA", "SAIDA"] }).notNull(),
-  category: varchar("category", { length: 120 }).notNull(),
-  description: text("description").notNull(),
-  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
-  movementDate: timestamp("movementDate").notNull(),
-  clientId: integer("clientId").references(() => clients.id, { onDelete: "set null" }),
-  loanId: integer("loanId").references(() => loans.id, { onDelete: "set null" }),
-  vehicleId: integer("vehicleId").references(() => vehicles.id, { onDelete: "set null" }),
-  vehicleSaleId: integer("vehicleSaleId").references(() => vehicleSales.id, { onDelete: "set null" }),
-  paymentId: integer("paymentId").references(() => payments.id, { onDelete: "set null" }),
-  responsible: varchar("responsible", { length: 255 }),
-  notes: text("notes"),
-  /** Chave idempotente da origem automática; entradas manuais permanecem nulas. */
-  sourceKey: varchar("sourceKey", { length: 180 }),
-  createdBy: integer("createdBy").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
-}, (table) => ({
-  sourceKeyUnique: uniqueIndex("cash_flow_source_key_unique").on(table.sourceKey)
-}));
+var cashFlow = pgTable(
+  "cash_flow",
+  {
+    id: serial("id").primaryKey(),
+    databaseId: integer("databaseId").notNull(),
+    type: varchar("type", { length: 64, enum: ["ENTRADA", "SAIDA"] }).notNull(),
+    category: varchar("category", { length: 120 }).notNull(),
+    description: text("description").notNull(),
+    amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+    movementDate: timestamp("movementDate").notNull(),
+    clientId: integer("clientId").references(() => clients.id, {
+      onDelete: "set null"
+    }),
+    loanId: integer("loanId").references(() => loans.id, {
+      onDelete: "set null"
+    }),
+    vehicleId: integer("vehicleId").references(() => vehicles.id, {
+      onDelete: "set null"
+    }),
+    vehicleSaleId: integer("vehicleSaleId").references(() => vehicleSales.id, {
+      onDelete: "set null"
+    }),
+    paymentId: integer("paymentId").references(() => payments.id, {
+      onDelete: "set null"
+    }),
+    responsible: varchar("responsible", { length: 255 }),
+    notes: text("notes"),
+    /** Chave idempotente da origem automática; entradas manuais permanecem nulas. */
+    sourceKey: varchar("sourceKey", { length: 180 }),
+    createdBy: integer("createdBy").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull()
+  },
+  (table) => ({
+    sourceKeyUnique: uniqueIndex("cash_flow_source_key_unique").on(
+      table.sourceKey
+    )
+  })
+);
 var vehicles = pgTable("vehicles", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(),
   // Isolamento por banco
   clientId: integer("clientId").references(() => clients.id),
-  vehicleType: varchar("vehicleType", { length: 64, enum: ["CARRO", "MOTO", "OUTRO"] }).default("OUTRO").notNull(),
+  vehicleType: varchar("vehicleType", {
+    length: 64,
+    enum: ["CARRO", "MOTO", "PRODUTO", "OUTRO"]
+  }).default("OUTRO").notNull(),
   brand: varchar("brand", { length: 100 }),
   model: varchar("model", { length: 100 }).notNull(),
   year: integer("year"),
@@ -401,7 +522,27 @@ var vehicles = pgTable("vehicles", {
   purchaseDate: timestamp("purchaseDate"),
   stockEntryDate: timestamp("stockEntryDate").defaultNow().notNull(),
   price: numeric("price", { precision: 15, scale: 2 }).default("0.00").notNull(),
-  status: varchar("status", { length: 64, enum: ["disponivel", "vendido", "reservado", "indisponivel"] }).default("disponivel").notNull(),
+  status: varchar("status", {
+    length: 64,
+    enum: ["disponivel", "vendido", "reservado", "indisponivel"]
+  }).default("disponivel").notNull(),
+  description: text("description"),
+  createdBy: integer("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull()
+});
+var products = pgTable("products", {
+  id: serial("id").primaryKey(),
+  databaseId: integer("databaseId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 120 }),
+  sku: varchar("sku", { length: 80 }),
+  purchasePrice: numeric("purchasePrice", { precision: 15, scale: 2 }).default("0.00").notNull(),
+  salePrice: numeric("salePrice", { precision: 15, scale: 2 }).notNull(),
+  status: varchar("status", {
+    length: 64,
+    enum: ["disponivel", "vendido", "indisponivel"]
+  }).default("disponivel").notNull(),
   description: text("description"),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -411,7 +552,9 @@ var vehicleSales = pgTable("vehicle_sales", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(),
   vehicleId: integer("vehicleId").notNull().references(() => vehicles.id),
-  clientId: integer("clientId").references(() => clients.id, { onDelete: "set null" }),
+  clientId: integer("clientId").references(() => clients.id, {
+    onDelete: "set null"
+  }),
   saleAmount: numeric("saleAmount", { precision: 15, scale: 2 }).notNull(),
   receivedAmount: numeric("receivedAmount", { precision: 15, scale: 2 }).default("0.00").notNull(),
   receivableBalance: numeric("receivableBalance", { precision: 15, scale: 2 }).default("0.00").notNull(),
@@ -426,24 +569,35 @@ var vehicleFinancings = pgTable("vehicleFinancings", {
   id: serial("id").primaryKey(),
   databaseId: integer("databaseId").notNull(),
   // Isolamento por banco
-  vehicleId: integer("vehicleId").notNull(),
+  assetType: varchar("assetType", { length: 20, enum: ["vehicle", "product"] }).default("vehicle").notNull(),
+  vehicleId: integer("vehicleId"),
+  productId: integer("productId").references(() => products.id),
   clientId: integer("clientId").notNull(),
   vehiclePrice: numeric("vehiclePrice", { precision: 15, scale: 2 }).notNull(),
   downPayment: numeric("downPayment", { precision: 15, scale: 2 }).notNull(),
   // Entrada
-  financedAmount: numeric("financedAmount", { precision: 15, scale: 2 }).notNull(),
+  financedAmount: numeric("financedAmount", {
+    precision: 15,
+    scale: 2
+  }).notNull(),
   // Valor financiado
   interestRate: numeric("interestRate", { precision: 5, scale: 2 }).notNull(),
   // Taxa de juros mensal (%)
   installments: integer("installments").notNull(),
   // Número de parcelas
-  installmentAmount: numeric("installmentAmount", { precision: 15, scale: 2 }).notNull(),
+  installmentAmount: numeric("installmentAmount", {
+    precision: 15,
+    scale: 2
+  }).notNull(),
   // Valor da parcela
   totalAmount: numeric("totalAmount", { precision: 15, scale: 2 }).notNull(),
   // Valor total a pagar
   startDate: timestamp("startDate").notNull(),
   endDate: timestamp("endDate").notNull(),
-  status: varchar("status", { length: 64, enum: ["ativo", "pago", "atrasado", "cancelado"] }).default("ativo").notNull(),
+  status: varchar("status", {
+    length: 64,
+    enum: ["ativo", "pago", "atrasado", "cancelado"]
+  }).default("ativo").notNull(),
   notes: text("notes"),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -466,7 +620,10 @@ var auditLogs = pgTable("auditLogs", {
   // JSON com detalhes da ação
   ipAddress: varchar("ipAddress", { length: 45 }),
   userAgent: text("userAgent"),
-  status: varchar("status", { length: 64, enum: ["success", "failed", "warning"] }).default("success").notNull(),
+  status: varchar("status", {
+    length: 64,
+    enum: ["success", "failed", "warning"]
+  }).default("success").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull()
 });
 
@@ -813,6 +970,7 @@ async function deleteDatabase(id) {
     await tx.delete(vehicleSales).where(eq(vehicleSales.databaseId, id));
     await tx.delete(loans).where(eq(loans.databaseId, id));
     await tx.delete(vehicles).where(eq(vehicles.databaseId, id));
+    await tx.delete(products).where(eq(products.databaseId, id));
     await tx.delete(clients).where(eq(clients.databaseId, id));
     await tx.delete(agents).where(eq(agents.databaseId, id));
     await tx.delete(userDatabaseAccess).where(eq(userDatabaseAccess.databaseId, id));
@@ -1534,6 +1692,51 @@ async function getVehicleById(id) {
   const result = await db.select().from(vehicles).where(eq(vehicles.id, id)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
+async function getProductsByDatabase(databaseId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(products).where(eq(products.databaseId, databaseId)).orderBy(desc(products.createdAt));
+}
+async function getProductById(id) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const rows = await db.select().from(products).where(eq(products.id, id)).limit(1);
+  return rows[0];
+}
+async function createProduct(data) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const [created] = await db.insert(products).values(data).returning();
+  if (!created) throw new Error("N\xE3o foi poss\xEDvel confirmar o produto criado.");
+  return created;
+}
+async function updateProductInDatabase(id, databaseId, data) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(products).set(data).where(and(eq(products.id, id), eq(products.databaseId, databaseId)));
+}
+async function deleteProductInDatabase(id, databaseId) {
+  const db = await getDb();
+  if (!db) return;
+  await db.transaction(async (tx) => {
+    const contracts = await tx.select({ id: vehicleFinancings.id }).from(vehicleFinancings).where(
+      and(
+        eq(vehicleFinancings.productId, id),
+        eq(vehicleFinancings.databaseId, databaseId)
+      )
+    );
+    const contractIds = contracts.map((item) => item.id);
+    if (contractIds.length) {
+      const paymentRows = await tx.select({ id: payments.id }).from(payments).where(inArray(payments.vehicleFinancingId, contractIds));
+      const paymentIds = paymentRows.map((item) => item.id);
+      if (paymentIds.length)
+        await tx.delete(cashFlow).where(inArray(cashFlow.paymentId, paymentIds));
+      await tx.delete(payments).where(inArray(payments.vehicleFinancingId, contractIds));
+      await tx.delete(vehicleFinancings).where(inArray(vehicleFinancings.id, contractIds));
+    }
+    await tx.delete(products).where(and(eq(products.id, id), eq(products.databaseId, databaseId)));
+  });
+}
 async function updateVehicleInDatabase(id, data, databaseId) {
   const db = await getDb();
   if (!db) return;
@@ -1716,6 +1919,7 @@ async function getDashboardStats(databaseId) {
       loanRows,
       loanPaymentRows,
       vehicleRows,
+      productRows,
       vehicleSaleRows,
       vehiclePurchaseRows,
       financingRows,
@@ -1783,9 +1987,12 @@ async function getDashboardStats(databaseId) {
         id: vehicles.id,
         model: vehicles.model,
         brand: vehicles.brand,
+        plate: vehicles.plate,
+        vehicleType: vehicles.vehicleType,
         status: vehicles.status,
         expenses: vehicles.expenses
       }).from(vehicles).where(eq(vehicles.databaseId, databaseId)),
+      db.select({ id: products.id, name: products.name, sku: products.sku }).from(products).where(eq(products.databaseId, databaseId)),
       db.select({
         saleAmount: vehicleSales.saleAmount,
         purchasePrice: vehicles.purchasePrice,
@@ -1861,7 +2068,13 @@ async function getDashboardStats(databaseId) {
     const vehicleNames = new Map(
       vehicleRows.map((vehicle) => [
         vehicle.id,
-        `${vehicle.brand ?? ""} ${vehicle.model}`.trim()
+        `${vehicle.brand ?? ""} ${vehicle.model}${vehicle.plate ? ` \xB7 ${vehicle.plate}` : ""}`.trim()
+      ])
+    );
+    const productNames = new Map(
+      productRows.map((product) => [
+        product.id,
+        `${product.name}${product.sku ? ` \xB7 ${product.sku}` : ""}`
       ])
     );
     const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
@@ -1877,6 +2090,9 @@ async function getDashboardStats(databaseId) {
       return `${parts.year}-${parts.month}-${parts.day}`;
     };
     const todayKey = dateKey(/* @__PURE__ */ new Date());
+    const upcomingLimit = /* @__PURE__ */ new Date();
+    upcomingLimit.setDate(upcomingLimit.getDate() + 2);
+    const upcomingLimitKey = dateKey(upcomingLimit);
     const dueItems = [];
     const paidKeys = new Set(
       allPaymentRows.filter((payment) => payment.status === "pago").map(
@@ -1913,7 +2129,7 @@ async function getDashboardStats(databaseId) {
           clientId: financing.clientId,
           clientName: clientNames.get(financing.clientId) ?? `Cliente #${financing.clientId}`,
           amount: Number(financing.installmentAmount),
-          product: vehicleNames.get(financing.vehicleId) ?? `Financiamento #${financing.id}`,
+          product: financing.assetType === "product" ? productNames.get(financing.productId ?? 0) ?? `Produto #${financing.productId}` : vehicleNames.get(financing.vehicleId ?? 0) ?? `Ve\xEDculo #${financing.vehicleId}`,
           dueDate: addPeriods(
             new Date(financing.startDate),
             installmentNumber,
@@ -1931,13 +2147,25 @@ async function getDashboardStats(databaseId) {
     const dueTodayItems = dueItems.filter((item) => dateKey(item.dueDate) === todayKey).sort((a, b) => a.clientName.localeCompare(b.clientName));
     const overdueItems = dueItems.filter((item) => dateKey(item.dueDate) < todayKey).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
     const dueToday = dueTodayItems.slice(0, 100).map(serializeDue);
+    const upcoming = dueItems.filter((item) => {
+      const itemKey = dateKey(item.dueDate);
+      return itemKey >= todayKey && itemKey <= upcomingLimitKey;
+    }).sort(
+      (a, b) => a.dueDate.getTime() - b.dueDate.getTime() || a.clientName.localeCompare(b.clientName)
+    ).slice(0, 200).map(serializeDue);
     const overdue = overdueItems.slice(0, 100).map(serializeDue);
     const financedVehicleIds = new Set(
-      financingRows.map((financing) => financing.vehicleId)
+      financingRows.flatMap(
+        (financing) => financing.vehicleId ? [financing.vehicleId] : []
+      )
     );
     const soldVehicleIds = /* @__PURE__ */ new Set([
-      ...vehicleRows.filter((vehicle) => vehicle.status === "vendido").map((vehicle) => vehicle.id),
-      ...Array.from(financedVehicleIds)
+      ...vehicleRows.filter(
+        (vehicle) => vehicle.status === "vendido" && vehicle.vehicleType !== "PRODUTO"
+      ).map((vehicle) => vehicle.id),
+      ...vehicleRows.filter(
+        (vehicle) => financedVehicleIds.has(vehicle.id) && vehicle.vehicleType !== "PRODUTO"
+      ).map((vehicle) => vehicle.id)
     ]);
     const vehiclePayments = allPaymentRows.filter(
       (payment) => payment.vehicleFinancingId !== null
@@ -1973,7 +2201,7 @@ async function getDashboardStats(databaseId) {
       vehicleProfit: roundMoney(vehicleProfit),
       vehicleExpenses: roundMoney(vehicleExpenses),
       vehicleSalesCount: vehicleSaleRows.length,
-      collections: { dueToday, overdue },
+      collections: { dueToday, upcoming, overdue },
       vehicleMetrics: {
         carsSold: soldVehicleIds.size,
         financings: financingRows.length,
@@ -1984,7 +2212,10 @@ async function getDashboardStats(databaseId) {
           (item) => item.contractType === "financiamento"
         ).length,
         totalContracts: roundMoney(totalFinancingContracts),
-        totalPaid: roundMoney(totalFinancingPaid)
+        totalPaid: roundMoney(totalFinancingPaid),
+        remainingBalance: roundMoney(
+          Math.max(0, totalFinancingContracts - totalFinancingPaid)
+        )
       },
       loanMetrics: {
         totalLent: roundMoney(totalLent),
@@ -3984,7 +4215,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     create: protectedProcedure2.input(
       z2.object({
         clientId: z2.number().int().positive().optional(),
-        vehicleType: z2.enum(["CARRO", "MOTO", "OUTRO"]).optional(),
+        vehicleType: z2.enum(["CARRO", "MOTO", "PRODUTO", "OUTRO"]).optional(),
         brand: z2.string().trim().optional(),
         model: z2.string().trim().min(1, "Informe o modelo do ve\xEDculo."),
         year: z2.coerce.number().int().min(1900).max(2200).optional(),
@@ -4042,8 +4273,8 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         input.purchasePrice > 0 ? {
           databaseId: activeDb.id,
           type: "SAIDA",
-          category: "COMPRA_VEICULO",
-          description: `Compra de ve\xEDculo: ${input.model}`,
+          category: input.vehicleType === "PRODUTO" ? "COMPRA_PRODUTO" : "COMPRA_VEICULO",
+          description: `${input.vehicleType === "PRODUTO" ? "Compra de produto" : "Compra de ve\xEDculo"}: ${input.model}`,
           amount: purchasePrice,
           movementDate: input.purchaseDate ? new Date(input.purchaseDate) : /* @__PURE__ */ new Date(),
           createdBy: ctx.user.id
@@ -4052,10 +4283,10 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       await createAuditLog({
         userId: ctx.user.id,
         username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
-        action: "create_vehicle",
+        action: input.vehicleType === "PRODUTO" ? "create_product" : "create_vehicle",
         entity: "vehicles",
         databaseId: activeDb.id,
-        details: `Ve\xEDculo criado: ${input.brand} ${input.model}`,
+        details: `${input.vehicleType === "PRODUTO" ? "Produto" : "Ve\xEDculo"} criado: ${input.brand ?? ""} ${input.model}`,
         status: "success"
       });
       return result;
@@ -4064,7 +4295,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       z2.object({
         id: z2.number().int().positive(),
         clientId: z2.number().int().positive().optional().nullable(),
-        vehicleType: z2.enum(["CARRO", "MOTO", "OUTRO"]).optional(),
+        vehicleType: z2.enum(["CARRO", "MOTO", "PRODUTO", "OUTRO"]).optional(),
         brand: z2.string().trim().optional().nullable(),
         model: z2.string().trim().min(1).optional(),
         year: z2.coerce.number().int().min(1900).max(2200).optional().nullable(),
@@ -4155,6 +4386,87 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         entityId: input.id,
         databaseId: activeDb?.id,
         details: "Ve\xEDculo deletado",
+        status: "success"
+      });
+      return { success: true };
+    })
+  }),
+  // ==================== PRODUCTS ====================
+  products: router({
+    list: protectedProcedure2.query(async ({ ctx }) => {
+      if (!ctx.user.canView)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Sem permiss\xE3o para visualizar produtos."
+        });
+      const activeDb = await getActiveDatabase();
+      return activeDb ? getProductsByDatabase(activeDb.id) : [];
+    }),
+    create: protectedProcedure2.input(
+      z2.object({
+        name: z2.string().trim().min(1, "Informe o nome do produto."),
+        category: z2.string().trim().optional(),
+        sku: z2.string().trim().optional(),
+        purchasePrice: z2.coerce.number().nonnegative().default(0),
+        salePrice: z2.coerce.number().positive(),
+        description: z2.string().trim().optional()
+      })
+    ).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.canInsert)
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Sem permiss\xE3o para cadastrar produtos."
+        });
+      const activeDb = await getActiveDatabase();
+      if (!activeDb)
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Nenhum banco ativo."
+        });
+      const created = await createProduct({
+        databaseId: activeDb.id,
+        name: input.name,
+        category: input.category || null,
+        sku: input.sku?.toUpperCase() || null,
+        purchasePrice: input.purchasePrice.toFixed(2),
+        salePrice: input.salePrice.toFixed(2),
+        description: input.description || null,
+        createdBy: ctx.user.id
+      });
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
+        action: "create_product",
+        entity: "products",
+        entityId: created.id,
+        databaseId: activeDb.id,
+        details: `Produto criado: ${created.name}`,
+        status: "success"
+      });
+      return created;
+    }),
+    delete: protectedProcedure2.input(z2.object({ id: z2.number().int().positive() })).mutation(async ({ input, ctx }) => {
+      if (ctx.user.role !== "super_admin")
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Somente o Super Admin pode excluir produtos."
+        });
+      const activeDb = await getActiveDatabase();
+      const product = await getProductById(input.id);
+      if (!activeDb || !product || product.databaseId !== activeDb.id)
+        throw new TRPCError3({
+          code: "NOT_FOUND",
+          message: "Produto n\xE3o encontrado."
+        });
+      await deleteProductInDatabase(input.id, activeDb.id);
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
+        action: "delete_product",
+        entity: "products",
+        entityId: input.id,
+        databaseId: activeDb.id,
+        details: `Produto exclu\xEDdo: ${product.name}`,
         status: "success"
       });
       return { success: true };
@@ -4314,9 +4626,10 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           code: "NOT_FOUND",
           message: "Financiamento n\xE3o encontrado no banco ativo."
         });
-      const [client, vehicle, payments2] = await Promise.all([
+      const [client, vehicle, product, payments2] = await Promise.all([
         getClientById(financing.clientId),
-        getVehicleById(financing.vehicleId),
+        financing.vehicleId ? getVehicleById(financing.vehicleId) : Promise.resolve(void 0),
+        financing.productId ? getProductById(financing.productId) : Promise.resolve(void 0),
         getPaymentsByFinancing(financing.id, activeDb.id)
       ]);
       const paid = payments2.filter((payment) => payment.status === "pago");
@@ -4327,6 +4640,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         financing,
         client,
         vehicle,
+        product,
         payments: payments2,
         totalPaid,
         remainingBalance: roundMoney(
@@ -4336,7 +4650,9 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     }),
     create: protectedProcedure2.input(
       z2.object({
-        vehicleId: z2.number().int().positive(),
+        assetType: z2.enum(["vehicle", "product"]).default("vehicle"),
+        vehicleId: z2.number().int().positive().optional(),
+        productId: z2.number().int().positive().optional(),
         clientId: z2.number().int().positive(),
         vehiclePrice: positiveDecimal("Pre\xE7o do ve\xEDculo"),
         downPayment: nonNegativeDecimal("Entrada"),
@@ -4359,9 +4675,15 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           message: "Voc\xEA n\xE3o tem permiss\xE3o para inserir dados"
         });
       }
-      const [client, vehicle] = await Promise.all([
+      if (input.assetType === "vehicle" && (!input.vehicleId || input.productId) || input.assetType === "product" && (!input.productId || input.vehicleId))
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Selecione exatamente um ve\xEDculo ou produto."
+        });
+      const [client, vehicle, product] = await Promise.all([
         getClientById(input.clientId),
-        getVehicleById(input.vehicleId)
+        input.vehicleId ? getVehicleById(input.vehicleId) : Promise.resolve(void 0),
+        input.productId ? getProductById(input.productId) : Promise.resolve(void 0)
       ]);
       if (!client || client.databaseId !== activeDb.id) {
         throw new TRPCError3({
@@ -4369,12 +4691,17 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           message: "Cliente inv\xE1lido para o banco ativo."
         });
       }
-      if (!vehicle || vehicle.databaseId !== activeDb.id) {
+      if (input.assetType === "vehicle" && (!vehicle || vehicle.databaseId !== activeDb.id)) {
         throw new TRPCError3({
           code: "BAD_REQUEST",
           message: "Ve\xEDculo inv\xE1lido para o banco ativo."
         });
       }
+      if (input.assetType === "product" && (!product || product.databaseId !== activeDb.id))
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Produto inv\xE1lido para o banco ativo."
+        });
       const startDate = new Date(input.startDate);
       const vehiclePrice = Number(input.vehiclePrice);
       const downPayment = Number(input.downPayment);
@@ -4405,6 +4732,16 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         databaseId: activeDb.id,
         createdBy: ctx.user.id
       });
+      if (input.vehicleId)
+        await updateVehicleInDatabase(
+          input.vehicleId,
+          { status: "vendido", clientId: input.clientId },
+          activeDb.id
+        );
+      if (input.productId)
+        await updateProductInDatabase(input.productId, activeDb.id, {
+          status: "vendido"
+        });
       await createAuditLog({
         userId: ctx.user.id,
         username: ctx.user.name || ctx.user.email || "Usu\xE1rio",
@@ -4522,14 +4859,15 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           vehicleProfit: 0,
           vehicleExpenses: 0,
           vehicleSalesCount: 0,
-          collections: { dueToday: [], overdue: [] },
+          collections: { dueToday: [], upcoming: [], overdue: [] },
           vehicleMetrics: {
             carsSold: 0,
             financings: 0,
             installmentsPaid: 0,
             installmentsOverdue: 0,
             totalContracts: 0,
-            totalPaid: 0
+            totalPaid: 0,
+            remainingBalance: 0
           },
           loanMetrics: {
             totalLent: 0,
@@ -4824,13 +5162,14 @@ var SDKServer = class {
 var sdk = new SDKServer();
 
 // server/bootstrap-schema.ts
-import { neon } from "@neondatabase/serverless";
+import { neon as neon2 } from "@neondatabase/serverless";
 var bootstrapPromise = null;
 function ensurePreviewBusinessSchema() {
-  if (process.env.VERCEL_ENV !== "preview" || !process.env.DATABASE_URL) return Promise.resolve();
+  if (process.env.VERCEL_ENV !== "preview" || !process.env.DATABASE_URL)
+    return Promise.resolve();
   if (bootstrapPromise) return bootstrapPromise;
   bootstrapPromise = (async () => {
-    const sql2 = neon(process.env.DATABASE_URL);
+    const sql2 = neon2(process.env.DATABASE_URL);
     await sql2`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "dashboardOnly" boolean DEFAULT false NOT NULL`;
     await sql2`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "failedLoginAttempts" integer DEFAULT 0 NOT NULL`;
     await sql2`CREATE TABLE IF NOT EXISTS "databases" ("id" serial PRIMARY KEY, "name" varchar(255) NOT NULL UNIQUE, "description" text, "type" varchar(64) NOT NULL, "isActive" boolean DEFAULT false NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
@@ -4840,7 +5179,11 @@ function ensurePreviewBusinessSchema() {
     await sql2`CREATE TABLE IF NOT EXISTS "clients" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "cpf" varchar(14), "birthDate" timestamp, "email" varchar(320), "phone" varchar(20), "whatsapp" varchar(20), "profession" varchar(120), "indicatorAgentId" integer, "address" text, "residentialAddress" jsonb, "commercialAddress" jsonb, "city" varchar(100), "state" varchar(2), "zipCode" varchar(10), "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`CREATE TABLE IF NOT EXISTS "loans" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "clientId" integer NOT NULL, "amount" numeric(15,2) NOT NULL, "interestType" varchar(64) DEFAULT 'simple' NOT NULL, "interestRate" numeric(8,4) NOT NULL, "ratePeriod" varchar(64) DEFAULT 'month' NOT NULL, "installments" integer NOT NULL, "installmentAmount" numeric(15,2) NOT NULL, "totalAmount" numeric(15,2) NOT NULL, "remainingBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "principalBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "accruedInterest" numeric(15,2) DEFAULT '0.00' NOT NULL, "totalPaid" numeric(15,2) DEFAULT '0.00' NOT NULL, "lastInterestPeriod" varchar(20), "startDate" timestamp NOT NULL, "endDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'ativo' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`CREATE TABLE IF NOT EXISTS "vehicles" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "clientId" integer, "vehicleType" varchar(64) DEFAULT 'OUTRO' NOT NULL, "brand" varchar(100), "model" varchar(100) NOT NULL, "year" integer, "color" varchar(50), "plate" varchar(20), "renavam" varchar(30), "chassi" varchar(50), "mileage" integer, "purchasePrice" numeric(15,2) DEFAULT '0.00' NOT NULL, "expenses" numeric(15,2) DEFAULT '0.00' NOT NULL, "salePrice" numeric(15,2), "purchaseDate" timestamp, "stockEntryDate" timestamp DEFAULT now() NOT NULL, "price" numeric(15,2) DEFAULT '0.00' NOT NULL, "status" varchar(64) DEFAULT 'disponivel' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "products" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "category" varchar(120), "sku" varchar(80), "purchasePrice" numeric(15,2) DEFAULT '0.00' NOT NULL, "salePrice" numeric(15,2) NOT NULL, "status" varchar(64) DEFAULT 'disponivel' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`CREATE TABLE IF NOT EXISTS "vehicleFinancings" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "vehicleId" integer NOT NULL, "clientId" integer NOT NULL, "vehiclePrice" numeric(15,2) NOT NULL, "downPayment" numeric(15,2) NOT NULL, "financedAmount" numeric(15,2) NOT NULL, "interestRate" numeric(5,2) NOT NULL, "installments" integer NOT NULL, "installmentAmount" numeric(15,2) NOT NULL, "totalAmount" numeric(15,2) NOT NULL, "startDate" timestamp NOT NULL, "endDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'ativo' NOT NULL, "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`ALTER TABLE "vehicleFinancings" ALTER COLUMN "vehicleId" DROP NOT NULL`;
+    await sql2`ALTER TABLE "vehicleFinancings" ADD COLUMN IF NOT EXISTS "assetType" varchar(20) DEFAULT 'vehicle' NOT NULL`;
+    await sql2`ALTER TABLE "vehicleFinancings" ADD COLUMN IF NOT EXISTS "productId" integer`;
     await sql2`CREATE TABLE IF NOT EXISTS "loan_interest_history" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "loanId" integer NOT NULL, "periodReference" varchar(20) NOT NULL, "previousPrincipalBalance" numeric(15,2) NOT NULL, "interestGenerated" numeric(15,2) NOT NULL, "paymentAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "interestPaid" numeric(15,2) DEFAULT '0.00' NOT NULL, "principalAmortized" numeric(15,2) DEFAULT '0.00' NOT NULL, "updatedPrincipalBalance" numeric(15,2) NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`CREATE UNIQUE INDEX IF NOT EXISTS "loan_interest_history_loan_period_unique" ON "loan_interest_history" ("loanId", "periodReference")`;
     await sql2`CREATE TABLE IF NOT EXISTS "payments" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "loanId" integer, "vehicleFinancingId" integer, "installmentNumber" integer NOT NULL, "amount" numeric(15,2) NOT NULL, "paymentDate" timestamp NOT NULL, "dueDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'pendente' NOT NULL, "lateFee" numeric(15,2) DEFAULT '0.00', "interest" numeric(15,2) DEFAULT '0.00', "principalAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "interestAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "remainingBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "notes" text, "agentId" integer, "commissionPercentage" numeric(5,2) DEFAULT '0.00' NOT NULL, "commissionAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "netAmount" numeric(15,2) DEFAULT '0.00' NOT NULL, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;

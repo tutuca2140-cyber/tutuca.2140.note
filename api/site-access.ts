@@ -5,7 +5,6 @@ import {
   sendJson,
   SESSION_COOKIE_NAME,
 } from "./auth/_shared.js";
-import { handleMercadoPagoWebhook } from "../server/mercadopago-webhook.js";
 import { handleAsaasWebhook } from "../server/asaas-webhook.js";
 import { handleMarketing } from "../server/marketing.js";
 import { handlePropertiesV2 } from "../server/properties-v2.js";
@@ -16,7 +15,6 @@ function ensureAccessTable() { if (accessTablePromise) return accessTablePromise
 function cleanPath(value:unknown){const path=String(value??"/").trim();if(!path.startsWith("/"))return "/";return path.slice(0,500)||"/";}
 export default async function handler(req:any,res:any){
   const scope=String(Array.isArray(req?.query?.scope)?req.query.scope[0]:req?.query?.scope??"").trim().toLowerCase();
-  if(scope==="mercadopago-webhook")return handleMercadoPagoWebhook(req,res);
   if(scope==="asaas-webhook")return handleAsaasWebhook(req,res);
   if(scope==="marketing")return handleMarketing(req,res);
   if(scope==="properties")return handlePropertiesV2(req,res);
