@@ -1,3 +1,4 @@
+// Customer ratings, moderation and published testimonials.
 import { getSql, readCookie, readJsonBody, sendJson, SESSION_COOKIE_NAME } from "../api/auth/_shared.js";
 
 type SessionUser = { id:number; role:string; loginMethod?:string|null; accountOwnerId?:number|null; name?:string|null; username?:string|null };
