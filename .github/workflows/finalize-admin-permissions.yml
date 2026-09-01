@@ -1,0 +1,29 @@
+name: Finalize Admin Permissions
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/finalize-admin-permissions.yml"
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: python .github/scripts/finalize-admin-permissions.py
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit final changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add api/admin/commercial-accounts.ts api/admin/control-panel.ts server/routers.ts client/src/pages/admin/Usuarios.tsx client/src/pages/admin/Assinaturas.tsx client/src/pages/admin/Controle.tsx client/src/pages/admin/Marketing.tsx
+          git commit -m "fix: finalize delegated admin access and user IDs [skip ci]" || exit 0
+          git push
