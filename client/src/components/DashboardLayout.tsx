@@ -7,7 +7,7 @@ import { useCommercialContext } from "@/hooks/useCommercialContext";
 import { trpc } from "@/lib/trpc";
 import {
   Activity, Building2, CalendarDays, Car, ChevronRight, ClipboardList, CreditCard, Database,
-  FileText, KeyRound, LayoutDashboard, LogOut, Mail, Menu, MoreHorizontal, Package, Settings, Shield,
+  FileText, KeyRound, LayoutDashboard, LogOut, Mail, Menu, MessageCircle, MoreHorizontal, Package, Settings, Shield,
   UserRound, UserRoundCog, Users, Wallet, X,
 } from "lucide-react";
 import { Children, cloneElement, isValidElement, useEffect, useState, type ReactElement, type ReactNode } from "react";
@@ -65,6 +65,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     { name: "Painel de Controle", href: "/admin/controle", icon: Activity, show: isSuperAdmin },
     { name: "Assinaturas", href: "/admin/assinaturas", icon: CreditCard, show: isSuperAdmin },
     { name: "Marketing", href: "/admin/marketing", icon: Mail, show: isSuperAdmin },
+    { name: "Suporte", href: "/admin/suporte", icon: MessageCircle, show: isSuperAdmin },
     { name: "Usuários", href: "/admin/usuarios", icon: Shield, show: isSuperAdmin },
     { name: "Bancos de Dados", href: "/admin/bancos", icon: Database, show: Boolean(isAdmin) },
     { name: "Auditoria", href: "/admin/auditoria", icon: FileText, show: Boolean(isAdmin) },

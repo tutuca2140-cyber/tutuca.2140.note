@@ -1,4 +1,5 @@
 import DashboardLayout from "@/components/DashboardLayout";
+import SupportChat from "@/components/SupportChat";
 import { useAuth } from "@/_core/hooks/useAuth";
 import {
   BarChart3,
@@ -238,6 +239,8 @@ export default function Tutorial() {
             </div>
           </div>
         </section>
+
+        <SupportChat />
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {visibleLessons.map((lesson, index) => {
