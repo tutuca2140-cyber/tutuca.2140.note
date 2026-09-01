@@ -10,7 +10,7 @@ import {
   FileText, KeyRound, LayoutDashboard, LogOut, Mail, Menu, MessageCircle, MoreHorizontal, Package, Settings, Shield,
   UserRound, UserRoundCog, Users, Wallet, X,
 } from "lucide-react";
-import { Children, cloneElement, isValidElement, useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
 
@@ -22,6 +22,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const { data: commercialContext } = useCommercialContext();
   const [location, navigate] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [supportUnreadCount, setSupportUnreadCount] = useState(0);
+  const originalTitleRef = useRef(typeof document !== "undefined" ? document.title : "Note Note");
   const utils = trpc.useUtils();
   const { data: availableDatabases = [] } = trpc.databases.list.useQuery(undefined, { enabled: Boolean(user) });
   const { data: activeDatabase } = trpc.databases.getActive.useQuery(undefined, { enabled: Boolean(user) });
@@ -43,6 +45,46 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const commercialAccount = Boolean(commercialContext?.commercial);
   const canManageOwnDatabases = Boolean(commercialAccount && commercialContext?.permissions.canManageDatabases);
   const canManageTeam = Boolean(commercialAccount && commercialContext?.permissions.canManageUsers);
+  const canWatchSupport = Boolean(isSuperAdmin || user?.adminCanSupport || commercialAccount);
+
+  useEffect(() => {
+    if (!user || !canWatchSupport) { setSupportUnreadCount(0); return; }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await fetch("/api/site-access?scope=support&action=notifications", { credentials: "include", cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (cancelled) return;
+        const unread = Math.max(0, Number(data?.unreadCount || 0));
+        setSupportUnreadCount(unread);
+        const latestId = Number(data?.latest?.id || 0);
+        if (!latestId || unread <= 0) return;
+        const key = `note-note-support-last-notified-${user.id}`;
+        const already = Number(window.localStorage.getItem(key) || 0);
+        if (already === latestId) return;
+        window.localStorage.setItem(key, String(latestId));
+        const from = data?.audience === "admin" ? (data?.latest?.name || data?.latest?.username || "Cliente") : "Suporte Note Note";
+        const preview = String(data?.latest?.message || "Nova mensagem recebida.").slice(0, 110);
+        toast.info(`Nova mensagem de suporte — ${from}`, { description: preview, duration: 8000 });
+        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+          const notification = new Notification(`Note Note — ${from}`, { body: preview, icon: "/brand/note-note-icon.png", tag: `support-${latestId}` });
+          notification.onclick = () => { window.focus(); if (data?.audience === "admin") navigate("/admin/suporte"); notification.close(); };
+        }
+      } catch {
+        // Notificação é complementar; falhas silenciosas não interrompem o sistema.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 10000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [canWatchSupport, navigate, user?.id]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.title = supportUnreadCount > 0 ? `(${supportUnreadCount}) ${originalTitleRef.current}` : originalTitleRef.current;
+    return () => { document.title = originalTitleRef.current; };
+  }, [supportUnreadCount]);
 
   const navigation: NavItem[] = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, show: true },
@@ -84,7 +126,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   const renderNavItem = (item: NavItem) => {
     const Icon = item.icon; const active = isActive(item.href);
-    return <Link key={item.name} href={item.href}><a className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-[0.98] ${active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`} onClick={() => setSidebarOpen(false)}><Icon className="h-5 w-5 shrink-0" />{item.name}</a></Link>;
+    return <Link key={item.name} href={item.href}><a className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-[0.98] ${active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`} onClick={() => setSidebarOpen(false)}><Icon className="h-5 w-5 shrink-0" /><span className="flex-1">{item.name}</span>{item.href === "/admin/suporte" && supportUnreadCount > 0 ? <span className={`min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-black ${active ? "bg-primary-foreground text-primary" : "bg-primary text-primary-foreground"}`}>{supportUnreadCount > 99 ? "99+" : supportUnreadCount}</span> : null}</a></Link>;
   };
 
   const accountLabel = user.role === "super_admin" ? "Super Administrador" : commercialContext?.commercial ? commercialContext.isOwner ? `Contratante ${commercialContext.plan === "plus" ? "Plus" : "Basic"}` : "Usuário da conta" : user.role;

@@ -101,6 +101,58 @@ export async function handleSupportChat(req: any, res: any) {
     const sql = getSql();
     const queryAction = cleanText(Array.isArray(req?.query?.action) ? req.query.action[0] : req?.query?.action, 50).toLowerCase();
 
+    if (req.method === "GET" && queryAction === "notifications") {
+      if (user.role === "super_admin" || user.adminCanSupport) {
+        const counts = await sql`
+          SELECT COUNT(*)::int AS "unreadCount"
+          FROM support_messages
+          WHERE "senderRole"='user' AND "readAt" IS NULL
+        `;
+        const latestRows = await sql`
+          SELECT m.id,m.message,m."createdAt",t.id AS "threadId",u.name,u.username,u."supportId"
+          FROM support_messages m
+          JOIN support_threads t ON t.id=m."threadId"
+          JOIN users u ON u.id=t."subscriberUserId"
+          WHERE m."senderRole"='user' AND m."readAt" IS NULL
+          ORDER BY m."createdAt" DESC,m.id DESC
+          LIMIT 1
+        `;
+        return sendJson(res, 200, {
+          success: true,
+          unreadCount: Number((counts[0] as any)?.unreadCount || 0),
+          latest: latestRows[0] || null,
+          audience: "admin",
+        });
+      }
+
+      const subscriber = await getSubscriber(user);
+      if (!subscriber) return sendJson(res, 200, { success: true, unreadCount: 0, latest: null, audience: "none" });
+      const counts = await sql`
+        SELECT COUNT(*)::int AS "unreadCount"
+        FROM support_messages m
+        JOIN support_threads t ON t.id=m."threadId"
+        WHERE t."subscriberUserId"=${Number(subscriber.id)}
+          AND m."senderRole"='super_admin'
+          AND m."readAt" IS NULL
+      `;
+      const latestRows = await sql`
+        SELECT m.id,m.message,m."createdAt",m."threadId"
+        FROM support_messages m
+        JOIN support_threads t ON t.id=m."threadId"
+        WHERE t."subscriberUserId"=${Number(subscriber.id)}
+          AND m."senderRole"='super_admin'
+          AND m."readAt" IS NULL
+        ORDER BY m."createdAt" DESC,m.id DESC
+        LIMIT 1
+      `;
+      return sendJson(res, 200, {
+        success: true,
+        unreadCount: Number((counts[0] as any)?.unreadCount || 0),
+        latest: latestRows[0] || null,
+        audience: "subscriber",
+      });
+    }
+
     if (user.role === "super_admin" || user.adminCanSupport) {
       if (req.method === "GET" && (!queryAction || queryAction === "list")) {
         const threads = await sql`

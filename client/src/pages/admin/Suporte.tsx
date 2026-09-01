@@ -1,6 +1,6 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
-import { Circle, MessageCircle, RefreshCw, Send, UserRound } from "lucide-react";
+import { Bell, Circle, MessageCircle, RefreshCw, Send, UserRound } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -55,6 +55,14 @@ export default function AdminSuporte(){
   useEffect(()=>{if(!selected)return;const timer=window.setInterval(()=>loadThread(selected,true),10000);return()=>window.clearInterval(timer);},[selected,loadThread]);
   useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth"});},[messages.length]);
 
+  const enableNotifications=async()=>{
+    if (!("Notification" in window)) return toast.error("Este navegador não oferece notificações do sistema.");
+    if (Notification.permission === "granted") return toast.success("Notificações do navegador já estão ativadas.");
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") toast.success("Notificações de novas mensagens de suporte ativadas.");
+    else toast.error("Permissão de notificação não foi concedida.");
+  };
+
   const send=async(event:FormEvent)=>{
     event.preventDefault();
     if(!selected||!reply.trim()||sending)return;
@@ -82,7 +90,7 @@ export default function AdminSuporte(){
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Super Admin</p><h1 className="text-2xl font-bold">Suporte aos assinantes</h1><p className="text-sm text-muted-foreground">Mensagens organizadas pela chegada mais recente do cliente.</p></div>
-        <Button variant="outline" onClick={()=>loadList()}><RefreshCw className="mr-2 h-4 w-4"/>Atualizar</Button>
+        <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={enableNotifications}><Bell className="mr-2 h-4 w-4"/>Ativar notificações</Button><Button variant="outline" onClick={()=>loadList()}><RefreshCw className="mr-2 h-4 w-4"/>Atualizar</Button></div>
       </div>
       <div className="grid min-h-[620px] gap-4 lg:grid-cols-[360px_1fr]">
         <section className="overflow-hidden rounded-2xl border bg-card">
