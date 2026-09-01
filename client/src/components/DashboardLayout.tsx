@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCommercialContext } from "@/hooks/useCommercialContext";
 import { trpc } from "@/lib/trpc";
 import {
-  Activity, Building2, CalendarDays, Car, ChevronRight, ClipboardList, CreditCard, Database,
+  Activity, Building2, CalendarDays, CalendarRange, Car, ChevronRight, ClipboardList, CreditCard, Database,
   FileText, KeyRound, LayoutDashboard, LogOut, Mail, Menu, MessageCircle, MoreHorizontal, Package, Settings, Shield, Star,
   UserRound, UserRoundCog, Users, Wallet, X,
 } from "lucide-react";
@@ -98,6 +98,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     { name: "Financiamentos", href: "/financiamentos", icon: ClipboardList, show: Boolean(user?.canView && regularAccess) },
     { name: "Contas a receber", href: "/contas-a-receber", icon: CalendarDays, show: Boolean(user?.canView && regularAccess) },
     { name: "Caixa", href: "/caixa", icon: Wallet, show: Boolean(user?.canView && regularAccess) },
+    { name: "Fechamentos", href: "/fechamentos", icon: CalendarRange, show: Boolean(user?.canView && regularAccess) },
     { name: "Relatórios", href: "/relatorios", icon: FileText, show: Boolean(user?.canGenerateReports && regularAccess) },
     { name: "Agentes", href: "/agentes", icon: Users, show: Boolean(user?.canView && regularAccess) },
     { name: "Meu Banco", href: "/meu-banco", icon: Database, show: Boolean(canManageOwnDatabases && regularAccess) },

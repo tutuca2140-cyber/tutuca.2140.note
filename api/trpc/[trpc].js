@@ -264,6 +264,13 @@ var users = pgTable("users", {
   canGenerateReports: boolean("canGenerateReports").default(false).notNull(),
   canAccessSettings: boolean("canAccessSettings").default(false).notNull(),
   dashboardOnly: boolean("dashboardOnly").default(false).notNull(),
+  adminCanControlPanel: boolean("adminCanControlPanel").default(false).notNull(),
+  adminCanSubscriptions: boolean("adminCanSubscriptions").default(false).notNull(),
+  adminCanMarketing: boolean("adminCanMarketing").default(false).notNull(),
+  adminCanSupport: boolean("adminCanSupport").default(false).notNull(),
+  adminCanUsers: boolean("adminCanUsers").default(false).notNull(),
+  adminCanDatabases: boolean("adminCanDatabases").default(false).notNull(),
+  adminCanAudit: boolean("adminCanAudit").default(false).notNull(),
   failedLoginAttempts: integer("failedLoginAttempts").default(0).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   emailVerified: boolean("emailVerified").default(false).notNull(),
@@ -2472,6 +2479,12 @@ var adminProcedure2 = protectedProcedure2.use(({ ctx, next }) => {
   }
   return next({ ctx });
 });
+var usersAdminProcedure = protectedProcedure2.use(({ ctx, next }) => {
+  if (ctx.user.role !== "super_admin" && !ctx.user.adminCanUsers) {
+    throw new TRPCError3({ code: "FORBIDDEN", message: "Sem autoriza\xE7\xE3o para administrar usu\xE1rios." });
+  }
+  return next({ ctx });
+});
 var superAdminProcedure = protectedProcedure2.use(({ ctx, next }) => {
   if (ctx.user.role !== "super_admin") {
     throw new TRPCError3({
@@ -2657,10 +2670,10 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
   }),
   // ==================== USERS ====================
   users: router({
-    list: adminProcedure2.query(async () => {
+    list: usersAdminProcedure.query(async () => {
       return await getAllUsers();
     }),
-    getById: adminProcedure2.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
+    getById: usersAdminProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
       return await getUserById(input.id);
     }),
     create: superAdminProcedure.input(
@@ -2677,6 +2690,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         canGenerateReports: z2.boolean().default(false),
         canAccessSettings: z2.boolean().default(false),
         dashboardOnly: z2.boolean().default(false),
+        adminCanControlPanel: z2.boolean().default(false),
+        adminCanSubscriptions: z2.boolean().default(false),
+        adminCanMarketing: z2.boolean().default(false),
+        adminCanSupport: z2.boolean().default(false),
+        adminCanUsers: z2.boolean().default(false),
+        adminCanDatabases: z2.boolean().default(false),
+        adminCanAudit: z2.boolean().default(false),
         databaseIds: z2.array(z2.number().int().positive()).max(3).default([])
       })
     ).mutation(async ({ input, ctx }) => {
@@ -2742,6 +2762,13 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         canGenerateReports: z2.boolean(),
         canAccessSettings: z2.boolean(),
         dashboardOnly: z2.boolean(),
+        adminCanControlPanel: z2.boolean(),
+        adminCanSubscriptions: z2.boolean(),
+        adminCanMarketing: z2.boolean(),
+        adminCanSupport: z2.boolean(),
+        adminCanUsers: z2.boolean(),
+        adminCanDatabases: z2.boolean(),
+        adminCanAudit: z2.boolean(),
         databaseIds: z2.array(z2.number().int().positive()).max(3)
       })
     ).mutation(async ({ input, ctx }) => {

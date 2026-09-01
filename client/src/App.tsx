@@ -30,6 +30,7 @@ const Relatorios = lazy(() => import("./pages/Relatorios"));
 const MeuBanco = lazy(() => import("./pages/MeuBanco"));
 const Equipe = lazy(() => import("./pages/Equipe"));
 const Tutorial = lazy(() => import("./pages/Tutorial"));
+const Fechamentos = lazy(() => import("./pages/Fechamentos"));
 const AdminControle = lazy(() => import("./pages/admin/Controle"));
 const AdminAssinaturas = lazy(() => import("./pages/admin/Assinaturas"));
 const AdminMarketing = lazy(() => import("./pages/admin/Marketing"));
@@ -56,6 +57,7 @@ const PaidRelatorios = () => <CommercialPaymentGate><Relatorios /></CommercialPa
 const PaidMeuBanco = () => <CommercialPaymentGate><MeuBanco /></CommercialPaymentGate>;
 const PaidEquipe = () => <CommercialPaymentGate><Equipe /></CommercialPaymentGate>;
 const PaidTutorial = () => <CommercialPaymentGate><Tutorial /></CommercialPaymentGate>;
+const PaidFechamentos = () => <CommercialPaymentGate><Fechamentos /></CommercialPaymentGate>;
 
 function AuthenticatedSystemGuide() {
   const { user, loading } = useAuth();
@@ -87,6 +89,7 @@ function Router() {
       <Route path={"/meu-banco"} component={PaidMeuBanco} />
       <Route path={"/equipe"} component={PaidEquipe} />
       <Route path={"/tutorial"} component={PaidTutorial} />
+      <Route path={"/fechamentos"} component={PaidFechamentos} />
       <Route path={"/admin/controle"} component={AdminControle} />
       <Route path={"/admin/assinaturas"} component={AdminAssinaturas} />
       <Route path={"/admin/marketing"} component={AdminMarketing} />
