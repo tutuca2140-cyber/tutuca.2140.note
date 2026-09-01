@@ -1,0 +1,152 @@
+from pathlib import Path
+
+def rep(path, old, new, count=1):
+    p = Path(path)
+    t = p.read_text()
+    if old not in t:
+        raise SystemExit(f"Expected snippet not found in {path}: {old[:80]}")
+    p.write_text(t.replace(old, new, count))
+
+rep('drizzle/schema.ts', '''  category: varchar("category", { length: 120 }),
+  sku: varchar("sku", { length: 80 }),
+  purchasePrice: numeric("purchasePrice", { precision: 15, scale: 2 })''', '''  category: varchar("category", { length: 120 }),
+  sku: varchar("sku", { length: 80 }),
+  color: varchar("color", { length: 80 }),
+  stockQuantity: numeric("stockQuantity", { precision: 15, scale: 3 })
+    .default("0.000")
+    .notNull(),
+  stockUnit: varchar("stockUnit", {
+    length: 20,
+    enum: ["unit", "weight", "liter"],
+  })
+    .default("unit")
+    .notNull(),
+  purchasePrice: numeric("purchasePrice", { precision: 15, scale: 2 })''')
+
+rep('server/routers.ts', '''          category: z.string().trim().optional(),
+          sku: z.string().trim().optional(),
+          purchasePrice: z.coerce.number().nonnegative().default(0),''', '''          category: z.string().trim().optional(),
+          sku: z.string().trim().optional(),
+          color: z.string().trim().max(80).optional(),
+          stockQuantity: z.coerce.number().nonnegative().default(0),
+          stockUnit: z.enum(["unit", "weight", "liter"]).default("unit"),
+          purchasePrice: z.coerce.number().nonnegative().default(0),''')
+
+rep('server/routers.ts', '''        const created = await db.createProduct({
+          databaseId: activeDb.id,
+          name: input.name,
+          category: input.category || null,
+          sku: input.sku?.toUpperCase() || null,
+          purchasePrice: input.purchasePrice.toFixed(2),''', '''        if (input.stockUnit === "unit" && !Number.isInteger(input.stockQuantity)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Quando o estoque for por unidade, informe uma quantidade inteira.",
+          });
+        }
+        const created = await db.createProduct({
+          databaseId: activeDb.id,
+          name: input.name,
+          category: input.category || null,
+          sku: input.sku?.toUpperCase() || null,
+          color: input.color || null,
+          stockQuantity: input.stockQuantity.toFixed(3),
+          stockUnit: input.stockUnit,
+          purchasePrice: input.purchasePrice.toFixed(2),''')
+
+rep('server/bootstrap-schema.ts', '''    await sql`CREATE TABLE IF NOT EXISTS "products" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "category" varchar(120), "sku" varchar(80), "purchasePrice" numeric(15,2) DEFAULT '0.00' NOT NULL, "salePrice" numeric(15,2) NOT NULL, "status" varchar(64) DEFAULT 'disponivel' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;''', '''    await sql`CREATE TABLE IF NOT EXISTS "products" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "category" varchar(120), "sku" varchar(80), "color" varchar(80), "stockQuantity" numeric(15,3) DEFAULT '0.000' NOT NULL, "stockUnit" varchar(20) DEFAULT 'unit' NOT NULL, "purchasePrice" numeric(15,2) DEFAULT '0.00' NOT NULL, "salePrice" numeric(15,2) NOT NULL, "status" varchar(64) DEFAULT 'disponivel' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "color" varchar(80)`;
+    await sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockQuantity" numeric(15,3) DEFAULT '0.000' NOT NULL`;
+    await sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockUnit" varchar(20) DEFAULT 'unit' NOT NULL`;''')
+
+p = Path('client/src/pages/Produtos.tsx')
+t = p.read_text()
+t = t.replace('''  sku: "",
+  cost: "",''', '''  sku: "",
+  color: "",
+  stockQuantity: "0",
+  stockUnit: "unit" as "unit" | "weight" | "liter",
+  cost: "",''', 1)
+t = t.replace('''        sku: form.sku.trim().toUpperCase() || undefined,
+        purchasePrice: form.cost || "0",''', '''        sku: form.sku.trim().toUpperCase() || undefined,
+        color: form.color.trim() || undefined,
+        stockQuantity: form.stockQuantity || "0",
+        stockUnit: form.stockUnit,
+        purchasePrice: form.cost || "0",''', 1)
+t = t.replace('''    `${item.name} ${item.category ?? ""} ${item.sku ?? ""}`''', '''    `${item.name} ${item.category ?? ""} ${item.sku ?? ""} ${item.color ?? ""}`''', 1)
+marker = '''                    <div>
+                      <Label htmlFor="product-cost">Valor de compra</Label>'''
+controls = '''                    <div>
+                      <Label htmlFor="product-color">Cor do produto</Label>
+                      <Input
+                        id="product-color"
+                        value={form.color}
+                        placeholder="Ex.: Azul, Preto, Branco"
+                        onChange={e => setForm(c => ({ ...c, color: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="product-stock-unit">Controle do estoque por</Label>
+                      <select
+                        id="product-stock-unit"
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={form.stockUnit}
+                        onChange={e => setForm(c => ({ ...c, stockUnit: e.target.value as "unit" | "weight" | "liter" }))}
+                      >
+                        <option value="unit">Unidade</option>
+                        <option value="weight">Peso (kg)</option>
+                        <option value="liter">Litro (L)</option>
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="product-stock-quantity">Quantidade em estoque *</Label>
+                      <Input
+                        id="product-stock-quantity"
+                        type="number"
+                        min="0"
+                        step={form.stockUnit === "unit" ? "1" : "0.001"}
+                        value={form.stockQuantity}
+                        onChange={e => setForm(c => ({ ...c, stockQuantity: e.target.value }))}
+                        required
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {form.stockUnit === "unit" ? "Informe o número de unidades existentes." : form.stockUnit === "weight" ? "Informe o peso total disponível em quilogramas." : "Informe o volume total disponível em litros."}
+                      </p>
+                    </div>
+                    <div>
+                      <Label htmlFor="product-cost">Valor de compra</Label>'''
+if marker not in t:
+    raise SystemExit('Product form marker not found')
+t = t.replace(marker, controls, 1)
+old = '''              <CardContent className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">Venda</p>
+                  <p className="font-semibold">{money(product.salePrice)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  <p className="font-semibold capitalize">{product.status}</p>
+                </div>
+              </CardContent>'''
+new = '''              <CardContent className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">Venda</p>
+                  <p className="font-semibold">{money(product.salePrice)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Estoque</p>
+                  <p className="font-semibold">
+                    {Number(product.stockQuantity || 0).toLocaleString("pt-BR", { maximumFractionDigits: 3 })} {product.stockUnit === "weight" ? "kg" : product.stockUnit === "liter" ? "L" : Number(product.stockQuantity || 0) === 1 ? "unidade" : "unidades"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Cor</p>
+                  <p className="font-semibold">{product.color || "Não informada"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  <p className="font-semibold capitalize">{product.status}</p>
+                </div>
+              </CardContent>'''
+if old not in t:
+    raise SystemExit('Product card marker not found')
+p.write_text(t.replace(old, new, 1))
