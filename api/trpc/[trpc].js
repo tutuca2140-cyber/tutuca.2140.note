@@ -1698,20 +1698,36 @@ async function getVehicleById(id) {
   const result = await db.select().from(vehicles).where(eq(vehicles.id, id)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
+var productInventorySchemaPromise = null;
+async function ensureProductInventorySchema(db) {
+  if (productInventorySchemaPromise) return productInventorySchemaPromise;
+  productInventorySchemaPromise = (async () => {
+    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "color" varchar(80)`);
+    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockQuantity" numeric(15,3) DEFAULT '0.000' NOT NULL`);
+    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockUnit" varchar(20) DEFAULT 'unit' NOT NULL`);
+  })().catch((error) => {
+    productInventorySchemaPromise = null;
+    throw error;
+  });
+  return productInventorySchemaPromise;
+}
 async function getProductsByDatabase(databaseId) {
   const db = await getDb();
   if (!db) return [];
+  await ensureProductInventorySchema(db);
   return db.select().from(products).where(eq(products.databaseId, databaseId)).orderBy(desc(products.createdAt));
 }
 async function getProductById(id) {
   const db = await getDb();
   if (!db) return void 0;
+  await ensureProductInventorySchema(db);
   const rows = await db.select().from(products).where(eq(products.id, id)).limit(1);
   return rows[0];
 }
 async function createProduct(data) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
+  await ensureProductInventorySchema(db);
   const [created] = await db.insert(products).values(data).returning();
   if (!created) throw new Error("N\xE3o foi poss\xEDvel confirmar o produto criado.");
   return created;

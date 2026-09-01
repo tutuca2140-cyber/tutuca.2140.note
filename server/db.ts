@@ -1783,9 +1783,24 @@ export async function getVehicleById(id: number) {
 }
 
 // ==================== PRODUCTS ====================
+let productInventorySchemaPromise: Promise<void> | null = null;
+async function ensureProductInventorySchema(db: any) {
+  if (productInventorySchemaPromise) return productInventorySchemaPromise;
+  productInventorySchemaPromise = (async () => {
+    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "color" varchar(80)`);
+    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockQuantity" numeric(15,3) DEFAULT '0.000' NOT NULL`);
+    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockUnit" varchar(20) DEFAULT 'unit' NOT NULL`);
+  })().catch((error: unknown) => {
+    productInventorySchemaPromise = null;
+    throw error;
+  });
+  return productInventorySchemaPromise;
+}
+
 export async function getProductsByDatabase(databaseId: number) {
   const db = await getDb();
   if (!db) return [];
+  await ensureProductInventorySchema(db);
   return db
     .select()
     .from(products)
@@ -1796,6 +1811,7 @@ export async function getProductsByDatabase(databaseId: number) {
 export async function getProductById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
+  await ensureProductInventorySchema(db);
   const rows = await db
     .select()
     .from(products)
@@ -1807,6 +1823,7 @@ export async function getProductById(id: number) {
 export async function createProduct(data: InsertProduct) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
+  await ensureProductInventorySchema(db);
   const [created] = await db.insert(products).values(data).returning();
   if (!created) throw new Error("Não foi possível confirmar o produto criado.");
   return created;
