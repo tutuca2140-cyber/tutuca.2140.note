@@ -429,6 +429,16 @@ export const products = pgTable("products", {
   name: varchar("name", { length: 255 }).notNull(),
   category: varchar("category", { length: 120 }),
   sku: varchar("sku", { length: 80 }),
+  color: varchar("color", { length: 80 }),
+  stockQuantity: numeric("stockQuantity", { precision: 15, scale: 3 })
+    .default("0.000")
+    .notNull(),
+  stockUnit: varchar("stockUnit", {
+    length: 20,
+    enum: ["unit", "weight", "liter"],
+  })
+    .default("unit")
+    .notNull(),
   purchasePrice: numeric("purchasePrice", { precision: 15, scale: 2 })
     .default("0.00")
     .notNull(),

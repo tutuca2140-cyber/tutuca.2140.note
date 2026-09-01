@@ -537,6 +537,12 @@ var products = pgTable("products", {
   name: varchar("name", { length: 255 }).notNull(),
   category: varchar("category", { length: 120 }),
   sku: varchar("sku", { length: 80 }),
+  color: varchar("color", { length: 80 }),
+  stockQuantity: numeric("stockQuantity", { precision: 15, scale: 3 }).default("0.000").notNull(),
+  stockUnit: varchar("stockUnit", {
+    length: 20,
+    enum: ["unit", "weight", "liter"]
+  }).default("unit").notNull(),
   purchasePrice: numeric("purchasePrice", { precision: 15, scale: 2 }).default("0.00").notNull(),
   salePrice: numeric("salePrice", { precision: 15, scale: 2 }).notNull(),
   status: varchar("status", {
@@ -4407,6 +4413,9 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         name: z2.string().trim().min(1, "Informe o nome do produto."),
         category: z2.string().trim().optional(),
         sku: z2.string().trim().optional(),
+        color: z2.string().trim().max(80).optional(),
+        stockQuantity: z2.coerce.number().nonnegative().default(0),
+        stockUnit: z2.enum(["unit", "weight", "liter"]).default("unit"),
         purchasePrice: z2.coerce.number().nonnegative().default(0),
         salePrice: z2.coerce.number().positive(),
         description: z2.string().trim().optional()
@@ -4423,11 +4432,20 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           code: "BAD_REQUEST",
           message: "Nenhum banco ativo."
         });
+      if (input.stockUnit === "unit" && !Number.isInteger(input.stockQuantity)) {
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Quando o estoque for por unidade, informe uma quantidade inteira."
+        });
+      }
       const created = await createProduct({
         databaseId: activeDb.id,
         name: input.name,
         category: input.category || null,
         sku: input.sku?.toUpperCase() || null,
+        color: input.color || null,
+        stockQuantity: input.stockQuantity.toFixed(3),
+        stockUnit: input.stockUnit,
         purchasePrice: input.purchasePrice.toFixed(2),
         salePrice: input.salePrice.toFixed(2),
         description: input.description || null,
@@ -5179,7 +5197,10 @@ function ensurePreviewBusinessSchema() {
     await sql2`CREATE TABLE IF NOT EXISTS "clients" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "cpf" varchar(14), "birthDate" timestamp, "email" varchar(320), "phone" varchar(20), "whatsapp" varchar(20), "profession" varchar(120), "indicatorAgentId" integer, "address" text, "residentialAddress" jsonb, "commercialAddress" jsonb, "city" varchar(100), "state" varchar(2), "zipCode" varchar(10), "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`CREATE TABLE IF NOT EXISTS "loans" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "clientId" integer NOT NULL, "amount" numeric(15,2) NOT NULL, "interestType" varchar(64) DEFAULT 'simple' NOT NULL, "interestRate" numeric(8,4) NOT NULL, "ratePeriod" varchar(64) DEFAULT 'month' NOT NULL, "installments" integer NOT NULL, "installmentAmount" numeric(15,2) NOT NULL, "totalAmount" numeric(15,2) NOT NULL, "remainingBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "principalBalance" numeric(15,2) DEFAULT '0.00' NOT NULL, "accruedInterest" numeric(15,2) DEFAULT '0.00' NOT NULL, "totalPaid" numeric(15,2) DEFAULT '0.00' NOT NULL, "lastInterestPeriod" varchar(20), "startDate" timestamp NOT NULL, "endDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'ativo' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`CREATE TABLE IF NOT EXISTS "vehicles" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "clientId" integer, "vehicleType" varchar(64) DEFAULT 'OUTRO' NOT NULL, "brand" varchar(100), "model" varchar(100) NOT NULL, "year" integer, "color" varchar(50), "plate" varchar(20), "renavam" varchar(30), "chassi" varchar(50), "mileage" integer, "purchasePrice" numeric(15,2) DEFAULT '0.00' NOT NULL, "expenses" numeric(15,2) DEFAULT '0.00' NOT NULL, "salePrice" numeric(15,2), "purchaseDate" timestamp, "stockEntryDate" timestamp DEFAULT now() NOT NULL, "price" numeric(15,2) DEFAULT '0.00' NOT NULL, "status" varchar(64) DEFAULT 'disponivel' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
-    await sql2`CREATE TABLE IF NOT EXISTS "products" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "category" varchar(120), "sku" varchar(80), "purchasePrice" numeric(15,2) DEFAULT '0.00' NOT NULL, "salePrice" numeric(15,2) NOT NULL, "status" varchar(64) DEFAULT 'disponivel' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`CREATE TABLE IF NOT EXISTS "products" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "name" varchar(255) NOT NULL, "category" varchar(120), "sku" varchar(80), "color" varchar(80), "stockQuantity" numeric(15,3) DEFAULT '0.000' NOT NULL, "stockUnit" varchar(20) DEFAULT 'unit' NOT NULL, "purchasePrice" numeric(15,2) DEFAULT '0.00' NOT NULL, "salePrice" numeric(15,2) NOT NULL, "status" varchar(64) DEFAULT 'disponivel' NOT NULL, "description" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
+    await sql2`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "color" varchar(80)`;
+    await sql2`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockQuantity" numeric(15,3) DEFAULT '0.000' NOT NULL`;
+    await sql2`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockUnit" varchar(20) DEFAULT 'unit' NOT NULL`;
     await sql2`CREATE TABLE IF NOT EXISTS "vehicleFinancings" ("id" serial PRIMARY KEY, "databaseId" integer NOT NULL, "vehicleId" integer NOT NULL, "clientId" integer NOT NULL, "vehiclePrice" numeric(15,2) NOT NULL, "downPayment" numeric(15,2) NOT NULL, "financedAmount" numeric(15,2) NOT NULL, "interestRate" numeric(5,2) NOT NULL, "installments" integer NOT NULL, "installmentAmount" numeric(15,2) NOT NULL, "totalAmount" numeric(15,2) NOT NULL, "startDate" timestamp NOT NULL, "endDate" timestamp NOT NULL, "status" varchar(64) DEFAULT 'ativo' NOT NULL, "notes" text, "createdBy" integer NOT NULL, "createdAt" timestamp DEFAULT now() NOT NULL, "updatedAt" timestamp DEFAULT now() NOT NULL)`;
     await sql2`ALTER TABLE "vehicleFinancings" ALTER COLUMN "vehicleId" DROP NOT NULL`;
     await sql2`ALTER TABLE "vehicleFinancings" ADD COLUMN IF NOT EXISTS "assetType" varchar(20) DEFAULT 'vehicle' NOT NULL`;

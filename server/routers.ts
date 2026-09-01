@@ -2508,6 +2508,9 @@ export const appRouter = router({
           name: z.string().trim().min(1, "Informe o nome do produto."),
           category: z.string().trim().optional(),
           sku: z.string().trim().optional(),
+          color: z.string().trim().max(80).optional(),
+          stockQuantity: z.coerce.number().nonnegative().default(0),
+          stockUnit: z.enum(["unit", "weight", "liter"]).default("unit"),
           purchasePrice: z.coerce.number().nonnegative().default(0),
           salePrice: z.coerce.number().positive(),
           description: z.string().trim().optional(),
@@ -2525,11 +2528,20 @@ export const appRouter = router({
             code: "BAD_REQUEST",
             message: "Nenhum banco ativo.",
           });
+        if (input.stockUnit === "unit" && !Number.isInteger(input.stockQuantity)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Quando o estoque for por unidade, informe uma quantidade inteira.",
+          });
+        }
         const created = await db.createProduct({
           databaseId: activeDb.id,
           name: input.name,
           category: input.category || null,
           sku: input.sku?.toUpperCase() || null,
+          color: input.color || null,
+          stockQuantity: input.stockQuantity.toFixed(3),
+          stockUnit: input.stockUnit,
           purchasePrice: input.purchasePrice.toFixed(2),
           salePrice: input.salePrice.toFixed(2),
           description: input.description || null,

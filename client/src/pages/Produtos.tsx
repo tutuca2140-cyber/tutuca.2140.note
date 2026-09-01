@@ -21,6 +21,9 @@ const emptyForm = {
   name: "",
   category: "",
   sku: "",
+  color: "",
+  stockQuantity: "0",
+  stockUnit: "unit" as "unit" | "weight" | "liter",
   cost: "",
   price: "",
   notes: "",
@@ -41,7 +44,7 @@ export default function Produtos() {
   const deleteProduct = trpc.products.delete.useMutation();
   const utils = trpc.useUtils();
   const filteredProducts = products.filter(item =>
-    `${item.name} ${item.category ?? ""} ${item.sku ?? ""}`
+    `${item.name} ${item.category ?? ""} ${item.sku ?? ""} ${item.color ?? ""}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
@@ -53,6 +56,9 @@ export default function Produtos() {
         name: form.name.trim(),
         category: form.category.trim() || undefined,
         sku: form.sku.trim().toUpperCase() || undefined,
+        color: form.color.trim() || undefined,
+        stockQuantity: form.stockQuantity || "0",
+        stockUnit: form.stockUnit,
         purchasePrice: form.cost || "0",
         salePrice: form.price,
         description: form.notes.trim() || undefined,
@@ -153,6 +159,43 @@ export default function Produtos() {
                           setForm(c => ({ ...c, sku: e.target.value }))
                         }
                       />
+                    </div>
+                    <div>
+                      <Label htmlFor="product-color">Cor do produto</Label>
+                      <Input
+                        id="product-color"
+                        value={form.color}
+                        placeholder="Ex.: Azul, Preto, Branco"
+                        onChange={e => setForm(c => ({ ...c, color: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="product-stock-unit">Controle do estoque por</Label>
+                      <select
+                        id="product-stock-unit"
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={form.stockUnit}
+                        onChange={e => setForm(c => ({ ...c, stockUnit: e.target.value as "unit" | "weight" | "liter" }))}
+                      >
+                        <option value="unit">Unidade</option>
+                        <option value="weight">Peso (kg)</option>
+                        <option value="liter">Litro (L)</option>
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="product-stock-quantity">Quantidade em estoque *</Label>
+                      <Input
+                        id="product-stock-quantity"
+                        type="number"
+                        min="0"
+                        step={form.stockUnit === "unit" ? "1" : "0.001"}
+                        value={form.stockQuantity}
+                        onChange={e => setForm(c => ({ ...c, stockQuantity: e.target.value }))}
+                        required
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {form.stockUnit === "unit" ? "Informe o número de unidades existentes." : form.stockUnit === "weight" ? "Informe o peso total disponível em quilogramas." : "Informe o volume total disponível em litros."}
+                      </p>
                     </div>
                     <div>
                       <Label htmlFor="product-cost">Valor de compra</Label>
@@ -256,6 +299,16 @@ export default function Produtos() {
                 <div>
                   <p className="text-xs text-muted-foreground">Venda</p>
                   <p className="font-semibold">{money(product.salePrice)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Estoque</p>
+                  <p className="font-semibold">
+                    {Number(product.stockQuantity || 0).toLocaleString("pt-BR", { maximumFractionDigits: 3 })} {product.stockUnit === "weight" ? "kg" : product.stockUnit === "liter" ? "L" : Number(product.stockQuantity || 0) === 1 ? "unidade" : "unidades"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Cor</p>
+                  <p className="font-semibold">{product.color || "Não informada"}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Status</p>
