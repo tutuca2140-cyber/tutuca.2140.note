@@ -33,6 +33,12 @@ export default async function handler(req: any, res: any) {
         u."canDelete",
         u."canGenerateReports",
         u."canAccessSettings",
+        u."canAdminControl",
+        u."canAdminSubscriptions",
+        u."canAdminMarketing",
+        u."canAdminSupport",
+        u."canAdminDatabases",
+        u."canAdminAudit",
         u."dashboardOnly",
         u."isActive"
       FROM local_sessions s

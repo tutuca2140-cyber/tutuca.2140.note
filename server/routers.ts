@@ -81,13 +81,21 @@ const protectedProcedure = baseProtectedProcedure.use(({ ctx, next, path }) => {
 });
 
 // Admin procedure - requer role admin ou super_admin
-const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
+const adminProcedure = protectedProcedure.use(({ ctx, next, path }) => {
   if (ctx.user.role !== "admin" && ctx.user.role !== "super_admin") {
     throw new TRPCError({
       code: "FORBIDDEN",
       message:
         "Acesso negado. Apenas administradores podem acessar este recurso.",
     });
+  }
+  if (ctx.user.role === "admin") {
+    if (path.startsWith("databases.") && !ctx.user.canAdminDatabases) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Você não possui autorização administrativa para Bancos de Dados." });
+    }
+    if (path.startsWith("audit.") && !ctx.user.canAdminAudit) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Você não possui autorização administrativa para Auditoria." });
+    }
   }
   return next({ ctx });
 });
