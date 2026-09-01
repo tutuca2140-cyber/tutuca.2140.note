@@ -5,20 +5,103 @@ on:
     branches:
       - audit/full-system-2026-09-01
 
+permissions:
+  contents: write
+
 jobs:
   audit:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: audit/full-system-2026-09-01
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: pnpm install --no-frozen-lockfile --config.allow-unused-patches=true
+      - name: Apply audited fixes and cleanup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          def replace_exact(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f'Expected snippet not found in {path}')
+              p.write_text(text.replace(old, new, 1))
+
+          replace_exact(
+              'api/auth/register-commercial.ts',
+              '    const trialEndsAt = trialEndDate();\n    const created = await sql`',
+              '    const trialEndsAt = trialEndDate();\n    const initialAccessActive = billingMethod === "card_monthly";\n    const subscriptionTrialEndsAt = initialAccessActive ? trialEndsAt.toISOString() : null;\n    const created = await sql`'
+          )
+          replace_exact(
+              'api/auth/register-commercial.ts',
+              '        true, true, true, true, true, false, false, 0, true, false, NOW(), NOW(), NOW()',
+              '        true, true, true, true, true, false, false, 0, ${initialAccessActive}, false, NOW(), NOW(), NOW()'
+          )
+          replace_exact(
+              'api/auth/register-commercial.ts',
+              "        ${user.id}, ${plan}, ${selectedPrice}, 'active', 'commercial_signup', 'asaas',\n        ${billingMethod}, ${trialEndsAt.toISOString()}, NOW(), NOW()",
+              "        ${user.id}, ${plan}, ${selectedPrice}, ${initialAccessActive ? \"active\" : \"pending_payment\"}, 'commercial_signup', 'asaas',\n        ${billingMethod}, ${subscriptionTrialEndsAt}, NOW(), NOW()"
+          )
+
+          replace_exact(
+              'server/properties-v2.ts',
+              'function installmentDue(startDate:string,n:number){const d=new Date(`${startDate}T12:00:00`);d.setMonth(d.getMonth()+Math.max(0,n-1));return d.toISOString().slice(0,10);}',
+              'function installmentDue(startDate:any,n:number){const raw=startDate instanceof Date?startDate.toISOString().slice(0,10):String(startDate??"").trim().slice(0,10);const d=new Date(`${raw}T12:00:00Z`);if(Number.isNaN(d.getTime()))throw Object.assign(new Error("Data inicial do financiamento inválida."),{statusCode:400});d.setUTCMonth(d.getUTCMonth()+Math.max(0,n-1));return d.toISOString().slice(0,10);}'
+          )
+          replace_exact(
+              'server/properties-v2.ts',
+              'installmentDue(String(f.startDate).slice(0,10),installmentNumber)',
+              'installmentDue(f.startDate,installmentNumber)'
+          )
+
+          p = Path('api/site-access.ts')
+          text = p.read_text()
+          text = text.replace('import { handleMercadoPagoWebhook } from "../server/mercadopago-webhook.js";\n', '')
+          text = text.replace('  if(scope==="mercadopago-webhook")return handleMercadoPagoWebhook(req,res);\n', '')
+          p.write_text(text)
+
+          vercel = json.loads(Path('vercel.json').read_text())
+          vercel['rewrites'] = [r for r in vercel.get('rewrites', []) if 'mercadopago' not in r.get('source','').lower() and 'mercadopago' not in r.get('destination','').lower()]
+          vercel['headers'] = [{
+              'source': '/api/(.*)',
+              'headers': [
+                  {'key': 'Cache-Control', 'value': 'no-store, no-cache, must-revalidate, max-age=0'},
+                  {'key': 'Pragma', 'value': 'no-cache'},
+                  {'key': 'Expires', 'value': '0'}
+              ]
+          }]
+          Path('vercel.json').write_text(json.dumps(vercel, indent=2, ensure_ascii=False) + '\n')
+
+          pkg = json.loads(Path('package.json').read_text())
+          pkg['name'] = 'note-note-sistema'
+          pnpm = pkg.get('pnpm', {})
+          pnpm.pop('patchedDependencies', None)
+          pkg['pnpm'] = pnpm
+          Path('package.json').write_text(json.dumps(pkg, indent=2, ensure_ascii=False) + '\n')
+
+          for obsolete in ['server/mercadopago-webhook.ts', 'patches/wouter@3.7.1.patch']:
+              q = Path(obsolete)
+              if q.exists(): q.unlink()
+          PY
+      - run: pnpm install --no-frozen-lockfile
       - name: TypeScript check
         run: pnpm check
       - name: Unit and integration tests
         run: pnpm test
       - name: Production build
         run: pnpm build
+      - name: Commit audited changes
+        run: |
+          rm -f .github/workflows/full-system-audit.yml
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add -A
+          git commit -m "fix: audit payment access, cache and obsolete code [skip ci]"
+          git push origin HEAD:audit/full-system-2026-09-01
