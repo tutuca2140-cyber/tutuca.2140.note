@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt";
 import {
+  ensureAuthUserColumns,
   getSql,
   readCookie,
   readJsonBody,
@@ -21,6 +22,7 @@ function isPlan(value: unknown): value is PlanId {
 }
 
 async function ensureTables() {
+  await ensureAuthUserColumns();
   const sql = getSql();
   await sql`
     CREATE TABLE IF NOT EXISTS commercial_subscriptions (
@@ -72,7 +74,7 @@ async function getSuperAdmin(req: any) {
   if (!token) return null;
   const sql = getSql();
   const rows = await sql`
-    SELECT u.id, u.username, u.email, u.name, u.role, u."isActive", u."passwordHash"
+    SELECT u.id, u.username, u.email, u.name, u.role, u."isActive", u."passwordHash", u."canAdminSubscriptions"
       FROM local_sessions s
       JOIN users u ON u.id = s."userId"
      WHERE s.token = ${token}
@@ -80,7 +82,7 @@ async function getSuperAdmin(req: any) {
      LIMIT 1
   `;
   const user = rows[0] as any;
-  if (!user?.isActive || user.role !== "super_admin") return null;
+  if (!user?.isActive || !(user.role === "super_admin" || (user.role === "admin" && user.canAdminSubscriptions))) return null;
   return user;
 }
 
@@ -106,7 +108,7 @@ async function listCommercialAccounts() {
       GROUP BY au."ownerId"
     )
     SELECT
-      u.id, u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt", u."lastSignedIn",
+      u.id, u.username, u.name, u.email, u.whatsapp, u."supportId", u."isActive", u."createdAt", u."lastSignedIn",
       cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt" AS "subscriptionUpdatedAt",
       cs.provider, cs."billingMethod", cs."providerStatus", cs."providerSubscriptionId",
       cs."providerCheckoutId", cs."providerCustomerId", cs."checkoutUrl", cs."lastPaymentStatus",
@@ -122,7 +124,7 @@ async function listCommercialAccounts() {
     LEFT JOIN usage_summary usage ON usage."ownerId" = u.id
     WHERE u."loginMethod" = 'commercial_signup'
     GROUP BY
-      u.id, u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt", u."lastSignedIn",
+      u.id, u.username, u.name, u.email, u.whatsapp, u."supportId", u."isActive", u."createdAt", u."lastSignedIn",
       cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt", cs.provider,
       cs."billingMethod", cs."providerStatus", cs."providerSubscriptionId", cs."providerCheckoutId",
       cs."providerCustomerId", cs."checkoutUrl", cs."lastPaymentStatus", cs."lastPaymentId",
@@ -214,6 +216,9 @@ async function writeSubscriptionAudit(admin: any, target: any, action: string, d
 }
 
 async function verifyAdminPassword(admin: any, password: string) {
+  if (admin.role !== "super_admin") {
+    throw Object.assign(new Error("Esta ação protegida é exclusiva do Super Administrador."), { statusCode: 403 });
+  }
   if (!password || !admin.passwordHash) {
     throw Object.assign(new Error("Digite a senha do Super Administrador para confirmar."), { statusCode: 400 });
   }

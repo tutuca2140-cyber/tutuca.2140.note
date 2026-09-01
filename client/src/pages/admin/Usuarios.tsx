@@ -44,7 +44,8 @@ type PermissionKey =
   | "canGenerateReports"
   | "canAccessSettings";
 type Permissions = Record<PermissionKey, boolean>;
-type Draft = Permissions & {
+type AdminPermissionKey = "canAdminControl" | "canAdminSubscriptions" | "canAdminMarketing" | "canAdminSupport" | "canAdminDatabases" | "canAdminAudit";
+type Draft = Permissions & Record<AdminPermissionKey, boolean> & {
   id?: number;
   username: string;
   email: string;
@@ -69,6 +70,15 @@ const permissionOptions: Array<{
   { key: "canAccessSettings", label: "Acessar configurações", description: "Consultar e alterar configurações administrativas." },
 ];
 
+const adminPermissionOptions: Array<{ key: AdminPermissionKey; label: string; description: string }> = [
+  { key: "canAdminControl", label: "Painel de Controle", description: "Visualizar indicadores gerais, acessos e usuários consolidados." },
+  { key: "canAdminSubscriptions", label: "Assinaturas", description: "Consultar assinaturas e executar ações operacionais permitidas. Cancelamentos e exclusões protegidas continuam exclusivos do Super Admin." },
+  { key: "canAdminMarketing", label: "Marketing", description: "Consultar destinatários autorizados e enviar campanhas de e-mail." },
+  { key: "canAdminSupport", label: "Suporte", description: "Receber, responder, encerrar e reabrir atendimentos dos assinantes." },
+  { key: "canAdminDatabases", label: "Bancos de Dados", description: "Acessar a administração de bancos permitida ao perfil administrador." },
+  { key: "canAdminAudit", label: "Auditoria", description: "Consultar registros de auditoria e histórico administrativo." },
+];
+
 const permissionsForRole = (role: Draft["role"]): Permissions =>
   role === "admin"
     ? { canView: true, canInsert: true, canEdit: true, canDelete: true, canGenerateReports: true, canAccessSettings: true }
@@ -82,6 +92,12 @@ const makeEmptyDraft = (): Draft => ({
   role: "user",
   databaseIds: [],
   dashboardOnly: false,
+  canAdminControl: false,
+  canAdminSubscriptions: false,
+  canAdminMarketing: false,
+  canAdminSupport: false,
+  canAdminDatabases: false,
+  canAdminAudit: false,
   ...permissionsForRole("user"),
 });
 
@@ -141,6 +157,12 @@ export default function AdminUsuarios() {
       canDelete: user.canDelete,
       canGenerateReports: user.canGenerateReports,
       canAccessSettings: user.canAccessSettings,
+      canAdminControl: Boolean(user.canAdminControl),
+      canAdminSubscriptions: Boolean(user.canAdminSubscriptions),
+      canAdminMarketing: Boolean(user.canAdminMarketing),
+      canAdminSupport: Boolean(user.canAdminSupport),
+      canAdminDatabases: Boolean(user.canAdminDatabases),
+      canAdminAudit: Boolean(user.canAdminAudit),
       databaseIds: user.databaseIds ?? [],
       dashboardOnly: user.dashboardOnly,
     });
@@ -259,7 +281,7 @@ export default function AdminUsuarios() {
                       <Label>Perfil</Label>
                       <Select
                         value={draft.role}
-                        onValueChange={(role: Draft["role"]) => setDraft({ ...draft, role, dashboardOnly: false, ...permissionsForRole(role) })}
+                        onValueChange={(role: Draft["role"]) => setDraft({ ...draft, role, dashboardOnly: false, ...permissionsForRole(role), ...(role === "user" ? { canAdminControl:false, canAdminSubscriptions:false, canAdminMarketing:false, canAdminSupport:false, canAdminDatabases:false, canAdminAudit:false } : {}) })}
                       >
                         <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
                         <SelectContent><SelectItem value="user">Usuário</SelectItem><SelectItem value="admin">Administrador</SelectItem></SelectContent>
@@ -313,6 +335,28 @@ export default function AdminUsuarios() {
                     </div>
                   )}
                 </section>
+
+
+                {draft.role === "admin" && !draft.dashboardOnly && (
+                  <section className="space-y-4 border-t pt-5">
+                    <div className="flex items-start gap-3">
+                      <div className="rounded-lg bg-primary/10 p-2 text-primary"><Shield className="h-5 w-5" /></div>
+                      <div><h3 className="font-semibold">Autorizações administrativas delegadas</h3><p className="text-sm text-muted-foreground">Escolha quais áreas da Administração este usuário da equipe poderá acessar. O gerenciamento de usuários e ações protegidas por senha do Super Admin não são delegáveis.</p></div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {adminPermissionOptions.map(permission => (
+                        <div key={permission.key} className="flex min-w-0 items-start justify-between gap-4 rounded-xl border bg-card p-4">
+                          <Label htmlFor={`admin-permission-${permission.key}`} className="min-w-0 cursor-pointer leading-normal">
+                            <span className="block font-medium">{permission.label}</span>
+                            <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">{permission.description}</span>
+                          </Label>
+                          <Switch id={`admin-permission-${permission.key}`} checked={draft[permission.key]} onCheckedChange={checked => setDraft(current => ({ ...current, [permission.key]: checked }))} aria-label={permission.label} />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><strong>Segurança:</strong> Usuários, exclusão de contas, cancelamentos protegidos e alterações de permissões continuam exclusivos do Super Admin.</div>
+                  </section>
+                )}
 
                 <div className="flex flex-col-reverse gap-2 border-t pt-5 sm:flex-row sm:justify-end">
                   <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>

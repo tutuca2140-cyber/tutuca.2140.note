@@ -34,6 +34,13 @@ export const users = pgTable("users", {
   canDelete: boolean("canDelete").default(false).notNull(),
   canGenerateReports: boolean("canGenerateReports").default(false).notNull(),
   canAccessSettings: boolean("canAccessSettings").default(false).notNull(),
+  // Autorizações administrativas delegadas pelo Super Admin
+  canAdminControl: boolean("canAdminControl").default(false).notNull(),
+  canAdminSubscriptions: boolean("canAdminSubscriptions").default(false).notNull(),
+  canAdminMarketing: boolean("canAdminMarketing").default(false).notNull(),
+  canAdminSupport: boolean("canAdminSupport").default(false).notNull(),
+  canAdminDatabases: boolean("canAdminDatabases").default(true).notNull(),
+  canAdminAudit: boolean("canAdminAudit").default(true).notNull(),
   dashboardOnly: boolean("dashboardOnly").default(false).notNull(),
   failedLoginAttempts: integer("failedLoginAttempts").default(0).notNull(),
 

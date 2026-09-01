@@ -1,8 +1,10 @@
+import { useAuth } from "@/_core/hooks/useAuth";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Circle, MessageCircle, RefreshCw, Send, UserRound } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useLocation } from "wouter";
 
 type Thread = {
   id:number;
@@ -21,6 +23,8 @@ type Thread = {
 type Msg = { id:number; senderRole:"user"|"super_admin"; message:string; createdAt:string; senderName?:string };
 
 export default function AdminSuporte(){
+  const { user, loading: authLoading }=useAuth({redirectOnUnauthenticated:true,redirectPath:"/login"});
+  const [,navigate]=useLocation();
   const [threads,setThreads]=useState<Thread[]>([]);
   const [selected,setSelected]=useState<number|null>(null);
   const [detail,setDetail]=useState<any>(null);
@@ -50,7 +54,8 @@ export default function AdminSuporte(){
     }catch(error){if(!silent)toast.error(error instanceof Error?error.message:"Erro ao abrir atendimento.");}
   },[]);
 
-  useEffect(()=>{loadList();const timer=window.setInterval(()=>loadList(true),10000);return()=>window.clearInterval(timer);},[loadList]);
+  useEffect(()=>{if(!authLoading&&user&&!(user.role==="super_admin"||(user.role==="admin"&&user.canAdminSupport)))navigate("/dashboard",{replace:true});},[authLoading,user,navigate]);
+  useEffect(()=>{if(!(user?.role==="super_admin"||(user?.role==="admin"&&user?.canAdminSupport)))return;loadList();const timer=window.setInterval(()=>loadList(true),10000);return()=>window.clearInterval(timer);},[loadList,user?.role,user?.canAdminSupport]);
   useEffect(()=>{if(selected)loadThread(selected);else{setDetail(null);setMessages([]);}},[selected,loadThread]);
   useEffect(()=>{if(!selected)return;const timer=window.setInterval(()=>loadThread(selected,true),10000);return()=>window.clearInterval(timer);},[selected,loadThread]);
   useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth"});},[messages.length]);
@@ -78,10 +83,12 @@ export default function AdminSuporte(){
     await Promise.all([loadThread(selected,true),loadList(true)]);
   };
 
+  if(authLoading||!user||!(user.role==="super_admin"||(user.role==="admin"&&user.canAdminSupport)))return null;
+
   return <DashboardLayout>
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Super Admin</p><h1 className="text-2xl font-bold">Suporte aos assinantes</h1><p className="text-sm text-muted-foreground">Mensagens organizadas pela chegada mais recente do cliente.</p></div>
+        <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Administração autorizada</p><h1 className="text-2xl font-bold">Suporte aos assinantes</h1><p className="text-sm text-muted-foreground">Mensagens organizadas pela chegada mais recente do cliente.</p></div>
         <Button variant="outline" onClick={()=>loadList()}><RefreshCw className="mr-2 h-4 w-4"/>Atualizar</Button>
       </div>
       <div className="grid min-h-[620px] gap-4 lg:grid-cols-[360px_1fr]">

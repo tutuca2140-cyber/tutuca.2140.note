@@ -24,6 +24,12 @@ export function ensureAuthUserColumns() {
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canDeleteCashFlow" boolean DEFAULT false NOT NULL`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp varchar(20)`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "supportId" varchar(9)`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canAdminControl" boolean DEFAULT false NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canAdminSubscriptions" boolean DEFAULT false NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canAdminMarketing" boolean DEFAULT false NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canAdminSupport" boolean DEFAULT false NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canAdminDatabases" boolean DEFAULT true NOT NULL`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS "canAdminAudit" boolean DEFAULT true NOT NULL`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS users_support_id_uidx ON users ("supportId") WHERE "supportId" IS NOT NULL`;
     await sql`
       CREATE OR REPLACE FUNCTION assign_commercial_support_id()

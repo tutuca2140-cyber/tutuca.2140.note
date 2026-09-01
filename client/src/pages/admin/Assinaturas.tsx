@@ -29,6 +29,7 @@ import { toast } from "sonner";
 type PaymentState = "paid" | "unpaid" | "pending" | "trial" | "canceled";
 type CommercialAccount = {
   id: number;
+  supportId?: string | null;
   username: string;
   name?: string | null;
   email?: string | null;
@@ -149,7 +150,8 @@ function downloadAccountsExcel(accounts: CommercialAccount[]) {
   if (!accounts.length) return toast.error("Não há assinaturas para exportar.");
 
   const headers = [
-    "ID",
+    "ID interno",
+    "ID de usuário (9 dígitos)",
     "Nome completo",
     "Usuário",
     "E-mail",
@@ -186,6 +188,7 @@ function downloadAccountsExcel(accounts: CommercialAccount[]) {
 
   const rows = accounts.map(account => [
     account.id,
+    account.supportId || "",
     account.name || account.username,
     account.username,
     account.email || "",
@@ -248,7 +251,7 @@ export default function AdminAssinaturas() {
   const [secureLoading, setSecureLoading] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && user && user.role !== "super_admin") navigate("/dashboard", { replace: true });
+    if (!authLoading && user && !(user.role === "super_admin" || (user.role === "admin" && user.canAdminSubscriptions))) navigate("/dashboard", { replace: true });
   }, [authLoading, navigate, user]);
 
   const load = async () => {
@@ -266,7 +269,7 @@ export default function AdminAssinaturas() {
     }
   };
 
-  useEffect(() => { if (user?.role === "super_admin") void load(); }, [user?.role]);
+  useEffect(() => { if (user?.role === "super_admin" || (user?.role === "admin" && user?.canAdminSubscriptions)) void load(); }, [user?.role, user?.canAdminSubscriptions]);
 
   const runAction = async (account: CommercialAccount, action: "approve" | "mark_unpaid" | "mark_paid") => {
     setActionId(account.id);
@@ -321,14 +324,14 @@ export default function AdminAssinaturas() {
     }
   };
 
-  if (authLoading || !user || user.role !== "super_admin") return null;
+  if (authLoading || !user || !(user.role === "super_admin" || (user.role === "admin" && user.canAdminSubscriptions))) return null;
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />Exclusivo do Super Administrador</div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />Administração de assinaturas</div>
             <h1 className="mt-2 text-3xl font-black tracking-tight">Assinaturas</h1>
             <p className="mt-2 text-muted-foreground">Visão comercial completa: plano, cobrança, pagamento, teste, validade, Asaas e acesso do cliente.</p>
           </div>
@@ -377,7 +380,7 @@ export default function AdminAssinaturas() {
                             {paymentBadge(account)}
                             <Badge variant={account.plan === "plus" ? "default" : "secondary"}>{account.plan === "plus" ? "Plus" : "Basic"}</Badge>
                           </div>
-                          <p className="mt-1 text-xs text-muted-foreground">@{account.username} · {lifecycleLabel(account)}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">@{account.username} · ID <span className="font-mono font-semibold">{account.supportId || "—"}</span> · {lifecycleLabel(account)}</p>
                           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
                             <span className="flex items-center gap-1"><Mail className="h-3.5 w-3.5" />{account.email || "—"}</span>
                             <span className="flex items-center gap-1"><MessageCircle className="h-3.5 w-3.5" />{account.whatsapp || "—"}</span>
@@ -388,8 +391,8 @@ export default function AdminAssinaturas() {
                           {account.status === "past_due" && <Button size="sm" onClick={() => runAction(account, "mark_paid")} disabled={actionId === account.id}><CheckCircle2 className="mr-2 h-4 w-4" />Confirmar pagamento</Button>}
                           {active && <Button size="sm" variant="outline" onClick={() => runAction(account, "mark_unpaid")} disabled={actionId === account.id}><AlertTriangle className="mr-2 h-4 w-4" />Marcar atraso</Button>}
                           {active && account.billingMethod === "pix_annual" && <Button size="sm" variant="outline" disabled title="Fluxo de estorno será habilitado em uma próxima etapa"><RotateCcw className="mr-2 h-4 w-4" />Estornar Pix</Button>}
-                          {account.status !== "canceled" && <Button size="sm" variant="outline" onClick={() => openSecureAction(account, "cancel_subscription")} disabled={actionId === account.id}><XCircle className="mr-2 h-4 w-4" />Cancelar</Button>}
-                          {canDelete && <Button size="sm" variant="destructive" onClick={() => openSecureAction(account, "delete_unpaid")} disabled={actionId === account.id}><Trash2 className="mr-2 h-4 w-4" />Excluir</Button>}
+                          {user.role === "super_admin" && account.status !== "canceled" && <Button size="sm" variant="outline" onClick={() => openSecureAction(account, "cancel_subscription")} disabled={actionId === account.id}><XCircle className="mr-2 h-4 w-4" />Cancelar</Button>}
+                          {user.role === "super_admin" && canDelete && <Button size="sm" variant="destructive" onClick={() => openSecureAction(account, "delete_unpaid")} disabled={actionId === account.id}><Trash2 className="mr-2 h-4 w-4" />Excluir</Button>}
                         </div>
                       </div>
 

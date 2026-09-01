@@ -10,6 +10,7 @@ type UserRow = {
   loginMethod?: string;
   accountOwnerId?: number | null;
   supportId?: string | null;
+  canAdminSupport?: boolean;
 };
 
 let tablesPromise: Promise<void> | null = null;
@@ -58,7 +59,7 @@ async function getSessionUser(req: any): Promise<UserRow | null> {
   if (!token) return null;
   const sql = getSql();
   const rows = await sql`
-    SELECT u.id,u.name,u.username,u.email,u.role,u."isActive",u."loginMethod",u."accountOwnerId",u."supportId"
+    SELECT u.id,u.name,u.username,u.email,u.role,u."isActive",u."loginMethod",u."accountOwnerId",u."supportId",u."canAdminSupport"
     FROM local_sessions s
     JOIN users u ON u.id=s."userId"
     WHERE s.token=${token} AND s."expiresAt">NOW()
@@ -100,7 +101,7 @@ export async function handleSupportChat(req: any, res: any) {
     const sql = getSql();
     const queryAction = cleanText(Array.isArray(req?.query?.action) ? req.query.action[0] : req?.query?.action, 50).toLowerCase();
 
-    if (user.role === "super_admin") {
+    if (user.role === "super_admin" || (user.role === "admin" && user.canAdminSupport)) {
       if (req.method === "GET" && (!queryAction || queryAction === "list")) {
         const threads = await sql`
           SELECT

@@ -119,7 +119,7 @@ function formatUsage(value: unknown) {
 function exportCommercialExcel(accounts: any[]) {
   if (!accounts.length) return toast.error("Não há clientes comerciais para exportar.");
   const headers = [
-    "ID", "Nome completo", "Usuário", "E-mail", "WhatsApp", "Situação comercial",
+    "ID interno", "ID de usuário (9 dígitos)", "Nome completo", "Usuário", "E-mail", "WhatsApp", "Situação comercial",
     "Status de pagamento", "Status interno", "Conta ativa", "Plano", "Forma de cobrança",
     "Valor contratado", "Provedor", "Status no provedor", "Último status de pagamento",
     "ID do último pagamento", "Fim do teste grátis", "Validade / pago até", "Expiração do Pix",
@@ -129,6 +129,7 @@ function exportCommercialExcel(accounts: any[]) {
   ];
   const rows = accounts.map(account => [
     account.id,
+    account.supportId || "",
     account.name || account.username,
     account.username || "",
     account.email || "",
@@ -201,7 +202,7 @@ export default function AdminControle() {
   const [filter, setFilter] = useState<"all" | "active" | "commercial" | "internal">("all");
 
   useEffect(() => {
-    if (!authLoading && user && user.role !== "super_admin") navigate("/dashboard", { replace: true });
+    if (!authLoading && user && !(user.role === "super_admin" || (user.role === "admin" && user.canAdminControl))) navigate("/dashboard", { replace: true });
   }, [authLoading, navigate, user]);
 
   const load = async () => {
@@ -219,7 +220,7 @@ export default function AdminControle() {
     }
   };
 
-  useEffect(() => { if (user?.role === "super_admin") void load(); }, [user?.role]);
+  useEffect(() => { if (user?.role === "super_admin" || (user?.role === "admin" && user?.canAdminControl)) void load(); }, [user?.role, user?.canAdminControl]);
 
   const downloadDetailedReport = async () => {
     setExporting(true);
@@ -243,12 +244,12 @@ export default function AdminControle() {
       if (filter === "commercial" && !commercial) return false;
       if (filter === "internal" && commercial) return false;
       if (!normalized) return true;
-      return [item.name, item.username, item.email, item.databaseNames, item.plan]
+      return [item.name, item.username, item.email, item.supportId, item.databaseNames, item.plan]
         .some(value => String(value ?? "").toLowerCase().includes(normalized));
     });
   }, [data?.users, filter, query]);
 
-  if (authLoading || !user || user.role !== "super_admin") return null;
+  if (authLoading || !user || !(user.role === "super_admin" || (user.role === "admin" && user.canAdminControl))) return null;
 
   const s = data?.summary;
   const storage = s?.storage ?? {};
@@ -260,12 +261,12 @@ export default function AdminControle() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />Exclusivo do Super Administrador</div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />Painel administrativo autorizado</div>
             <h1 className="mt-2 text-3xl font-black tracking-tight">Painel de Controle</h1>
             <p className="mt-2 max-w-3xl text-muted-foreground">Visão central dos acessos ao Note Note, usuários, assinaturas, valores, bancos e movimentação operacional.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={downloadDetailedReport} disabled={exporting}>
+            <Button variant="outline" onClick={downloadDetailedReport} disabled={exporting || !(user.role === "super_admin" || user.canAdminSubscriptions)}>
               {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
               Baixar relatório detalhado
             </Button>
@@ -358,7 +359,7 @@ export default function AdminControle() {
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div><CardTitle>Usuários e clientes</CardTitle><p className="mt-1 text-sm text-muted-foreground">Lista consolidada para facilitar a administração dos acessos.</p></div>
               <div className="flex flex-col gap-2 sm:flex-row">
-                <div className="relative min-w-[260px]"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar nome, usuário, e-mail ou banco" className="pl-9" /></div>
+                <div className="relative min-w-[260px]"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar nome, ID, usuário, e-mail ou banco" className="pl-9" /></div>
                 <div className="flex flex-wrap gap-2">
                   {([ ["all", "Todos"], ["active", "Ativos"], ["commercial", "Comerciais"], ["internal", "Grátis/Teste"] ] as const).map(([value, label]) => (
                     <Button key={value} size="sm" variant={filter === value ? "default" : "outline"} onClick={() => setFilter(value)}>{label}</Button>
@@ -376,7 +377,7 @@ export default function AdminControle() {
                     const commercial = item.loginMethod === "commercial_signup";
                     return (
                       <tr key={item.id} className="hover:bg-muted/20">
-                        <td className="px-4 py-3"><p className="font-semibold">{item.name || item.username || "Sem nome"}</p><p className="text-xs text-muted-foreground">{item.username || "—"} · {item.email || "sem e-mail"}</p></td>
+                        <td className="px-4 py-3"><p className="font-semibold">{item.name || item.username || "Sem nome"}</p><p className="text-xs text-muted-foreground">{item.username || "—"} · {item.email || "sem e-mail"}</p>{commercial ? <p className="mt-1 font-mono text-xs font-semibold text-primary">ID {item.supportId || "—"}</p> : null}</td>
                         <td className="px-4 py-3"><Badge variant={commercial ? "default" : "secondary"}>{commercial ? "Comercial" : "Grátis/Teste"}</Badge></td>
                         <td className="px-4 py-3">{item.plan ? <><span className="font-semibold capitalize">{item.plan}</span><div className="text-xs text-muted-foreground">{cents(item.priceCents)}</div></> : "—"}</td>
                         <td className="px-4 py-3"><Badge variant={item.isActive ? "default" : "outline"}>{item.isActive ? "Ativo" : commercial && item.subscriptionStatus === "pending_payment" ? "Aguardando pagamento" : "Inativo"}</Badge></td>

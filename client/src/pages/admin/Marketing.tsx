@@ -1,13 +1,17 @@
+import { useAuth } from "@/_core/hooks/useAuth";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { CheckSquare, Image, Mail, Send, Square, Trash2, Upload, Users } from "lucide-react";
 
-type Recipient = { id:number; name?:string; username?:string; email:string; whatsapp?:string; plan?:string; status?:string; marketingState:"current"|"overdue"|"other" };
+type Recipient = { id:number; supportId?:string; name?:string; username?:string; email:string; whatsapp?:string; plan?:string; status?:string; marketingState:"current"|"overdue"|"other" };
 
 export default function Marketing() {
+  const { user, loading: authLoading } = useAuth({ redirectOnUnauthenticated: true, redirectPath: "/login" });
+  const [, navigate] = useLocation();
   const [recipients,setRecipients]=useState<Recipient[]>([]);
   const [loading,setLoading]=useState(true);
   const [sending,setSending]=useState(false);
@@ -19,7 +23,8 @@ export default function Marketing() {
   const [imageName,setImageName]=useState("");
 
   const load=async()=>{ setLoading(true); try { const r=await fetch("/api/admin/marketing",{credentials:"include"}); const j=await r.json(); if(!r.ok) throw new Error(j.message); setRecipients(j.recipients||[]); } catch(e){ toast.error(e instanceof Error?e.message:"Erro ao carregar clientes."); } finally {setLoading(false);} };
-  useEffect(()=>{void load();},[]);
+  useEffect(()=>{if(!authLoading&&user&&!(user.role==="super_admin"||(user.role==="admin"&&user.canAdminMarketing)))navigate("/dashboard",{replace:true});},[authLoading,user,navigate]);
+  useEffect(()=>{if(user?.role==="super_admin"||(user?.role==="admin"&&user?.canAdminMarketing))void load();},[user?.role,user?.canAdminMarketing]);
 
   const visible=useMemo(()=>segment==="current"?recipients.filter(r=>r.marketingState==="current"):segment==="overdue"?recipients.filter(r=>r.marketingState==="overdue"):recipients,[recipients,segment]);
   const targetCount=segment==="selected"?selected.length:visible.length;
@@ -46,8 +51,10 @@ export default function Marketing() {
     catch(e){toast.error(e instanceof Error?e.message:"Não foi possível enviar a campanha.");} finally{setSending(false);}
   };
 
+  if(authLoading||!user||!(user.role==="super_admin"||(user.role==="admin"&&user.canAdminMarketing)))return null;
+
   return <DashboardLayout><div className="space-y-6">
-    <div><div className="flex items-center gap-2"><Mail className="h-6 w-6 text-primary"/><h1 className="text-2xl font-bold">Marketing por E-mail</h1></div><p className="mt-1 text-sm text-muted-foreground">Campanhas exclusivas do Super Administrador para clientes cadastrados.</p></div>
+    <div><div className="flex items-center gap-2"><Mail className="h-6 w-6 text-primary"/><h1 className="text-2xl font-bold">Marketing por E-mail</h1></div><p className="mt-1 text-sm text-muted-foreground">Campanhas para clientes cadastrados, conforme autorização administrativa concedida pelo Super Admin.</p></div>
 
     <div className="grid gap-3 sm:grid-cols-3">
       <button onClick={()=>setSegment("all")} className={`rounded-2xl border p-4 text-left ${segment==="all"?"border-primary bg-primary/5":"bg-background"}`}><Users className="mb-2 h-5 w-5"/><b>Todos</b><div className="text-2xl font-bold">{recipients.length}</div></button>
@@ -57,7 +64,7 @@ export default function Marketing() {
 
     <div className="grid gap-6 xl:grid-cols-[1fr_1.05fr]">
       <section className="rounded-2xl border bg-background p-5 space-y-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="font-semibold">Destinatários</h2><p className="text-xs text-muted-foreground">Use um grupo inteiro ou selecione clientes individualmente.</p></div><div className="flex gap-2"><Button size="sm" variant="outline" onClick={selectVisible}>Selecionar exibidos</Button><Button size="sm" variant="ghost" onClick={clear}>Limpar</Button></div></div>
-        <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">{loading?<p className="py-8 text-center text-muted-foreground">Carregando...</p>:visible.map(r=><label key={r.id} className="flex cursor-pointer items-center gap-3 rounded-xl border p-3 hover:bg-muted/40"><input type="checkbox" checked={selected.includes(r.id)} onChange={()=>toggle(r.id)} className="h-4 w-4"/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{r.name||r.username||"Cliente"}</p><p className="truncate text-xs text-muted-foreground">{r.email}{r.whatsapp?` • ${r.whatsapp}`:""}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${r.marketingState==="current"?"bg-emerald-100 text-emerald-700":r.marketingState==="overdue"?"bg-red-100 text-red-700":"bg-slate-100 text-slate-600"}`}>{r.marketingState==="current"?"EM DIA":r.marketingState==="overdue"?"ATRASADO":"OUTRO"}</span></label>)}</div>
+        <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">{loading?<p className="py-8 text-center text-muted-foreground">Carregando...</p>:visible.map(r=><label key={r.id} className="flex cursor-pointer items-center gap-3 rounded-xl border p-3 hover:bg-muted/40"><input type="checkbox" checked={selected.includes(r.id)} onChange={()=>toggle(r.id)} className="h-4 w-4"/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{r.name||r.username||"Cliente"}</p><p className="truncate text-xs text-muted-foreground">{r.email}{r.whatsapp?` • ${r.whatsapp}`:""}</p><p className="mt-1 font-mono text-[11px] font-semibold text-primary">ID {r.supportId||"—"}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${r.marketingState==="current"?"bg-emerald-100 text-emerald-700":r.marketingState==="overdue"?"bg-red-100 text-red-700":"bg-slate-100 text-slate-600"}`}>{r.marketingState==="current"?"EM DIA":r.marketingState==="overdue"?"ATRASADO":"OUTRO"}</span></label>)}</div>
         <Button variant={segment==="selected"?"default":"outline"} onClick={()=>setSegment("selected")} disabled={!selected.length} className="w-full">Usar somente os {selected.length} selecionado(s)</Button>
       </section>
 

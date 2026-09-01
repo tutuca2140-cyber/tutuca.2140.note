@@ -1,4 +1,5 @@
 import {
+  ensureAuthUserColumns,
   getSql,
   readCookie,
   readJsonBody,
@@ -117,9 +118,10 @@ export default async function handler(req: any, res: any) {
       return sendJson(res, 401, { success: false, message: "Sessão não encontrada." });
     }
 
+    await ensureAuthUserColumns();
     const sql = getSql();
     const session = await sql`
-      SELECT u.id, u.username, u.role, u."isActive"
+      SELECT u.id, u.username, u.role, u."isActive", u."canAdminControl"
         FROM local_sessions s
         JOIN users u ON u.id = s."userId"
        WHERE s.token = ${token}
@@ -127,16 +129,17 @@ export default async function handler(req: any, res: any) {
        LIMIT 1
     `;
     const currentUser = session[0] as any;
-    if (!currentUser?.isActive || currentUser.role !== "super_admin") {
+    if (!currentUser?.isActive || !(currentUser.role === "super_admin" || (currentUser.role === "admin" && currentUser.canAdminControl))) {
       return sendJson(res, 403, {
         success: false,
-        message: "Painel disponível somente para o Super Administrador.",
+        message: "Você não possui autorização para acessar o Painel de Controle.",
       });
     }
 
     await ensureTables();
 
     if (req.method === "POST") {
+      if (currentUser.role !== "super_admin") return sendJson(res, 403, { success: false, message: "A exclusão de usuários é exclusiva do Super Administrador." });
       const body = await readJsonBody(req);
       const action = String(body?.action ?? "").trim();
       const userId = Number(body?.userId);
@@ -246,6 +249,7 @@ export default async function handler(req: any, res: any) {
           u.username,
           u.email,
           u.name,
+          u."supportId",
           u.role,
           u."isActive",
           u."loginMethod",

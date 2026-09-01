@@ -12,6 +12,12 @@ type AuthUser = {
   canDelete?: boolean;
   canGenerateReports?: boolean;
   canAccessSettings?: boolean;
+  canAdminControl?: boolean;
+  canAdminSubscriptions?: boolean;
+  canAdminMarketing?: boolean;
+  canAdminSupport?: boolean;
+  canAdminDatabases?: boolean;
+  canAdminAudit?: boolean;
   dashboardOnly?: boolean;
   isActive?: boolean;
 };
