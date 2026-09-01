@@ -1,0 +1,49 @@
+name: Dashboard Simple
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/dashboard-simple-organized-2026-09-01
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Improve dashboard
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('client/src/pages/Dashboard.tsx')
+          s=p.read_text()
+          s=s.replace('Activity, BadgeDollarSign, Building2, Car, CreditCard, Eye, EyeOff, Focus, Package, Settings2, Users, Wallet, X', 'Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BadgeDollarSign, Building2, Car, CreditCard, Eye, EyeOff, Focus, Package, Settings2, Users, Wallet, X')
+          s=s.replace('function Metric({label,value,accent}:{label:string;value:string|number;accent?:boolean}){return <div className="rounded-xl border bg-background p-3"><p className="text-xs text-muted-foreground">{label}</p><p className={`mt-1 text-xl font-bold ${accent?"text-primary":""}`}>{value}</p></div>}', '''function Metric({label,value,accent}:{label:string;value:string|number;accent?:boolean}){return <div className={`rounded-xl border p-3 ${accent?"border-primary/20 bg-primary/[0.04]":"bg-background"}`}><p className="text-xs font-medium text-muted-foreground">{label}</p><p className={`mt-1 text-lg font-bold tracking-tight sm:text-xl ${accent?"text-primary":""}`}>{value}</p></div>}
+function SummaryCard({label,value,helper,Icon,tone="default"}:{label:string;value:string;helper:string;Icon:any;tone?:"default"|"positive"|"warning"}){const toneClass=tone==="positive"?"text-emerald-600 dark:text-emerald-400":tone==="warning"?"text-amber-600 dark:text-amber-400":"text-primary";return <Card className="overflow-hidden"><CardContent className="p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p><p className="mt-2 truncate text-2xl font-bold tracking-tight sm:text-3xl">{value}</p><p className="mt-1 text-xs text-muted-foreground">{helper}</p></div><div className="rounded-xl bg-muted/60 p-2.5"><Icon className={`h-5 w-5 ${toneClass}`}/></div></div></CardContent></Card>}''')
+          marker='''    {focused&&<div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/5 p-3"><p className="text-sm font-medium">Modo de análise: {blocks.find(b=>b.key===focused)?.title}</p><Button size="sm" variant="ghost" onClick={()=>setFocused(null)}>Mostrar todos</Button></div>}'''
+          replacement='''    {focused&&<div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/5 p-3"><p className="text-sm font-medium">Modo de análise: {blocks.find(b=>b.key===focused)?.title}</p><Button size="sm" variant="ghost" onClick={()=>setFocused(null)}>Mostrar todos</Button></div>}
+    {!focused&&<section className="space-y-3"><div><h2 className="text-lg font-bold">Resumo geral</h2><p className="text-sm text-muted-foreground">Os números mais importantes do banco ativo em um só lugar.</p></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><SummaryCard label="Saldo disponível" value={money(cashSummary.balance)} helper={`${money(cashSummary.input)} em entradas`} Icon={Wallet} tone="positive"/><SummaryCard label="A receber" value={money(Number(stats?.loanMetrics?.totalOpen||0)+rentalSummary.pending+financeSplit.vehicle.open+financeSplit.product.open)} helper="Empréstimos, aluguéis, veículos e produtos" Icon={ArrowUpRight}/><SummaryCard label="Total recebido" value={money(Number(stats?.loanMetrics?.totalReceived||0)+rentalSummary.paid+propertySummary.received+financeSplit.vehicle.paid+financeSplit.product.paid)} helper="Recebimentos registrados nas operações" Icon={ArrowDownRight}/><SummaryCard label="Vencido em empréstimos" value={money(stats?.loanMetrics?.totalOverdue||0)} helper="Valor que merece atenção" Icon={AlertTriangle} tone="warning"/></div></section>}'''
+          if marker not in s: raise SystemExit('focus marker not found')
+          s=s.replace(marker,replacement)
+          s=s.replace('''<div className="flex items-center gap-2"><Activity className="h-7 w-7 text-primary"/><h1 className="text-3xl font-bold">Dashboard</h1></div><p className="mt-1 text-muted-foreground">Visão modular do negócio. Oculte blocos ou abra apenas um para análise completa.</p>''','''<div className="flex items-center gap-2"><Activity className="h-7 w-7 text-primary"/><h1 className="text-3xl font-bold">Visão geral</h1></div><p className="mt-1 text-muted-foreground">Acompanhe caixa, valores a receber e operações de <b>{activeDb?.name||"seu banco"}</b>.</p>''')
+          s=s.replace('''<div className={focused?"grid gap-5":"grid gap-5 xl:grid-cols-2"}>''','''{!focused&&<div className="border-t pt-1"><h2 className="mt-4 text-lg font-bold">Detalhes por área</h2><p className="text-sm text-muted-foreground">Abra uma área para analisar seus números com mais espaço.</p></div>}
+    <div className={focused?"grid gap-5":"grid gap-4 xl:grid-cols-2"}>''')
+          s=s.replace('className={expanded?"border-primary/40 shadow-lg":""}', 'className={expanded?"border-primary/40 shadow-lg":"transition-shadow hover:shadow-sm"}')
+          s=s.replace('<CardHeader className="flex flex-row items-start justify-between gap-3">','<CardHeader className="flex flex-row items-start justify-between gap-3 pb-3">')
+          s=s.replace('<CardContent className="space-y-5">','<CardContent className="space-y-4">')
+          p.write_text(s)
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit clean result
+        run: |
+          rm .github/workflows/dashboard-simple.yml
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add client/src/pages/Dashboard.tsx .github/workflows/dashboard-simple.yml
+          git commit -m "feat: simplify and organize dashboard [skip ci]"
+          git push origin HEAD:feat/dashboard-simple-organized-2026-09-01
