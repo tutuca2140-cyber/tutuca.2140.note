@@ -1,0 +1,29 @@
+name: Apply Support Message Notifications
+on:
+  push:
+    branches: ["feat/support-message-notifications-2026-09-01"]
+    paths:
+      - ".github/workflows/apply-support-message-notifications.yml"
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: python .github/scripts/support-message-notifications.py
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit tested changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add server/support-chat.ts client/src/components/DashboardLayout.tsx client/src/pages/admin/Suporte.tsx
+          git commit -m "feat: notify new support messages [skip ci]"
+          git push
