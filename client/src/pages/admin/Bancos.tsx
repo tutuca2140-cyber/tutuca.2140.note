@@ -46,6 +46,9 @@ export default function AdminBancos() {
   const [editOpen, setEditOpen] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [adminPending, setAdminPending] = useState(false);
+  const [customerPassword, setCustomerPassword] = useState("");
+  const [customerDatabases, setCustomerDatabases] = useState<any[]>([]);
+  const [customerUnlocked, setCustomerUnlocked] = useState(false);
   const [editTarget, setEditTarget] = useState<DatabaseRecord | null>(null);
   const [duplicateTarget, setDuplicateTarget] = useState<DatabaseRecord | null>(null);
   const [editForm, setEditForm] = useState({ name: "", description: "" });
@@ -60,6 +63,8 @@ export default function AdminBancos() {
   const createMutation = trpc.databases.create.useMutation();
   const setActiveMutation = trpc.databases.setActive.useMutation();
   const deleteMutation = trpc.databases.delete.useMutation();
+  const listCustomerDatabases = trpc.databases.listCustomerDatabases.useMutation();
+  const enterCustomerDatabase = trpc.databases.enterCustomerDatabase.useMutation();
   const utils = trpc.useUtils();
 
   const refreshDatabases = async () => {
@@ -198,6 +203,34 @@ export default function AdminBancos() {
     }
   };
 
+  const unlockCustomerDatabases = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const rows = await listCustomerDatabases.mutateAsync({ password: customerPassword });
+      setCustomerDatabases(rows);
+      setCustomerUnlocked(true);
+      toast.success("Área protegida liberada.");
+    } catch (error) {
+      setCustomerUnlocked(false);
+      toast.error(error instanceof Error ? error.message : "Não foi possível liberar os bancos de clientes.");
+    }
+  };
+
+  const openCustomerDatabase = async (databaseId: number) => {
+    if (!customerPassword) {
+      toast.error("Digite novamente a senha do Super Admin.");
+      return;
+    }
+    try {
+      await enterCustomerDatabase.mutateAsync({ id: databaseId, password: customerPassword });
+      await refreshDatabases();
+      toast.success("Banco do cliente liberado para esta sessão administrativa.");
+      window.location.href = "/dashboard";
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível acessar o banco do cliente.");
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -278,6 +311,49 @@ export default function AdminBancos() {
             </DialogContent>
           </Dialog>
         </div>
+
+        {user?.role === "super_admin" && (
+          <Card className="border-amber-200 bg-amber-50/40 dark:border-amber-900 dark:bg-amber-950/10">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Database className="h-5 w-5" />
+                Bancos de Clientes — Área Protegida
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Os bancos pertencentes a usuários que contrataram o Note Note não aparecem em “Banco em operação”. Para consultar um deles, confirme a senha do Super Admin nesta área específica.
+              </p>
+              {!customerUnlocked ? (
+                <form onSubmit={unlockCustomerDatabases} className="flex flex-col gap-2 sm:flex-row">
+                  <Input type="password" value={customerPassword} onChange={e => setCustomerPassword(e.target.value)} placeholder="Senha do Super Admin" autoComplete="current-password" required />
+                  <Button type="submit" disabled={listCustomerDatabases.isPending}>{listCustomerDatabases.isPending ? "Verificando..." : "Liberar área protegida"}</Button>
+                </form>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Área liberada nesta tela.</p>
+                    <Button type="button" variant="outline" size="sm" onClick={() => { setCustomerUnlocked(false); setCustomerDatabases([]); setCustomerPassword(""); }}>Bloquear novamente</Button>
+                  </div>
+                  {customerDatabases.length ? (
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {customerDatabases.map((db: any) => (
+                        <div key={db.id} className="rounded-xl border bg-background p-4">
+                          <p className="font-semibold">{db.name}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Cliente: {db.ownerName || db.ownerUsername || db.ownerEmail || "Conta comercial"}</p>
+                          <p className="text-xs text-muted-foreground">{db.ownerEmail || "E-mail não informado"}</p>
+                          <Button className="mt-3 w-full" size="sm" onClick={() => openCustomerDatabase(db.id)} disabled={enterCustomerDatabase.isPending}>Acessar com senha do Super Admin</Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">Nenhum banco de cliente comercial encontrado.</p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {isLoading ? (
           <div className="py-12 text-center">

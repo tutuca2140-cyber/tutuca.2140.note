@@ -355,10 +355,53 @@ export async function getAllDatabases() {
   return await db.select().from(databases).orderBy(desc(databases.createdAt));
 }
 
+export async function getCommercialCustomerDatabases() {
+  const db = await getDb();
+  if (!db) return [];
+  return await db
+    .select({
+      id: databases.id,
+      name: databases.name,
+      description: databases.description,
+      type: databases.type,
+      isActive: databases.isActive,
+      createdBy: databases.createdBy,
+      createdAt: databases.createdAt,
+      ownerName: users.name,
+      ownerUsername: users.username,
+      ownerEmail: users.email,
+      ownerLoginMethod: users.loginMethod,
+    })
+    .from(databases)
+    .innerJoin(users, eq(databases.createdBy, users.id))
+    .where(eq(users.loginMethod, "commercial_signup"))
+    .orderBy(desc(databases.createdAt));
+}
+
+export async function isCommercialCustomerDatabase(id: number) {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db
+    .select({ id: databases.id })
+    .from(databases)
+    .innerJoin(users, eq(databases.createdBy, users.id))
+    .where(and(eq(databases.id, id), eq(users.loginMethod, "commercial_signup")))
+    .limit(1);
+  return Boolean(rows[0]);
+}
+
 export async function getDatabasesForUser(userId: number, role: string) {
   const db = await getDb();
   if (!db) return [];
-  if (role === "super_admin") return getAllDatabases();
+  if (role === "super_admin") {
+    const rows = await db
+      .select({ database: databases })
+      .from(databases)
+      .leftJoin(users, eq(databases.createdBy, users.id))
+      .where(sql`COALESCE(${users.loginMethod}, 'local') NOT IN ('commercial_signup', 'commercial_subuser')`)
+      .orderBy(desc(databases.createdAt));
+    return rows.map(row => row.database);
+  }
   const assigned = await db
     .select({ database: databases })
     .from(userDatabaseAccess)

@@ -873,10 +873,36 @@ async function getAllDatabases() {
   if (!db) return [];
   return await db.select().from(databases).orderBy(desc(databases.createdAt));
 }
+async function getCommercialCustomerDatabases() {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select({
+    id: databases.id,
+    name: databases.name,
+    description: databases.description,
+    type: databases.type,
+    isActive: databases.isActive,
+    createdBy: databases.createdBy,
+    createdAt: databases.createdAt,
+    ownerName: users.name,
+    ownerUsername: users.username,
+    ownerEmail: users.email,
+    ownerLoginMethod: users.loginMethod
+  }).from(databases).innerJoin(users, eq(databases.createdBy, users.id)).where(eq(users.loginMethod, "commercial_signup")).orderBy(desc(databases.createdAt));
+}
+async function isCommercialCustomerDatabase(id) {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db.select({ id: databases.id }).from(databases).innerJoin(users, eq(databases.createdBy, users.id)).where(and(eq(databases.id, id), eq(users.loginMethod, "commercial_signup"))).limit(1);
+  return Boolean(rows[0]);
+}
 async function getDatabasesForUser(userId, role) {
   const db = await getDb();
   if (!db) return [];
-  if (role === "super_admin") return getAllDatabases();
+  if (role === "super_admin") {
+    const rows = await db.select({ database: databases }).from(databases).leftJoin(users, eq(databases.createdBy, users.id)).where(sql`COALESCE(${users.loginMethod}, 'local') NOT IN ('commercial_signup', 'commercial_subuser')`).orderBy(desc(databases.createdAt));
+    return rows.map((row) => row.database);
+  }
   const assigned = await db.select({ database: databases }).from(userDatabaseAccess).innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id)).where(eq(userDatabaseAccess.userId, userId));
   if (assigned.length || role !== "admin")
     return assigned.map((row) => row.database);
@@ -2900,6 +2926,52 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     getActive: protectedProcedure2.query(async () => {
       return await getActiveDatabase();
     }),
+    listCustomerDatabases: superAdminProcedure.input(z2.object({ password: z2.string().min(1) })).mutation(async ({ input, ctx }) => {
+      const current = await getUserById(ctx.user.id);
+      if (!current?.passwordHash || !await bcrypt.compare(input.password, current.passwordHash)) {
+        await createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.username || ctx.user.email || "Super Admin",
+          action: "customer_database_access_denied",
+          entity: "databases",
+          details: "Senha do Super Admin inv\xE1lida para acessar bancos de clientes.",
+          status: "failed"
+        });
+        throw new TRPCError3({ code: "UNAUTHORIZED", message: "Senha do Super Admin inv\xE1lida." });
+      }
+      const rows = await getCommercialCustomerDatabases();
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.username || ctx.user.email || "Super Admin",
+        action: "customer_database_list_access",
+        entity: "databases",
+        details: `Acesso protegido a ${rows.length} banco(s) de clientes.`,
+        status: "success"
+      });
+      return rows;
+    }),
+    enterCustomerDatabase: superAdminProcedure.input(z2.object({ id: z2.number().int().positive(), password: z2.string().min(1) })).mutation(async ({ input, ctx }) => {
+      const current = await getUserById(ctx.user.id);
+      if (!current?.passwordHash || !await bcrypt.compare(input.password, current.passwordHash)) {
+        throw new TRPCError3({ code: "UNAUTHORIZED", message: "Senha do Super Admin inv\xE1lida." });
+      }
+      if (!await isCommercialCustomerDatabase(input.id)) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Este banco n\xE3o pertence a uma conta comercial de cliente." });
+      }
+      await setActiveDatabase(input.id);
+      const dbInfo = await getDatabaseById(input.id);
+      await createAuditLog({
+        userId: ctx.user.id,
+        username: ctx.user.username || ctx.user.email || "Super Admin",
+        action: "enter_customer_database",
+        entity: "databases",
+        entityId: input.id,
+        databaseId: input.id,
+        details: `Acesso protegido ao banco do cliente: ${dbInfo?.name || input.id}`,
+        status: "success"
+      });
+      return { success: true, database: dbInfo };
+    }),
     create: adminProcedure2.input(
       z2.object({
         name: z2.string().min(1),
@@ -2922,6 +2994,12 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       return result;
     }),
     setActive: protectedProcedure2.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
+      if (ctx.user.role === "super_admin" && await isCommercialCustomerDatabase(input.id)) {
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Bancos de clientes n\xE3o podem ser acessados pelo seletor Banco em opera\xE7\xE3o. Use a \xE1rea protegida Bancos de Clientes no Super Admin."
+        });
+      }
       await setActiveDatabase(input.id);
       const dbInfo = await getDatabaseById(input.id);
       await createAuditLog({

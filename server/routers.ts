@@ -642,6 +642,58 @@ export const appRouter = router({
       return await db.getActiveDatabase();
     }),
 
+    listCustomerDatabases: superAdminProcedure
+      .input(z.object({ password: z.string().min(1) }))
+      .mutation(async ({ input, ctx }) => {
+        const current = await db.getUserById(ctx.user.id);
+        if (!current?.passwordHash || !(await bcrypt.compare(input.password, current.passwordHash))) {
+          await db.createAuditLog({
+            userId: ctx.user.id,
+            username: ctx.user.username || ctx.user.email || "Super Admin",
+            action: "customer_database_access_denied",
+            entity: "databases",
+            details: "Senha do Super Admin inválida para acessar bancos de clientes.",
+            status: "failed",
+          });
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Senha do Super Admin inválida." });
+        }
+        const rows = await db.getCommercialCustomerDatabases();
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.username || ctx.user.email || "Super Admin",
+          action: "customer_database_list_access",
+          entity: "databases",
+          details: `Acesso protegido a ${rows.length} banco(s) de clientes.`,
+          status: "success",
+        });
+        return rows;
+      }),
+
+    enterCustomerDatabase: superAdminProcedure
+      .input(z.object({ id: z.number().int().positive(), password: z.string().min(1) }))
+      .mutation(async ({ input, ctx }) => {
+        const current = await db.getUserById(ctx.user.id);
+        if (!current?.passwordHash || !(await bcrypt.compare(input.password, current.passwordHash))) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Senha do Super Admin inválida." });
+        }
+        if (!(await db.isCommercialCustomerDatabase(input.id))) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Este banco não pertence a uma conta comercial de cliente." });
+        }
+        await db.setActiveDatabase(input.id);
+        const dbInfo = await db.getDatabaseById(input.id);
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          username: ctx.user.username || ctx.user.email || "Super Admin",
+          action: "enter_customer_database",
+          entity: "databases",
+          entityId: input.id,
+          databaseId: input.id,
+          details: `Acesso protegido ao banco do cliente: ${dbInfo?.name || input.id}`,
+          status: "success",
+        });
+        return { success: true, database: dbInfo };
+      }),
+
     create: adminProcedure
       .input(
         z.object({
@@ -671,6 +723,12 @@ export const appRouter = router({
     setActive: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
+        if (ctx.user.role === "super_admin" && (await db.isCommercialCustomerDatabase(input.id))) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Bancos de clientes não podem ser acessados pelo seletor Banco em operação. Use a área protegida Bancos de Clientes no Super Admin.",
+          });
+        }
         await db.setActiveDatabase(input.id);
 
         const dbInfo = await db.getDatabaseById(input.id);
