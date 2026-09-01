@@ -13,6 +13,7 @@ import {
   Package,
   PlayCircle,
   ShieldCheck,
+  Star,
   TrendingUp,
   Users,
   Wallet,
@@ -216,6 +217,13 @@ function DemoPanel() {
 }
 
 export default function Home() {
+  const [publicReviews, setPublicReviews] = useState<any[]>([]);
+  useEffect(() => {
+    fetch("/api/site-access?scope=reviews&action=published", { cache: "no-store" })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { if (j?.success && Array.isArray(j.reviews)) setPublicReviews(j.reviews); })
+      .catch(() => {});
+  }, []);
   return (
     <div className="min-h-screen bg-white text-slate-950">
       <div className="bg-slate-950 px-4 py-2.5 text-center text-xs font-extrabold uppercase tracking-[0.16em] text-white sm:text-sm">Fez um rolo? Deu negócio? <span className="text-sky-300">Controle seus recebimentos.</span></div>
@@ -245,6 +253,8 @@ export default function Home() {
         <section id="funcionalidades" className="scroll-mt-24 bg-white py-20"><div className="mx-auto max-w-7xl px-5 lg:px-8"><div className="text-center"><p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-600">Na rotina de verdade</p><h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Mais controle. Menos dor de cabeça.</h2></div><div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-5">{benefits.map(benefit => { const Icon = benefit.icon; return <div key={benefit.title} className="text-center lg:text-left"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-blue-700 lg:mx-0"><Icon className="h-6 w-6" /></div><h3 className="mt-4 text-sm font-extrabold leading-5 text-slate-900">{benefit.title}</h3><p className="mt-2 text-sm leading-6 text-slate-500">{benefit.description}</p></div>; })}</div></div></section>
 
         <section id="sobre" className="scroll-mt-24 border-t border-blue-100 bg-slate-50/70 py-20"><div className="mx-auto grid max-w-7xl gap-12 px-5 lg:grid-cols-2 lg:px-8"><div><p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-600">Para quem é o Note Note?</p><h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Para quem trabalha fazendo negócio e precisa saber onde o dinheiro está.</h2></div><div className="space-y-5 text-base leading-8 text-slate-600"><p>O Note Note foi pensado para quem vende produtos, negocia veículos e imóveis, administra aluguéis, faz empréstimos pessoais ou trabalha com vendas parceladas e precisa enxergar quanto tem investido, quanto já recebeu e quanto ainda falta voltar.</p><p>Em vez de espalhar informação em caderno, conversa de WhatsApp e planilhas diferentes, você concentra a operação em um único sistema e acompanha cada cliente e negociação de forma organizada.</p></div></div></section>
+
+        {publicReviews.length > 0 && <section id="avaliacoes" className="border-t border-slate-200 bg-white py-20"><div className="mx-auto max-w-7xl px-5 lg:px-8"><div className="mx-auto max-w-3xl text-center"><p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-600">Opinião de quem usa</p><h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">O que nossos clientes dizem</h2><p className="mt-4 text-slate-600">Avaliações enviadas por clientes do Note Note e publicadas após análise.</p></div><div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">{publicReviews.slice(0,6).map(review => <article key={review.id} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex gap-1">{[1,2,3,4,5].map(n=><Star key={n} className={`h-5 w-5 ${n<=Number(review.rating)?"fill-amber-400 text-amber-400":"text-slate-200"}`}/>)}</div><p className="mt-4 text-sm leading-7 text-slate-600">“{review.comment}”</p><p className="mt-5 font-extrabold text-slate-900">{review.name || "Cliente Note Note"}</p><p className="text-xs text-slate-400">Cliente Note Note</p></article>)}</div></div></section>}
 
         <section id="suporte" className="scroll-mt-24 px-5 py-20 lg:px-8"><div className="mx-auto max-w-7xl overflow-hidden rounded-[2rem] bg-gradient-to-r from-blue-700 to-blue-600 px-7 py-10 text-white shadow-2xl shadow-blue-700/20 sm:px-10 lg:flex lg:items-center lg:justify-between lg:px-14"><div><p className="text-sm font-bold uppercase tracking-[0.18em] text-blue-100">Escolha seu acesso</p><h2 className="mt-2 text-3xl font-black">Comece com Basic ou Plus.</h2><p className="mt-3 max-w-2xl text-blue-100">Controle clientes, vendas, imóveis, aluguéis, financiamentos e caixa no mesmo sistema.</p></div><Link href="/planos"><a className="mt-7 inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-white px-7 font-extrabold text-blue-700 shadow-lg transition hover:-translate-y-0.5 lg:mt-0">Ver planos <ArrowRight className="h-5 w-5" /></a></Link></div></section>
       </main>

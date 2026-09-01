@@ -20,6 +20,7 @@ import {
   Loader2,
   Save,
   ShieldCheck,
+  Star,
   Trash2,
   UserRound,
   XCircle,
@@ -101,6 +102,11 @@ export default function Perfil() {
   const [deleting, setDeleting] = useState(false);
   const [cancelingPlan, setCancelingPlan] = useState(false);
   const [error, setError] = useState("");
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewHover, setReviewHover] = useState(0);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewPublished, setReviewPublished] = useState(false);
+  const [reviewSaving, setReviewSaving] = useState(false);
 
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
@@ -147,6 +153,37 @@ export default function Perfil() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (!profile?.commercial) return;
+    fetch("/api/site-access?scope=reviews&action=mine", { credentials: "include", cache: "no-store" })
+      .then(async response => ({ response, result: await response.json().catch(() => ({})) }))
+      .then(({ response, result }) => {
+        if (!response.ok || !result?.success) return;
+        if (result.review) {
+          setReviewRating(Number(result.review.rating || 0));
+          setReviewComment(String(result.review.comment || ""));
+          setReviewPublished(Boolean(result.review.published));
+        }
+      }).catch(() => {});
+  }, [profile?.commercial]);
+
+  const saveReview = async () => {
+    if (!reviewRating) return toast.error("Escolha de 1 a 5 estrelas.");
+    if (reviewComment.trim().length < 3) return toast.error("Escreva um comentário, sugestão ou elogio.");
+    setReviewSaving(true);
+    try {
+      const response = await fetch("/api/site-access?scope=reviews&action=mine", {
+        method: "POST", credentials: "include", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rating: reviewRating, comment: reviewComment.trim() }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) throw new Error(result?.message || "Não foi possível enviar sua avaliação.");
+      setReviewPublished(false);
+      toast.success(result.message || "Avaliação enviada.");
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Não foi possível enviar sua avaliação."); }
+    finally { setReviewSaving(false); }
+  };
 
   const sensitiveChanged = useMemo(() => {
     if (!profile) return false;
@@ -557,6 +594,27 @@ export default function Perfil() {
                 )}
               </CardContent>
             </Card>
+
+            {profile.commercial && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Avalie o Note Note</CardTitle>
+                  <CardDescription>Sua opinião ajuda a melhorar o sistema. Dê até 5 estrelas e escreva uma sugestão ou elogio. O texto só aparece no site se for aprovado pelo Note Note.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <p className="mb-2 text-sm font-semibold">Sua nota</p>
+                    <div className="flex gap-1.5">{[1,2,3,4,5].map(n => <button key={n} type="button" onMouseEnter={()=>setReviewHover(n)} onMouseLeave={()=>setReviewHover(0)} onClick={()=>setReviewRating(n)} aria-label={`${n} estrela${n>1?"s":""}`} className="rounded-lg p-1 transition hover:scale-110"><Star className={`h-8 w-8 ${n <= (reviewHover || reviewRating) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} /></button>)}</div>
+                  </div>
+                  <div>
+                    <Label htmlFor="profile-review">Comentário, sugestão ou elogio</Label>
+                    <textarea id="profile-review" value={reviewComment} onChange={e=>setReviewComment(e.target.value)} maxLength={1200} rows={5} placeholder="Conte o que você acha do Note Note ou deixe uma sugestão..." className="mt-2 w-full resize-y rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30" />
+                    <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>{reviewPublished ? "Este depoimento está publicado no site." : "Ao editar e reenviar, a avaliação volta para análise antes de ser publicada."}</span><span>{reviewComment.length}/1200</span></div>
+                  </div>
+                  <Button onClick={saveReview} disabled={reviewSaving || !reviewRating || reviewComment.trim().length < 3}>{reviewSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Star className="mr-2 h-4 w-4"/>}{reviewSaving ? "Enviando..." : "Enviar avaliação"}</Button>
+                </CardContent>
+              </Card>
+            )}
 
             {profile.canDeleteAccount && (
               <Card className="border-destructive/40">

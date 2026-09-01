@@ -34,6 +34,7 @@ const AdminControle = lazy(() => import("./pages/admin/Controle"));
 const AdminAssinaturas = lazy(() => import("./pages/admin/Assinaturas"));
 const AdminMarketing = lazy(() => import("./pages/admin/Marketing"));
 const AdminSuporte = lazy(() => import("./pages/admin/Suporte"));
+const AdminAvaliacoes = lazy(() => import("./pages/admin/Avaliacoes"));
 const AdminUsuarios = lazy(() => import("./pages/admin/Usuarios"));
 const AdminBancos = lazy(() => import("./pages/admin/Bancos"));
 const AdminAuditoria = lazy(() => import("./pages/admin/Auditoria"));
@@ -90,6 +91,7 @@ function Router() {
       <Route path={"/admin/assinaturas"} component={AdminAssinaturas} />
       <Route path={"/admin/marketing"} component={AdminMarketing} />
       <Route path={"/admin/suporte"} component={AdminSuporte} />
+      <Route path={"/admin/avaliacoes"} component={AdminAvaliacoes} />
       <Route path={"/admin/usuarios"} component={AdminUsuarios} />
       <Route path={"/admin/bancos"} component={AdminBancos} />
       <Route path={"/admin/auditoria"} component={AdminAuditoria} />

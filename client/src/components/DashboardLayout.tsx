@@ -7,7 +7,7 @@ import { useCommercialContext } from "@/hooks/useCommercialContext";
 import { trpc } from "@/lib/trpc";
 import {
   Activity, Building2, CalendarDays, Car, ChevronRight, ClipboardList, CreditCard, Database,
-  FileText, KeyRound, LayoutDashboard, LogOut, Mail, Menu, MessageCircle, MoreHorizontal, Package, Settings, Shield,
+  FileText, KeyRound, LayoutDashboard, LogOut, Mail, Menu, MessageCircle, MoreHorizontal, Package, Settings, Shield, Star,
   UserRound, UserRoundCog, Users, Wallet, X,
 } from "lucide-react";
 import { Children, cloneElement, isValidElement, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
@@ -108,6 +108,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     { name: "Assinaturas", href: "/admin/assinaturas", icon: CreditCard, show: Boolean(isSuperAdmin || user?.adminCanSubscriptions) },
     { name: "Marketing", href: "/admin/marketing", icon: Mail, show: Boolean(isSuperAdmin || user?.adminCanMarketing) },
     { name: "Suporte", href: "/admin/suporte", icon: MessageCircle, show: Boolean(isSuperAdmin || user?.adminCanSupport) },
+    { name: "Avaliações", href: "/admin/avaliacoes", icon: Star, show: Boolean(isSuperAdmin) },
     { name: "Usuários", href: "/admin/usuarios", icon: Shield, show: Boolean(isSuperAdmin || user?.adminCanUsers) },
     { name: "Bancos de Dados", href: "/admin/bancos", icon: Database, show: Boolean(isSuperAdmin || user?.adminCanDatabases) },
     { name: "Auditoria", href: "/admin/auditoria", icon: FileText, show: Boolean(isSuperAdmin || user?.adminCanAudit) },
