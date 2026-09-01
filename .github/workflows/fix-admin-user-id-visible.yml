@@ -1,0 +1,27 @@
+name: Fix Admin User ID Visible
+on:
+  push:
+    branches: ["fix/admin-user-id-visible-2026-09-01"]
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: python .github/scripts/fix-admin-user-id-visible.py
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add client/src/pages/admin/Assinaturas.tsx client/src/pages/admin/Marketing.tsx
+          git commit -m "fix: show linked user IDs in admin customer info [skip ci]" || exit 0
+          git push
