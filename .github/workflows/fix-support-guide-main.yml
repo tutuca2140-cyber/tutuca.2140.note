@@ -1,0 +1,30 @@
+name: Fix Support Guide Main
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/scripts/fix-support-guide-main.py"
+      - ".github/workflows/fix-support-guide-main.yml"
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: python .github/scripts/fix-support-guide-main.py
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add client/src/components/FloatingTutorial.tsx
+          git commit -m "fix: embed working support chat inside floating guide [skip ci]" || exit 0
+          git push
