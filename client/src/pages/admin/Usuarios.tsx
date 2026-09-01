@@ -268,8 +268,9 @@ export default function AdminUsuarios() {
                       <Input id="user-username" className="mt-2" autoCapitalize="none" value={draft.username} onChange={e => setDraft({ ...draft, username: e.target.value })} />
                     </div>
                     <div>
-                      <Label htmlFor="user-email">E-mail</Label>
-                      <Input id="user-email" className="mt-2" type="email" autoCapitalize="none" value={draft.email} onChange={e => setDraft({ ...draft, email: e.target.value })} />
+                      <Label htmlFor="user-email">E-mail <span className="text-xs font-normal text-muted-foreground">(opcional)</span></Label>
+                      <Input id="user-email" className="mt-2" type="email" autoCapitalize="none" value={draft.email} onChange={e => setDraft({ ...draft, email: e.target.value })} placeholder="usuario@exemplo.com" />
+                      <p className="mt-1 text-xs text-muted-foreground">Pode deixar em branco para usuários internos de equipe.</p>
                     </div>
                     {!draft.id && (
                       <div>

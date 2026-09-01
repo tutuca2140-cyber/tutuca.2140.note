@@ -350,7 +350,7 @@ export const appRouter = router({
       .input(
         z.object({
           username: z.string().trim().min(3).max(100),
-          email: z.string().trim().email(),
+          email: z.union([z.string().trim().email(), z.literal("")]).default(""),
           name: z.string().trim().min(1).max(200),
           password: z.string().min(6),
           role: z.enum(["user", "admin"]).default("user"),
@@ -378,7 +378,7 @@ export const appRouter = router({
             message: "Nome de usuário já cadastrado.",
           });
         }
-        if (await db.getUserByEmail(input.email)) {
+        if (input.email && await db.getUserByEmail(input.email)) {
           throw new TRPCError({
             code: "CONFLICT",
             message: "E-mail já cadastrado.",

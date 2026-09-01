@@ -2674,7 +2674,7 @@ export async function getDashboardStats(databaseId: number) {
 
 export async function createLocalUser(data: {
   username: string;
-  email: string;
+  email?: string;
   name: string;
   passwordHash: string;
   role?: "user" | "admin";
@@ -2685,6 +2685,13 @@ export async function createLocalUser(data: {
   canGenerateReports?: boolean;
   canAccessSettings?: boolean;
   dashboardOnly?: boolean;
+  adminCanControlPanel?: boolean;
+  adminCanSubscriptions?: boolean;
+  adminCanMarketing?: boolean;
+  adminCanSupport?: boolean;
+  adminCanUsers?: boolean;
+  adminCanDatabases?: boolean;
+  adminCanAudit?: boolean;
 }): Promise<any> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -2692,7 +2699,7 @@ export async function createLocalUser(data: {
   try {
     const result = await db.insert(users).values({
       username: data.username,
-      email: data.email,
+      email: data.email?.trim() || null,
       name: data.name,
       passwordHash: data.passwordHash,
       loginMethod: "local",
@@ -2704,6 +2711,13 @@ export async function createLocalUser(data: {
       canGenerateReports: data.canGenerateReports ?? false,
       canAccessSettings: data.canAccessSettings ?? false,
       dashboardOnly: data.dashboardOnly ?? false,
+      adminCanControlPanel: data.adminCanControlPanel ?? false,
+      adminCanSubscriptions: data.adminCanSubscriptions ?? false,
+      adminCanMarketing: data.adminCanMarketing ?? false,
+      adminCanSupport: data.adminCanSupport ?? false,
+      adminCanUsers: data.adminCanUsers ?? false,
+      adminCanDatabases: data.adminCanDatabases ?? false,
+      adminCanAudit: data.adminCanAudit ?? false,
       isActive: true,
       emailVerified: false,
       lastSignedIn: new Date(),
