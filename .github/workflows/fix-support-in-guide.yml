@@ -1,0 +1,29 @@
+name: Fix Support In Guide
+on:
+  push:
+    branches: ["fix/support-in-guide-2026-09-01"]
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: python .github/scripts/add-support-to-guide.py
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add client/src/components/FloatingTutorial.tsx
+          git commit -m "fix: show support inside floating guide [skip ci]" || exit 0
+          git push
