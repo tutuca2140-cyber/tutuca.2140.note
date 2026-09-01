@@ -13,6 +13,13 @@ type AuthUser = {
   canGenerateReports?: boolean;
   canAccessSettings?: boolean;
   dashboardOnly?: boolean;
+  adminCanControlPanel?: boolean;
+  adminCanSubscriptions?: boolean;
+  adminCanMarketing?: boolean;
+  adminCanSupport?: boolean;
+  adminCanUsers?: boolean;
+  adminCanDatabases?: boolean;
+  adminCanAudit?: boolean;
   isActive?: boolean;
 };
 

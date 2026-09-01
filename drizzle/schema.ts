@@ -35,6 +35,13 @@ export const users = pgTable("users", {
   canGenerateReports: boolean("canGenerateReports").default(false).notNull(),
   canAccessSettings: boolean("canAccessSettings").default(false).notNull(),
   dashboardOnly: boolean("dashboardOnly").default(false).notNull(),
+  adminCanControlPanel: boolean("adminCanControlPanel").default(false).notNull(),
+  adminCanSubscriptions: boolean("adminCanSubscriptions").default(false).notNull(),
+  adminCanMarketing: boolean("adminCanMarketing").default(false).notNull(),
+  adminCanSupport: boolean("adminCanSupport").default(false).notNull(),
+  adminCanUsers: boolean("adminCanUsers").default(false).notNull(),
+  adminCanDatabases: boolean("adminCanDatabases").default(false).notNull(),
+  adminCanAudit: boolean("adminCanAudit").default(false).notNull(),
   failedLoginAttempts: integer("failedLoginAttempts").default(0).notNull(),
 
   isActive: boolean("isActive").default(true).notNull(),

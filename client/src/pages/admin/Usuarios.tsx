@@ -53,6 +53,13 @@ type Draft = Permissions & {
   role: "user" | "admin";
   databaseIds: number[];
   dashboardOnly: boolean;
+  adminCanControlPanel: boolean;
+  adminCanSubscriptions: boolean;
+  adminCanMarketing: boolean;
+  adminCanSupport: boolean;
+  adminCanUsers: boolean;
+  adminCanDatabases: boolean;
+  adminCanAudit: boolean;
 };
 type UserTab = "super_admin" | "commercial";
 
@@ -82,6 +89,13 @@ const makeEmptyDraft = (): Draft => ({
   role: "user",
   databaseIds: [],
   dashboardOnly: false,
+  adminCanControlPanel: false,
+  adminCanSubscriptions: false,
+  adminCanMarketing: false,
+  adminCanSupport: false,
+  adminCanUsers: false,
+  adminCanDatabases: false,
+  adminCanAudit: false,
   ...permissionsForRole("user"),
 });
 
@@ -143,6 +157,13 @@ export default function AdminUsuarios() {
       canAccessSettings: user.canAccessSettings,
       databaseIds: user.databaseIds ?? [],
       dashboardOnly: user.dashboardOnly,
+      adminCanControlPanel: Boolean((user as any).adminCanControlPanel),
+      adminCanSubscriptions: Boolean((user as any).adminCanSubscriptions),
+      adminCanMarketing: Boolean((user as any).adminCanMarketing),
+      adminCanSupport: Boolean((user as any).adminCanSupport),
+      adminCanUsers: Boolean((user as any).adminCanUsers),
+      adminCanDatabases: Boolean((user as any).adminCanDatabases),
+      adminCanAudit: Boolean((user as any).adminCanAudit),
     });
     setOpen(true);
   };
@@ -312,6 +333,30 @@ export default function AdminUsuarios() {
                       ))}
                     </div>
                   )}
+                </section>
+
+                <section className="space-y-4 border-t pt-5">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-lg bg-primary/10 p-2 text-primary"><Shield className="h-5 w-5" /></div>
+                    <div><h3 className="font-semibold">Autorizações de Administração</h3><p className="text-sm text-muted-foreground">Permita que este usuário de equipe acesse somente as áreas administrativas selecionadas. O Super Admin continua com acesso total.</p></div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      ["adminCanControlPanel", "Painel de Controle"],
+                      ["adminCanSubscriptions", "Assinaturas"],
+                      ["adminCanMarketing", "Marketing"],
+                      ["adminCanSupport", "Suporte"],
+                      ["adminCanUsers", "Usuários"],
+                      ["adminCanDatabases", "Bancos de Dados"],
+                      ["adminCanAudit", "Auditoria"],
+                    ].map(([key,label]) => (
+                      <div key={key} className="flex items-center justify-between gap-3 rounded-xl border bg-card p-4">
+                        <Label htmlFor={`admin-permission-${key}`} className="cursor-pointer font-medium">{label}</Label>
+                        <Switch id={`admin-permission-${key}`} checked={Boolean((draft as any)[key])} onCheckedChange={checked => setDraft(current => ({ ...current, [key]: checked }))} />
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Essas autorizações dão acesso apenas aos módulos administrativos marcados; não transformam o usuário em Super Admin.</p>
                 </section>
 
                 <div className="flex flex-col-reverse gap-2 border-t pt-5 sm:flex-row sm:justify-end">

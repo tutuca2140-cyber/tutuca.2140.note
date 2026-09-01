@@ -34,6 +34,13 @@ export default async function handler(req: any, res: any) {
         u."canGenerateReports",
         u."canAccessSettings",
         u."dashboardOnly",
+        u."adminCanControlPanel",
+        u."adminCanSubscriptions",
+        u."adminCanMarketing",
+        u."adminCanSupport",
+        u."adminCanUsers",
+        u."adminCanDatabases",
+        u."adminCanAudit",
         u."isActive"
       FROM local_sessions s
       INNER JOIN users u ON u.id = s."userId"

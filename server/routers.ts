@@ -354,6 +354,13 @@ export const appRouter = router({
           canGenerateReports: z.boolean().default(false),
           canAccessSettings: z.boolean().default(false),
           dashboardOnly: z.boolean().default(false),
+          adminCanControlPanel: z.boolean().default(false),
+          adminCanSubscriptions: z.boolean().default(false),
+          adminCanMarketing: z.boolean().default(false),
+          adminCanSupport: z.boolean().default(false),
+          adminCanUsers: z.boolean().default(false),
+          adminCanDatabases: z.boolean().default(false),
+          adminCanAudit: z.boolean().default(false),
           databaseIds: z.array(z.number().int().positive()).max(3).default([]),
         })
       )
@@ -422,6 +429,13 @@ export const appRouter = router({
           canGenerateReports: z.boolean(),
           canAccessSettings: z.boolean(),
           dashboardOnly: z.boolean(),
+          adminCanControlPanel: z.boolean(),
+          adminCanSubscriptions: z.boolean(),
+          adminCanMarketing: z.boolean(),
+          adminCanSupport: z.boolean(),
+          adminCanUsers: z.boolean(),
+          adminCanDatabases: z.boolean(),
+          adminCanAudit: z.boolean(),
           databaseIds: z.array(z.number().int().positive()).max(3),
         })
       )

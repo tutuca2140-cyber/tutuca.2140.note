@@ -1,3 +1,4 @@
+import { getAuthorizedAdmin } from "../../server/admin-access.js";
 import bcrypt from "bcrypt";
 import {
   getSql,
@@ -67,21 +68,7 @@ async function ensureTables() {
   await sql`CREATE INDEX IF NOT EXISTS site_access_logs_user_idx ON site_access_logs ("userId", "createdAt" DESC)`;
 }
 
-async function getSuperAdmin(req: any) {
-  const token = readCookie(req, SESSION_COOKIE_NAME);
-  if (!token) return null;
-  const sql = getSql();
-  const rows = await sql`
-    SELECT u.id, u.username, u.email, u.name, u.role, u."isActive", u."passwordHash"
-      FROM local_sessions s
-      JOIN users u ON u.id = s."userId"
-     WHERE s.token = ${token}
-       AND s."expiresAt" > NOW()
-     LIMIT 1
-  `;
-  const user = rows[0] as any;
-  if (!user?.isActive || user.role !== "super_admin") return null;
-  return user;
+async function getSuperAdmin(req: any) { return getAuthorizedAdmin(req, "subscriptions");
 }
 
 async function listCommercialAccounts() {
@@ -106,7 +93,7 @@ async function listCommercialAccounts() {
       GROUP BY au."ownerId"
     )
     SELECT
-      u.id, u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt", u."lastSignedIn",
+      u.id, u."supportId", u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt", u."lastSignedIn",
       cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt" AS "subscriptionUpdatedAt",
       cs.provider, cs."billingMethod", cs."providerStatus", cs."providerSubscriptionId",
       cs."providerCheckoutId", cs."providerCustomerId", cs."checkoutUrl", cs."lastPaymentStatus",
@@ -122,7 +109,7 @@ async function listCommercialAccounts() {
     LEFT JOIN usage_summary usage ON usage."ownerId" = u.id
     WHERE u."loginMethod" = 'commercial_signup'
     GROUP BY
-      u.id, u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt", u."lastSignedIn",
+      u.id, u."supportId", u.username, u.name, u.email, u.whatsapp, u."isActive", u."createdAt", u."lastSignedIn",
       cs.plan, cs."priceCents", cs.status, cs."provisionedAt", cs."updatedAt", cs.provider,
       cs."billingMethod", cs."providerStatus", cs."providerSubscriptionId", cs."providerCheckoutId",
       cs."providerCustomerId", cs."checkoutUrl", cs."lastPaymentStatus", cs."lastPaymentId",

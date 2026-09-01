@@ -29,6 +29,7 @@ import { toast } from "sonner";
 type PaymentState = "paid" | "unpaid" | "pending" | "trial" | "canceled";
 type CommercialAccount = {
   id: number;
+  supportId?: string | null;
   username: string;
   name?: string | null;
   email?: string | null;
@@ -149,7 +150,8 @@ function downloadAccountsExcel(accounts: CommercialAccount[]) {
   if (!accounts.length) return toast.error("Não há assinaturas para exportar.");
 
   const headers = [
-    "ID",
+    "ID interno",
+    "ID de usuário",
     "Nome completo",
     "Usuário",
     "E-mail",
@@ -186,6 +188,7 @@ function downloadAccountsExcel(accounts: CommercialAccount[]) {
 
   const rows = accounts.map(account => [
     account.id,
+    account.supportId || "",
     account.name || account.username,
     account.username,
     account.email || "",
@@ -248,7 +251,7 @@ export default function AdminAssinaturas() {
   const [secureLoading, setSecureLoading] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && user && user.role !== "super_admin") navigate("/dashboard", { replace: true });
+    if (!authLoading && user && !(user.role === "super_admin" || user.adminCanSubscriptions)) navigate("/dashboard", { replace: true });
   }, [authLoading, navigate, user]);
 
   const load = async () => {
@@ -266,7 +269,7 @@ export default function AdminAssinaturas() {
     }
   };
 
-  useEffect(() => { if (user?.role === "super_admin") void load(); }, [user?.role]);
+  useEffect(() => { if ((user?.role === "super_admin" || user?.adminCanSubscriptions)) void load(); }, [user?.role]);
 
   const runAction = async (account: CommercialAccount, action: "approve" | "mark_unpaid" | "mark_paid") => {
     setActionId(account.id);
@@ -321,7 +324,7 @@ export default function AdminAssinaturas() {
     }
   };
 
-  if (authLoading || !user || user.role !== "super_admin") return null;
+  if (authLoading || !user || !(user.role === "super_admin" || user.adminCanSubscriptions)) return null;
 
   return (
     <DashboardLayout>

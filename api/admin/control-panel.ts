@@ -1,3 +1,4 @@
+import { getAuthorizedAdmin } from "../../server/admin-access.js";
 import {
   getSql,
   readCookie,
@@ -112,27 +113,9 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const token = readCookie(req, SESSION_COOKIE_NAME);
-    if (!token) {
-      return sendJson(res, 401, { success: false, message: "Sessão não encontrada." });
-    }
-
+    const currentUser = await getAuthorizedAdmin(req, "control");
+    if (!currentUser) return sendJson(res, 403, { success: false, message: "Sem autorização para o Painel de Controle." });
     const sql = getSql();
-    const session = await sql`
-      SELECT u.id, u.username, u.role, u."isActive"
-        FROM local_sessions s
-        JOIN users u ON u.id = s."userId"
-       WHERE s.token = ${token}
-         AND s."expiresAt" > NOW()
-       LIMIT 1
-    `;
-    const currentUser = session[0] as any;
-    if (!currentUser?.isActive || currentUser.role !== "super_admin") {
-      return sendJson(res, 403, {
-        success: false,
-        message: "Painel disponível somente para o Super Administrador.",
-      });
-    }
 
     await ensureTables();
 
@@ -243,6 +226,7 @@ export default async function handler(req: any, res: any) {
       sql`
         SELECT
           u.id,
+          u."supportId",
           u.username,
           u.email,
           u.name,
