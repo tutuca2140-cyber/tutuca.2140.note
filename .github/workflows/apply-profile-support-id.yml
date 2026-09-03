@@ -1,0 +1,33 @@
+name: Apply Profile Support ID
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/apply-profile-support-id.yml']
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: python .github/scripts/apply-profile-support-id.py
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Commit tested changes
+        run: |
+          rm .github/scripts/apply-profile-support-id.py .github/workflows/apply-profile-support-id.yml
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add server/profile-service.ts client/src/pages/Perfil.tsx .github/scripts/apply-profile-support-id.py .github/workflows/apply-profile-support-id.yml
+          git commit -m "feat: show immutable user ID in profile [skip ci]"
+          git push origin HEAD:main
