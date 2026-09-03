@@ -231,7 +231,7 @@ export default function Home() {
         <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between px-5 lg:px-8">
           <a href="#inicio" className="flex items-center"><img src="/brand/note-note-logo-official.png" alt="Note Note" className="h-11 w-auto max-w-[190px] object-contain" /></a>
           <nav className="hidden items-center gap-8 text-sm font-semibold text-slate-700 md:flex"><a href="#recursos" className="transition hover:text-blue-600">Recursos</a><a href="#imoveis" className="transition hover:text-blue-600">Imóveis</a><a href="#funcionalidades" className="transition hover:text-blue-600">Funcionalidades</a><a href="#sobre" className="transition hover:text-blue-600">Sobre</a><Link href="/planos"><a className="transition hover:text-blue-600">Planos</a></Link><a href="#suporte" className="transition hover:text-blue-600">Suporte</a></nav>
-          <Link href="/login"><a className="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700">Login <ArrowRight className="h-4 w-4" /></a></Link>
+          <div className="flex items-center gap-2"><Link href="/login"><a className="inline-flex h-11 items-center justify-center rounded-xl border border-blue-200 bg-white px-3 text-sm font-bold text-blue-700 transition hover:bg-blue-50 sm:px-4">Login</a></Link><Link href="/cadastro"><a className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-bold text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700 sm:px-5">Cadastre-se <ArrowRight className="hidden h-4 w-4 sm:block" /></a></Link></div>
         </div>
       </header>
 
