@@ -138,6 +138,25 @@
 }
 
 @layer components {
+  .support-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--primary) 35%, transparent) transparent;
+    overscroll-behavior: contain;
+  }
+
+  .support-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .support-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .support-scrollbar::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--primary) 30%, transparent);
+  }
+
   [data-slot="dialog-content"] form,
   [data-slot="card-content"] form {
     width: 100%;

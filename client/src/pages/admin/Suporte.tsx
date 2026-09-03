@@ -1,117 +1,41 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
-import { Bell, Circle, MessageCircle, RefreshCw, Send, UserRound } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { Bell, CheckCheck, Circle, Headphones, Inbox, LoaderCircle, MessageCircle, RefreshCw, Search, Send, X } from "lucide-react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-type Thread = {
-  id:number;
-  status:string;
-  lastUserMessageAt:string;
-  name?:string;
-  username?:string;
-  email?:string;
-  supportId?:string;
-  accountActive:boolean;
-  sessionActive:boolean;
-  unreadCount:number;
-  lastMessage?:string;
-};
-
-type Msg = { id:number; senderRole:"user"|"super_admin"; message:string; createdAt:string; senderName?:string };
+type Thread={id:number;status:string;lastUserMessageAt:string;name?:string;username?:string;email?:string;supportId?:string;accountActive:boolean;sessionActive:boolean;unreadCount:number;lastMessage?:string};
+type Msg={id:number;senderRole:"user"|"super_admin";message:string;createdAt:string;senderName?:string};
+const time=(value:string)=>new Intl.DateTimeFormat("pt-BR",{hour:"2-digit",minute:"2-digit"}).format(new Date(value));
+const listTime=(value:string)=>new Intl.DateTimeFormat("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}).format(new Date(value));
 
 export default function AdminSuporte(){
-  const [threads,setThreads]=useState<Thread[]>([]);
-  const [selected,setSelected]=useState<number|null>(null);
-  const [detail,setDetail]=useState<any>(null);
-  const [messages,setMessages]=useState<Msg[]>([]);
-  const [reply,setReply]=useState("");
-  const [sending,setSending]=useState(false);
-  const endRef=useRef<HTMLDivElement>(null);
-
-  const loadList=useCallback(async(silent=false)=>{
-    try{
-      const response=await fetch("/api/site-access?scope=support&action=list",{credentials:"include",cache:"no-store"});
-      const data=await response.json();
-      if(!response.ok)throw new Error(data?.message||"Erro ao carregar suporte.");
-      const next=Array.isArray(data.threads)?data.threads:[];
-      setThreads(next);
-      setSelected(current=>current??(next[0]?.id?Number(next[0].id):null));
-    }catch(error){if(!silent)toast.error(error instanceof Error?error.message:"Erro no suporte.");}
-  },[]);
-
-  const loadThread=useCallback(async(id:number,silent=false)=>{
-    try{
-      const response=await fetch(`/api/site-access?scope=support&action=thread&threadId=${id}`,{credentials:"include",cache:"no-store"});
-      const data=await response.json();
-      if(!response.ok)throw new Error(data?.message||"Erro ao abrir atendimento.");
-      setDetail(data.thread);
-      setMessages(Array.isArray(data.messages)?data.messages:[]);
-    }catch(error){if(!silent)toast.error(error instanceof Error?error.message:"Erro ao abrir atendimento.");}
-  },[]);
-
-  useEffect(()=>{loadList();const timer=window.setInterval(()=>loadList(true),10000);return()=>window.clearInterval(timer);},[loadList]);
+  const [threads,setThreads]=useState<Thread[]>([]),[selected,setSelected]=useState<number|null>(null),[detail,setDetail]=useState<any>(null),[messages,setMessages]=useState<Msg[]>([]),[reply,setReply]=useState(""),[search,setSearch]=useState(""),[sending,setSending]=useState(false),[loadingThread,setLoadingThread]=useState(false);
+  const endRef=useRef<HTMLDivElement>(null),textareaRef=useRef<HTMLTextAreaElement>(null);
+  const loadList=useCallback(async(silent=false)=>{try{const response=await fetch("/api/site-access?scope=support&action=list",{credentials:"include",cache:"no-store"}),data=await response.json();if(!response.ok)throw new Error(data?.message||"Erro ao carregar suporte.");const next=Array.isArray(data.threads)?data.threads:[];setThreads(next);setSelected(current=>current??(next[0]?.id?Number(next[0].id):null));}catch(error){if(!silent)toast.error(error instanceof Error?error.message:"Erro no suporte.");}},[]);
+  const loadThread=useCallback(async(id:number,silent=false)=>{if(!silent)setLoadingThread(true);try{const response=await fetch(`/api/site-access?scope=support&action=thread&threadId=${id}`,{credentials:"include",cache:"no-store"}),data=await response.json();if(!response.ok)throw new Error(data?.message||"Erro ao abrir atendimento.");setDetail(data.thread);setMessages(Array.isArray(data.messages)?data.messages:[]);}catch(error){if(!silent)toast.error(error instanceof Error?error.message:"Erro ao abrir atendimento.");}finally{if(!silent)setLoadingThread(false);}},[]);
+  useEffect(()=>{loadList();const timer=window.setInterval(()=>loadList(true),8000);return()=>window.clearInterval(timer);},[loadList]);
   useEffect(()=>{if(selected)loadThread(selected);else{setDetail(null);setMessages([]);}},[selected,loadThread]);
-  useEffect(()=>{if(!selected)return;const timer=window.setInterval(()=>loadThread(selected,true),10000);return()=>window.clearInterval(timer);},[selected,loadThread]);
-  useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth"});},[messages.length]);
+  useEffect(()=>{if(!selected)return;const timer=window.setInterval(()=>loadThread(selected,true),8000);return()=>window.clearInterval(timer);},[selected,loadThread]);
+  useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth",block:"end"});},[messages.length]);
+  const filtered=useMemo(()=>{const term=search.trim().toLowerCase();return term?threads.filter(thread=>[thread.name,thread.username,thread.email,thread.supportId,thread.lastMessage].some(value=>String(value||"").toLowerCase().includes(term))):threads;},[threads,search]);
+  const unread=threads.reduce((total,thread)=>total+Number(thread.unreadCount||0),0);
+  const enableNotifications=async()=>{if(!("Notification" in window))return toast.error("Este navegador não oferece notificações do sistema.");if(Notification.permission==="granted")return toast.success("Notificações já estão ativadas.");const permission=await Notification.requestPermission();permission==="granted"?toast.success("Notificações de suporte ativadas."):toast.error("Permissão de notificação não concedida.");};
+  const send=async(event?:FormEvent)=>{event?.preventDefault();if(!selected||!reply.trim()||sending)return;setSending(true);try{const response=await fetch("/api/site-access?scope=support",{method:"POST",credentials:"include",headers:{"content-type":"application/json"},body:JSON.stringify({action:"reply",threadId:selected,message:reply.trim()})}),data=await response.json();if(!response.ok)throw new Error(data?.message||"Erro ao responder.");setReply("");await Promise.all([loadThread(selected,true),loadList(true)]);textareaRef.current?.focus();}catch(error){toast.error(error instanceof Error?error.message:"Erro ao responder.");}finally{setSending(false);}};
+  const handleKeyDown=(event:KeyboardEvent<HTMLTextAreaElement>)=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();void send();}};
+  const toggle=async()=>{if(!selected||!detail)return;const action=detail.status==="closed"?"reopen":"close",response=await fetch("/api/site-access?scope=support",{method:"POST",credentials:"include",headers:{"content-type":"application/json"},body:JSON.stringify({action,threadId:selected})}),data=await response.json();if(!response.ok)return toast.error(data?.message||"Erro ao alterar atendimento.");await Promise.all([loadThread(selected,true),loadList(true)]);};
 
-  const enableNotifications=async()=>{
-    if (!("Notification" in window)) return toast.error("Este navegador não oferece notificações do sistema.");
-    if (Notification.permission === "granted") return toast.success("Notificações do navegador já estão ativadas.");
-    const permission = await Notification.requestPermission();
-    if (permission === "granted") toast.success("Notificações de novas mensagens de suporte ativadas.");
-    else toast.error("Permissão de notificação não foi concedida.");
-  };
-
-  const send=async(event:FormEvent)=>{
-    event.preventDefault();
-    if(!selected||!reply.trim()||sending)return;
-    setSending(true);
-    try{
-      const response=await fetch("/api/site-access?scope=support",{method:"POST",credentials:"include",headers:{"content-type":"application/json"},body:JSON.stringify({action:"reply",threadId:selected,message:reply.trim()})});
-      const data=await response.json();
-      if(!response.ok)throw new Error(data?.message||"Erro ao responder.");
-      setReply("");
-      await Promise.all([loadThread(selected,true),loadList(true)]);
-    }catch(error){toast.error(error instanceof Error?error.message:"Erro ao responder.");}
-    finally{setSending(false);}
-  };
-
-  const toggle=async()=>{
-    if(!selected||!detail)return;
-    const action=detail.status==="closed"?"reopen":"close";
-    const response=await fetch("/api/site-access?scope=support",{method:"POST",credentials:"include",headers:{"content-type":"application/json"},body:JSON.stringify({action,threadId:selected})});
-    const data=await response.json();
-    if(!response.ok)return toast.error(data?.message||"Erro ao alterar atendimento.");
-    await Promise.all([loadThread(selected,true),loadList(true)]);
-  };
-
-  return <DashboardLayout>
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Super Admin</p><h1 className="text-2xl font-bold">Suporte aos assinantes</h1><p className="text-sm text-muted-foreground">Mensagens organizadas pela chegada mais recente do cliente.</p></div>
-        <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={enableNotifications}><Bell className="mr-2 h-4 w-4"/>Ativar notificações</Button><Button variant="outline" onClick={()=>loadList()}><RefreshCw className="mr-2 h-4 w-4"/>Atualizar</Button></div>
-      </div>
-      <div className="grid min-h-[620px] gap-4 lg:grid-cols-[360px_1fr]">
-        <section className="overflow-hidden rounded-2xl border bg-card">
-          <div className="border-b p-3 font-semibold">Caixa de entrada ({threads.length})</div>
-          <div className="max-h-[680px] overflow-y-auto">
-            {threads.length===0?<p className="p-5 text-sm text-muted-foreground">Nenhuma mensagem recebida.</p>:threads.map(thread=><button key={thread.id} onClick={()=>setSelected(Number(thread.id))} className={`w-full border-b p-4 text-left transition hover:bg-muted/50 ${selected===Number(thread.id)?"bg-primary/10":""}`}>
-              <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-semibold">{thread.name||thread.username||"Assinante"}</p><p className="font-mono text-xs text-muted-foreground">ID {thread.supportId||"—"}</p></div>{Number(thread.unreadCount)>0?<span className="rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-primary-foreground">{thread.unreadCount}</span>:null}</div>
-              <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{thread.lastMessage||"Sem mensagem"}</p>
-              <div className="mt-2 flex flex-wrap gap-2 text-[10px]"><span className={`rounded-full px-2 py-1 ${thread.accountActive?"bg-emerald-500/10 text-emerald-700":"bg-destructive/10 text-destructive"}`}>Conta {thread.accountActive?"ativa":"inativa"}</span><span className={`rounded-full px-2 py-1 ${thread.sessionActive?"bg-emerald-500/10 text-emerald-700":"bg-muted text-muted-foreground"}`}>{thread.sessionActive?"Sessão ativa":"Offline"}</span></div>
-              <p className="mt-2 text-[10px] text-muted-foreground">Chegada: {new Date(thread.lastUserMessageAt).toLocaleString("pt-BR")}</p>
-            </button>)}
-          </div>
-        </section>
-        <section className="flex min-h-[620px] flex-col overflow-hidden rounded-2xl border bg-card">
-          {!detail?<div className="grid flex-1 place-items-center text-center text-muted-foreground"><div><MessageCircle className="mx-auto h-10 w-10"/><p className="mt-2">Selecione um atendimento.</p></div></div>:<>
-            <div className="border-b p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-center gap-3"><div className="rounded-full bg-primary/10 p-2"><UserRound className="h-5 w-5 text-primary"/></div><div><h2 className="font-bold">{detail.name||detail.username}</h2><p className="text-xs text-muted-foreground">{detail.email}</p><p className="font-mono text-xs font-bold">ID {detail.supportId||"—"}</p></div></div><div className="flex items-center gap-2"><span className="flex items-center gap-1 text-xs"><Circle className={`h-2.5 w-2.5 ${detail.sessionActive?"fill-emerald-500 text-emerald-500":"fill-muted text-muted"}`}/>{detail.sessionActive?"Sessão ativa":"Offline"}</span><Button size="sm" variant="outline" onClick={toggle}>{detail.status==="closed"?"Reabrir":"Encerrar"}</Button></div></div></div>
-            <div className="flex-1 space-y-3 overflow-y-auto bg-muted/15 p-4">{messages.map(message=><div key={message.id} className={`flex ${message.senderRole==="super_admin"?"justify-end":"justify-start"}`}><div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ${message.senderRole==="super_admin"?"bg-primary text-primary-foreground":"border bg-background"}`}><p className="whitespace-pre-wrap">{message.message}</p><p className={`mt-1 text-[10px] ${message.senderRole==="super_admin"?"text-primary-foreground/70":"text-muted-foreground"}`}>{message.senderRole==="super_admin"?"Super Admin":detail.name||"Cliente"} • {new Date(message.createdAt).toLocaleString("pt-BR")}</p></div></div>)}<div ref={endRef}/></div>
-            <form onSubmit={send} className="flex gap-2 border-t p-3"><textarea value={reply} onChange={event=>setReply(event.target.value)} maxLength={5000} rows={2} placeholder="Responder ao assinante..." className="flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"/><Button type="submit" disabled={sending||!reply.trim()}><Send className="mr-2 h-4 w-4"/>{sending?"Enviando...":"Responder"}</Button></form>
-          </>}
-        </section>
-      </div>
+  return <DashboardLayout><div className="space-y-5">
+    <div className="flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2"><p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Super Admin</p>{unread>0&&<span className="rounded-full bg-blue-600 px-2 py-0.5 text-xs font-bold text-white">{unread} nova{unread===1?"":"s"}</span>}</div><h1 className="mt-1 text-2xl font-extrabold tracking-tight sm:text-3xl">Central de suporte</h1><p className="mt-1 text-sm text-muted-foreground">Atendimentos em tempo real, organizados pela mensagem mais recente.</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" className="rounded-xl" onClick={enableNotifications}><Bell className="mr-2 h-4 w-4"/>Notificações</Button><Button variant="outline" className="rounded-xl" onClick={()=>loadList()}><RefreshCw className="mr-2 h-4 w-4"/>Atualizar</Button></div></div>
+    <div className="grid min-h-[640px] overflow-hidden rounded-[1.5rem] border bg-card shadow-[0_20px_70px_-45px_rgba(37,99,235,0.6)] lg:grid-cols-[350px_1fr]">
+      <aside className={`border-r bg-muted/15 ${detail?"hidden lg:block":"block"}`}><div className="border-b p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2 font-bold"><Inbox className="h-5 w-5 text-primary"/>Caixa de entrada</div><span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold">{threads.length}</span></div><div className="relative mt-3"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Buscar nome, e-mail ou ID" className="h-10 w-full rounded-xl border bg-background pl-9 pr-9 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"/>{search&&<button type="button" onClick={()=>setSearch("")} aria-label="Limpar busca" className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-muted"><X className="h-4 w-4"/></button>}</div></div>
+        <div className="support-scrollbar max-h-[680px] overflow-y-auto">{filtered.length===0?<div className="p-8 text-center"><MessageCircle className="mx-auto h-9 w-9 text-muted-foreground/50"/><p className="mt-3 text-sm font-semibold">{search?"Nenhum atendimento encontrado":"Nenhuma mensagem recebida"}</p><p className="mt-1 text-xs text-muted-foreground">{search?"Tente outro termo.":"As novas conversas aparecerão aqui."}</p></div>:filtered.map(thread=><button key={thread.id} onClick={()=>setSelected(Number(thread.id))} className={`relative w-full border-b p-4 text-left transition-all hover:bg-blue-500/[0.06] ${selected===Number(thread.id)?"bg-blue-500/[0.09] before:absolute before:inset-y-3 before:left-0 before:w-1 before:rounded-r-full before:bg-blue-600":""}`}><div className="flex items-start gap-3"><div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-blue-100 to-cyan-100 font-bold text-blue-700 dark:from-blue-950 dark:to-cyan-950 dark:text-blue-300">{String(thread.name||thread.username||"A").charAt(0).toUpperCase()}{thread.sessionActive&&<span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-emerald-500"/>}</div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><p className="truncate font-bold">{thread.name||thread.username||"Assinante"}</p><span className="shrink-0 text-[11px] text-muted-foreground">{listTime(thread.lastUserMessageAt)}</span></div><p className="mt-0.5 truncate text-sm text-muted-foreground">{thread.lastMessage||"Sem mensagem"}</p><div className="mt-2 flex items-center justify-between"><span className="font-mono text-[11px] text-muted-foreground">ID {thread.supportId||"—"}</span>{Number(thread.unreadCount)>0?<span className="grid min-w-5 place-items-center rounded-full bg-blue-600 px-1.5 py-0.5 text-[11px] font-bold text-white">{thread.unreadCount}</span>:<CheckCheck className="h-4 w-4 text-muted-foreground/60"/>}</div></div></div></button>)}</div>
+      </aside>
+      <section className={`min-w-0 flex-col ${detail?"flex":"hidden lg:flex"}`}>{loadingThread?<div className="grid flex-1 place-items-center"><LoaderCircle className="h-7 w-7 animate-spin text-primary"/></div>:!detail?<div className="grid flex-1 place-items-center px-6 text-center"><div><div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-blue-500/10 text-primary"><Headphones className="h-8 w-8"/></div><p className="mt-4 text-lg font-bold">Selecione um atendimento</p><p className="mt-1 text-sm text-muted-foreground">Escolha uma conversa para visualizar e responder.</p></div></div>:<>
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b bg-background/90 p-4 backdrop-blur"><div className="flex min-w-0 items-center gap-3"><button type="button" onClick={()=>{setSelected(null);setDetail(null);}} className="rounded-lg border p-2 lg:hidden" aria-label="Voltar para atendimentos">←</button><div className="relative grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-blue-600 to-cyan-500 text-lg font-bold text-white">{String(detail.name||detail.username||"C").charAt(0).toUpperCase()}<span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-[3px] border-background ${detail.sessionActive?"bg-emerald-500":"bg-slate-400"}`}/></div><div className="min-w-0"><h2 className="truncate font-extrabold">{detail.name||detail.username}</h2><p className="truncate text-xs text-muted-foreground">{detail.email} • ID {detail.supportId||"—"}</p></div></div><div className="flex items-center gap-2"><span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex"><Circle className={`h-2.5 w-2.5 ${detail.sessionActive?"fill-emerald-500 text-emerald-500":"fill-slate-400 text-slate-400"}`}/>{detail.sessionActive?"Online agora":"Offline"}</span><Button size="sm" variant="outline" className="rounded-xl" onClick={toggle}>{detail.status==="closed"?"Reabrir":"Encerrar"}</Button></div></header>
+        <div aria-live="polite" className="support-scrollbar flex-1 space-y-3 overflow-y-auto bg-gradient-to-b from-muted/20 to-background p-4 sm:p-6">{messages.map(message=>{const mine=message.senderRole==="super_admin";return <div key={message.id} className={`flex items-end gap-2 ${mine?"justify-end":"justify-start"}`}>{!mine&&<div className="mb-1 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-muted font-bold text-muted-foreground">{String(detail.name||"C").charAt(0).toUpperCase()}</div>}<div className={`max-w-[84%] rounded-2xl px-4 py-3 text-[0.9375rem] shadow-sm ${mine?"rounded-br-md bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-blue-600/15":"rounded-bl-md border bg-card"}`}><p className="whitespace-pre-wrap leading-relaxed">{message.message}</p><div className={`mt-1.5 flex items-center justify-end gap-1 text-[11px] ${mine?"text-blue-100":"text-muted-foreground"}`}><span>{mine?"Você":detail.name||"Cliente"} • {time(message.createdAt)}</span>{mine&&<CheckCheck className="h-3.5 w-3.5"/>}</div></div></div>})}<div ref={endRef}/></div>
+        {detail.status==="closed"?<div className="border-t bg-muted/30 p-4 text-center"><p className="text-sm font-semibold">Este atendimento foi encerrado.</p><button type="button" onClick={toggle} className="mt-1 text-sm font-bold text-primary hover:underline">Reabrir conversa</button></div>:<form onSubmit={send} className="border-t bg-background p-3 sm:p-4"><div className="rounded-2xl border p-2 shadow-sm transition focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10"><textarea ref={textareaRef} value={reply} onChange={event=>setReply(event.target.value)} onKeyDown={handleKeyDown} maxLength={5000} rows={2} aria-label="Resposta ao assinante" placeholder="Escreva uma resposta..." className="min-h-14 w-full resize-none bg-transparent px-2 py-2 text-base outline-none placeholder:text-muted-foreground/70"/><div className="flex items-center gap-3 border-t px-1 pt-2"><p className="hidden text-xs text-muted-foreground sm:block">Enter envia • Shift + Enter quebra a linha</p><span className="ml-auto text-xs text-muted-foreground">{reply.length}/5000</span><Button type="submit" disabled={sending||!reply.trim()} className="h-10 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 px-4"><span>{sending?"Enviando":"Enviar"}</span>{sending?<LoaderCircle className="h-4 w-4 animate-spin"/>:<Send className="h-4 w-4"/>}</Button></div></div></form>}
+      </>}</section>
     </div>
-  </DashboardLayout>;
+  </div></DashboardLayout>;
 }
