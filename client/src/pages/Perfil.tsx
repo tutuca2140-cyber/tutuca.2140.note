@@ -30,6 +30,7 @@ import { toast } from "sonner";
 
 type Profile = {
   id: number;
+  supportId?: string | null;
   name: string;
   username: string;
   email: string;
@@ -531,6 +532,17 @@ export default function Perfil() {
                       placeholder="(24) 99999-9999"
                       disabled={!profile.editable || saving}
                     />
+                  </div>
+                  <div>
+                    <Label htmlFor="profile-support-id">ID de usuário</Label>
+                    <Input
+                      id="profile-support-id"
+                      className="mt-2 font-mono tracking-[0.18em]"
+                      value={profile.supportId || "Não disponível"}
+                      readOnly
+                      disabled
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">Número gerado pelo sistema e não pode ser alterado.</p>
                   </div>
                 </div>
 

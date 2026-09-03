@@ -85,7 +85,7 @@ async function getViewer(client: Client, req: any) {
   const result = await client.query(
     `SELECT
        u.id, u.username, u.name, u.email, u.whatsapp, u.role, u."loginMethod",
-       u."accountOwnerId", u."passwordHash", u."isActive", u."createdAt",
+       u."accountOwnerId", u."passwordHash", u."isActive", u."createdAt", u."supportId",
        s.token AS "sessionToken"
      FROM local_sessions s
      JOIN users u ON u.id = s."userId"
@@ -155,6 +155,7 @@ async function getProfile(client: Client, user: any) {
   const subscription = await getSubscription(client, user);
   return {
     id: Number(user.id),
+    supportId: user.supportId ? String(user.supportId) : null,
     name: String(user.name || ""),
     username: String(user.username || ""),
     email: String(user.email || ""),
