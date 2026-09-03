@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCommercialContext } from "@/hooks/useCommercialContext";
 import { trpc } from "@/lib/trpc";
 import {
-  Activity, Building2, CalendarDays, CalendarRange, Car, ChevronRight, ClipboardList, CreditCard, Database,
+  Activity, Building2, CalendarDays, CalendarRange, Car, ChevronRight, ClipboardList, CreditCard, Database, Globe2,
   FileText, KeyRound, LayoutDashboard, LogOut, Mail, Menu, MessageCircle, MoreHorizontal, Package, Settings, Shield, Star,
   UserRound, UserRoundCog, Users, Wallet, X,
 } from "lucide-react";
@@ -106,6 +106,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   ];
   const adminNavigation: NavItem[] = [
     { name: "Painel de Controle", href: "/admin/controle", icon: Activity, show: Boolean(isSuperAdmin || user?.adminCanControlPanel) },
+    { name: "Visitantes do site", href: "/admin/visitantes", icon: Globe2, show: Boolean(isSuperAdmin || user?.adminCanControlPanel) },
     { name: "Assinaturas", href: "/admin/assinaturas", icon: CreditCard, show: Boolean(isSuperAdmin || user?.adminCanSubscriptions) },
     { name: "Marketing", href: "/admin/marketing", icon: Mail, show: Boolean(isSuperAdmin || user?.adminCanMarketing) },
     { name: "Suporte", href: "/admin/suporte", icon: MessageCircle, show: Boolean(isSuperAdmin || user?.adminCanSupport) },

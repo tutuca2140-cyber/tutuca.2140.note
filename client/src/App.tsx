@@ -40,6 +40,7 @@ const AdminUsuarios = lazy(() => import("./pages/admin/Usuarios"));
 const AdminBancos = lazy(() => import("./pages/admin/Bancos"));
 const AdminAuditoria = lazy(() => import("./pages/admin/Auditoria"));
 const AdminConfiguracoes = lazy(() => import("./pages/admin/Configuracoes"));
+const AdminVisitantes = lazy(() => import("./pages/admin/Visitantes"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const PaidClientes = () => <CommercialPaymentGate><Clientes /></CommercialPaymentGate>;
@@ -99,6 +100,7 @@ function Router() {
       <Route path={"/admin/bancos"} component={AdminBancos} />
       <Route path={"/admin/auditoria"} component={AdminAuditoria} />
       <Route path={"/admin/configuracoes"} component={AdminConfiguracoes} />
+      <Route path={"/admin/visitantes"} component={AdminVisitantes} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>

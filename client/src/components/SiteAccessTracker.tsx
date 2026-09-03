@@ -3,10 +3,26 @@ import { useLocation } from "wouter";
 
 const HEARTBEAT_MS = 5 * 60 * 1000;
 
+function trackingId(storage: Storage, key: string) {
+  try {
+    const current = storage.getItem(key);
+    if (current) return current;
+    const next = typeof window.crypto?.randomUUID === "function" ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    storage.setItem(key, next);
+    return next;
+  } catch {
+    return `private-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
 function registerAccess(path: string) {
   const body = JSON.stringify({
     path,
     referrer: document.referrer || "",
+    visitorId: trackingId(window.localStorage, "note-note-visitor-id"),
+    sessionId: trackingId(window.sessionStorage, "note-note-visit-session"),
+    language: navigator.language || "",
+    screen: `${window.screen.width}x${window.screen.height}`,
   });
 
   if (typeof navigator.sendBeacon === "function") {
