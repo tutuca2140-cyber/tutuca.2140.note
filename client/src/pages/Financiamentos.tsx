@@ -138,6 +138,64 @@ export default function Financiamentos() {
 
     return { amount, contracts: financingIds.size };
   }, [financings, payments]);
+  const detailSchedule = useMemo(() => {
+    if (!details) {
+      return { rows: [], overdueAmount: 0, paidCount: 0, overdueCount: 0 };
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const paidByInstallment = new Map<number, number>();
+    details.payments.forEach(payment => {
+      if (payment.status !== "pago") return;
+      paidByInstallment.set(
+        payment.installmentNumber,
+        (paidByInstallment.get(payment.installmentNumber) ?? 0) +
+          Number(payment.amount || 0)
+      );
+    });
+
+    const installmentAmount = Number(details.financing.installmentAmount || 0);
+    const rows = Array.from(
+      { length: details.financing.installments },
+      (_, index) => {
+        const installmentNumber = index + 1;
+        const dueDate = new Date(details.financing.startDate);
+        dueDate.setMonth(dueDate.getMonth() + installmentNumber);
+        dueDate.setHours(0, 0, 0, 0);
+        const paid = paidByInstallment.get(installmentNumber) ?? 0;
+        const remaining = Math.max(0, installmentAmount - paid);
+        const paidInFull = remaining < 0.01;
+        const overdue = !paidInFull && dueDate < today;
+        const dueToday = !paidInFull && dueDate.getTime() === today.getTime();
+        return {
+          installmentNumber,
+          dueDate,
+          paid,
+          remaining,
+          status: paidInFull
+            ? "Pago"
+            : overdue
+              ? "Vencida"
+              : dueToday
+                ? "Vence hoje"
+                : paid > 0
+                  ? "Pagamento parcial"
+                  : "A vencer",
+          overdue,
+        };
+      }
+    );
+
+    return {
+      rows,
+      overdueAmount: rows
+        .filter(row => row.overdue)
+        .reduce((sum, row) => sum + row.remaining, 0),
+      paidCount: rows.filter(row => row.status === "Pago").length,
+      overdueCount: rows.filter(row => row.overdue).length,
+    };
+  }, [details]);
   const assetLabel = form.assetType === "produto" ? "produto" : "veículo";
   const calculation = useMemo(() => {
     const price = Number(form.vehiclePrice),
@@ -765,7 +823,7 @@ export default function Financiamentos() {
           if (!value) setDetailId(null);
         }}
       >
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Histórico do financiamento #{detailId}</DialogTitle>
           </DialogHeader>
@@ -774,8 +832,92 @@ export default function Financiamentos() {
               Carregando histórico...
             </p>
           ) : (
-            <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-5">
+              <div className="rounded-xl border bg-muted/20 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">
+                      {details.client?.name ||
+                        `Cliente #${details.financing.clientId}`}
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {details.product
+                        ? `${details.product.name}${details.product.sku ? ` · ${details.product.sku}` : ""}`
+                        : details.vehicle
+                          ? `${details.vehicle.brand || ""} ${details.vehicle.model || ""}${details.vehicle.plate ? ` · ${details.vehicle.plate}` : ""}`.trim()
+                          : "Bem financiado não informado"}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium capitalize text-primary">
+                    {details.financing.status}
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <div>
+                    <p className="text-muted-foreground">Valor da venda</p>
+                    <p className="font-semibold">
+                      {money(details.financing.vehiclePrice)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Entrada</p>
+                    <p className="font-semibold">
+                      {money(details.financing.downPayment)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Juros mensais</p>
+                    <p className="font-semibold">
+                      {details.financing.interestRate}% ao mês
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Plano</p>
+                    <p className="font-semibold">
+                      {details.financing.installments}x de{" "}
+                      {money(details.financing.installmentAmount)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Início</p>
+                    <p className="font-semibold">
+                      {new Date(details.financing.startDate).toLocaleDateString(
+                        "pt-BR"
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Término previsto</p>
+                    <p className="font-semibold">
+                      {new Date(details.financing.endDate).toLocaleDateString(
+                        "pt-BR"
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Parcelas pagas</p>
+                    <p className="font-semibold">
+                      {detailSchedule.paidCount} de{" "}
+                      {details.financing.installments}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Parcelas vencidas</p>
+                    <p className="font-semibold text-red-700 dark:text-red-300">
+                      {detailSchedule.overdueCount}
+                    </p>
+                  </div>
+                </div>
+                {details.financing.notes ? (
+                  <div className="mt-4 border-t pt-3 text-sm">
+                    <p className="text-muted-foreground">Observações</p>
+                    <p className="mt-1 whitespace-pre-wrap">
+                      {details.financing.notes}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-lg bg-muted/50 p-3">
                   <p className="text-xs text-muted-foreground">
                     Total do contrato
@@ -796,8 +938,55 @@ export default function Financiamentos() {
                     {money(details.remainingBalance)}
                   </p>
                 </div>
+                <div className="rounded-lg bg-red-50 p-3 dark:bg-red-950/30">
+                  <p className="text-sm text-red-700 dark:text-red-300">
+                    Valores vencidos
+                  </p>
+                  <p className="font-semibold text-red-950 dark:text-red-100">
+                    {money(detailSchedule.overdueAmount)}
+                  </p>
+                </div>
+              </div>
+              <div>
+                <h3 className="mb-3 font-semibold">Situação das parcelas</h3>
+                <div className="space-y-2">
+                  {detailSchedule.rows.map(row => (
+                    <div
+                      key={row.installmentNumber}
+                      className={`grid gap-2 rounded-lg border p-3 text-sm sm:grid-cols-[0.7fr_1fr_1fr_1fr] ${
+                        row.overdue
+                          ? "border-red-200 bg-red-50/70 dark:border-red-900/60 dark:bg-red-950/20"
+                          : ""
+                      }`}
+                    >
+                      <span className="font-medium">
+                        Parcela {row.installmentNumber}
+                      </span>
+                      <span>
+                        Vencimento: {row.dueDate.toLocaleDateString("pt-BR")}
+                      </span>
+                      <span>
+                        {row.remaining > 0
+                          ? `Em aberto: ${money(row.remaining)}`
+                          : `Pago: ${money(row.paid)}`}
+                      </span>
+                      <span
+                        className={`font-semibold ${
+                          row.overdue
+                            ? "text-red-700 dark:text-red-300"
+                            : row.status === "Pago"
+                              ? "text-emerald-700 dark:text-emerald-300"
+                              : "text-muted-foreground"
+                        }`}
+                      >
+                        {row.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="space-y-2">
+                <h3 className="font-semibold">Pagamentos registrados</h3>
                 {details.payments.length ? (
                   details.payments.map(payment => {
                     const extra = Math.max(
