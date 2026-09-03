@@ -3,77 +3,880 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { Activity, BadgeDollarSign, Building2, CalendarRange, Car, CheckCircle2, CreditCard, Eye, EyeOff, Focus, Loader2, Package, Settings2, Users, Wallet, X } from "lucide-react";
+import {
+  Activity,
+  BadgeDollarSign,
+  Building2,
+  CalendarRange,
+  Car,
+  CheckCircle2,
+  CreditCard,
+  Eye,
+  EyeOff,
+  Focus,
+  Loader2,
+  Package,
+  Settings2,
+  Users,
+  Wallet,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "wouter";
 import { useEffect, useMemo, useState } from "react";
 
-const money=(v:any)=>Number(v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-type BlockKey="cash"|"loans"|"rentals"|"properties"|"vehicles"|"products"|"agents";
-const blocks:{key:BlockKey;title:string;icon:any}[]=[
-  {key:"cash",title:"Caixa Geral e Fluxo do Caixa",icon:Wallet},
-  {key:"loans",title:"Empréstimos",icon:CreditCard},
-  {key:"rentals",title:"Aluguéis",icon:Building2},
-  {key:"properties",title:"Financiamentos e Vendas de Imóveis",icon:BadgeDollarSign},
-  {key:"vehicles",title:"Financiamentos e Vendas de Veículos",icon:Car},
-  {key:"products",title:"Financiamentos e Produtos",icon:Package},
-  {key:"agents",title:"Agentes",icon:Users},
+const money = (v: any) =>
+  Number(v || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+type BlockKey =
+  | "cash"
+  | "loans"
+  | "rentals"
+  | "properties"
+  | "vehicles"
+  | "products"
+  | "agents";
+const blocks: { key: BlockKey; title: string; icon: any }[] = [
+  { key: "cash", title: "Caixa Geral e Fluxo do Caixa", icon: Wallet },
+  { key: "loans", title: "Empréstimos", icon: CreditCard },
+  { key: "rentals", title: "Aluguéis", icon: Building2 },
+  {
+    key: "properties",
+    title: "Financiamentos e Vendas de Imóveis",
+    icon: BadgeDollarSign,
+  },
+  { key: "vehicles", title: "Financiamentos e Vendas de Veículos", icon: Car },
+  { key: "products", title: "Financiamentos e Produtos", icon: Package },
+  { key: "agents", title: "Agentes", icon: Users },
 ];
-const defaults=Object.fromEntries(blocks.map(b=>[b.key,true])) as Record<BlockKey,boolean>;
-function Metric({label,value,accent}:{label:string;value:string|number;accent?:boolean}){return <div className="rounded-xl border bg-background p-3"><p className="text-xs text-muted-foreground">{label}</p><p className={`mt-1 text-xl font-bold ${accent?"text-primary":""}`}>{value}</p></div>}
-function Bars({items}:{items:{label:string;value:number;display?:string}[]}){const max=Math.max(1,...items.map(i=>Math.abs(i.value)));return <div className="space-y-3">{items.map((i,index)=><div key={`${i.label}-${index}`}><div className="mb-1 flex items-center justify-between gap-3 text-xs"><span className="truncate text-muted-foreground">{i.label}</span><b>{i.display??money(i.value)}</b></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-all" style={{width:`${Math.max(i.value?4:0,Math.min(100,Math.abs(i.value)/max*100))}%`}}/></div></div>)}</div>}
-function monthKey(d:Date){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`}
+const defaults = Object.fromEntries(blocks.map(b => [b.key, true])) as Record<
+  BlockKey,
+  boolean
+>;
+function Metric({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string | number;
+  accent?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border bg-background p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`mt-1 text-xl font-bold ${accent ? "text-primary" : ""}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+function Bars({
+  items,
+}: {
+  items: { label: string; value: number; display?: string }[];
+}) {
+  const max = Math.max(1, ...items.map(i => Math.abs(i.value)));
+  return (
+    <div className="space-y-3">
+      {items.map((i, index) => (
+        <div key={`${i.label}-${index}`}>
+          <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+            <span className="truncate text-muted-foreground">{i.label}</span>
+            <b>{i.display ?? money(i.value)}</b>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{
+                width: `${Math.max(i.value ? 4 : 0, Math.min(100, (Math.abs(i.value) / max) * 100))}%`,
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function monthKey(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
 
-export default function Dashboard(){
-  const {user}=useAuth();
-  const {data:stats,isLoading}=trpc.dashboard.stats.useQuery();
-  const {data:activeDb}=trpc.databases.getActive.useQuery();
-  const {data:cash=[]}=trpc.cashFlow.list.useQuery();
-  const {data:financings=[]}=trpc.vehicleFinancings.list.useQuery();
-  const {data:performance}=trpc.dashboard.agentPerformance.useQuery({});
-  const [propertyData,setPropertyData]=useState<any>({properties:[],rentals:[],payments:[],financings:[],financingPayments:[],sales:[]});
-  const [preferences,setPreferences]=useState<Record<BlockKey,boolean>>(defaults);
-  const [settingsOpen,setSettingsOpen]=useState(false);
-  const [focused,setFocused]=useState<BlockKey|null>(null);
-  const [closingBusy,setClosingBusy]=useState(false);
-  const [closedMonths,setClosedMonths]=useState<string[]>([]);
-  const prefKey=`notenote:dashboard-blocks:${user?.id??"guest"}`;
-  useEffect(()=>{try{const saved=localStorage.getItem(prefKey);if(saved)setPreferences({...defaults,...JSON.parse(saved)});}catch{}},[prefKey]);
-  const toggle=(key:BlockKey)=>setPreferences(current=>{const next={...current,[key]:!current[key]};localStorage.setItem(prefKey,JSON.stringify(next));return next;});
-  useEffect(()=>{let active=true;fetch("/api/site-access?scope=properties",{credentials:"include"}).then(async r=>{if(!r.ok)return null;return r.json();}).then(j=>{if(active&&j?.success)setPropertyData(j);}).catch(()=>{});return()=>{active=false};},[activeDb?.id]);
+export default function Dashboard() {
+  const { user } = useAuth();
+  const { data: stats, isLoading } = trpc.dashboard.stats.useQuery();
+  const { data: activeDb } = trpc.databases.getActive.useQuery();
+  const { data: cash = [] } = trpc.cashFlow.list.useQuery();
+  const { data: financings = [] } = trpc.vehicleFinancings.list.useQuery();
+  const { data: performance } = trpc.dashboard.agentPerformance.useQuery({});
+  const [propertyData, setPropertyData] = useState<any>({
+    properties: [],
+    rentals: [],
+    payments: [],
+    financings: [],
+    financingPayments: [],
+    sales: [],
+  });
+  const [preferences, setPreferences] =
+    useState<Record<BlockKey, boolean>>(defaults);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [focused, setFocused] = useState<BlockKey | null>(null);
+  const [closingBusy, setClosingBusy] = useState(false);
+  const [closedMonths, setClosedMonths] = useState<string[]>([]);
+  const prefKey = `notenote:dashboard-blocks:${user?.id ?? "guest"}`;
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(prefKey);
+      if (saved) setPreferences({ ...defaults, ...JSON.parse(saved) });
+    } catch {}
+  }, [prefKey]);
+  const toggle = (key: BlockKey) =>
+    setPreferences(current => {
+      const next = { ...current, [key]: !current[key] };
+      localStorage.setItem(prefKey, JSON.stringify(next));
+      return next;
+    });
+  useEffect(() => {
+    let active = true;
+    fetch("/api/site-access?scope=properties", { credentials: "include" })
+      .then(async r => {
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then(j => {
+        if (active && j?.success) setPropertyData(j);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [activeDb?.id]);
 
-  const cashSummary=useMemo(()=>{const input=cash.filter((x:any)=>x.type==="ENTRADA").reduce((s:number,x:any)=>s+Number(x.amount||0),0),out=cash.filter((x:any)=>x.type==="SAIDA").reduce((s:number,x:any)=>s+Number(x.amount||0),0);const months=Array.from({length:6},(_,i)=>{const d=new Date();d.setMonth(d.getMonth()-(5-i));return monthKey(d)});return {input,out,balance:input-out,chart:months.map(m=>{const entries=cash.filter((x:any)=>String(x.movementDate||"").slice(0,7)===m);return {label:m.split("-").reverse().join("/"),value:entries.filter((x:any)=>x.type==="ENTRADA").reduce((s:number,x:any)=>s+Number(x.amount||0),0)}})};},[cash]);
-  const rentalSummary=useMemo(()=>{const current=propertyData.currentMonth||new Date().toISOString().slice(0,7);const active=(propertyData.rentals||[]).filter((r:any)=>r.status==="ativo");const expected=active.reduce((s:number,r:any)=>s+Number(r.monthlyRent||0),0);const paid=(propertyData.payments||[]).filter((p:any)=>p.referenceMonth===current).reduce((s:number,p:any)=>s+Number(p.amount||0),0);const months=Array.from({length:6},(_,i)=>{const d=new Date();d.setMonth(d.getMonth()-(5-i));return monthKey(d)});return {active:active.length,expected,paid,pending:Math.max(0,expected-paid),chart:months.map(m=>({label:m.split("-").reverse().join("/"),value:(propertyData.payments||[]).filter((p:any)=>p.referenceMonth===m).reduce((s:number,p:any)=>s+Number(p.amount||0),0)}))};},[propertyData]);
-  const propertySummary=useMemo(()=>{const fs=propertyData.financings||[],fps=propertyData.financingPayments||[],sales=propertyData.sales||[];const financed=fs.reduce((s:number,f:any)=>s+Number(f.salePrice||0),0),received=fs.reduce((s:number,f:any)=>s+Number(f.downPayment||0),0)+fps.reduce((s:number,p:any)=>s+Number(p.amount||0),0),cashSales=sales.reduce((s:number,x:any)=>s+Number(x.amount||0),0);const status=["disponivel","alugado","financiado","vendido"].map(st=>({label:st,value:(propertyData.properties||[]).filter((p:any)=>p.status===st).length,display:String((propertyData.properties||[]).filter((p:any)=>p.status===st).length)}));return {financed,received,cashSales,totalSales:financed+cashSales,status};},[propertyData]);
-  const financeSplit=useMemo(()=>{const vehicle=(financings as any[]).filter(f=>(f.assetType||"vehicle")!=="product"),product=(financings as any[]).filter(f=>f.assetType==="product");const summarize=(rows:any[])=>({count:rows.length,total:rows.reduce((s,f)=>s+Number(f.totalAmount||f.vehiclePrice||0),0),paid:rows.reduce((s,f)=>s+Number(f.totalPaid||0),0),open:rows.reduce((s,f)=>s+Math.max(0,Number(f.totalAmount||0)-Number(f.totalPaid||0)),0),chart:rows.slice(0,8).map(f=>({label:`#${f.id}`,value:Math.max(0,Number(f.totalAmount||0)-Number(f.totalPaid||0))}))});return {vehicle:summarize(vehicle),product:summarize(product)};},[financings]);
-  const agentRanking=(performance?.ranking??[]).map((a:any)=>({label:a.agentName||a.name||`Agente #${a.agentId}`,value:Number(a.paymentVolume||0)}));
-  const currentMonth=monthKey(new Date());
-  const currentMonthCash=useMemo(()=>{const rows=(cash as any[]).filter(x=>String(x.movementDate||"").slice(0,7)===currentMonth);const input=rows.filter(x=>x.type==="ENTRADA").reduce((sum,x)=>sum+Number(x.amount||0),0);const output=rows.filter(x=>x.type==="SAIDA").reduce((sum,x)=>sum+Number(x.amount||0),0);return {input,output,balance:input-output};},[cash,currentMonth]);
-  useEffect(()=>{if(!activeDb?.id){setClosedMonths([]);return;}fetch(`/api/site-access?scope=monthly-closings&databaseId=${activeDb.id}`,{credentials:"include",cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>setClosedMonths(Array.isArray(j?.closings)?j.closings.map((x:any)=>String(x.month)):[])).catch(()=>{});},[activeDb?.id]);
-  const closeMonth=async()=>{if(!activeDb?.id)return toast.error("Selecione um banco de dados.");if(closedMonths.includes(currentMonth))return toast.info("Este mês já foi fechado.");if(!window.confirm(`Confirmar o fechamento integral de ${currentMonth.split("-").reverse().join("/")}? O fechamento ficará salvo no histórico.`))return;setClosingBusy(true);try{const snapshot={cash:{monthlyInput:currentMonthCash.input,monthlyOutput:currentMonthCash.output,monthlyBalance:currentMonthCash.balance,totalInput:cashSummary.input,totalOutput:cashSummary.out,totalBalance:cashSummary.balance},loans:{active:Number(stats?.activeLoans?.count||0),lent:Number(stats?.loanMetrics?.totalLent||0),received:Number(stats?.loanMetrics?.totalReceived||0),open:Number(stats?.loanMetrics?.totalOpen||0),overdue:Number(stats?.loanMetrics?.totalOverdue||0)},rentals:{active:rentalSummary.active,expected:rentalSummary.expected,paid:rentalSummary.paid,pending:rentalSummary.pending},properties:{cashSales:propertySummary.cashSales,financed:propertySummary.financed,received:propertySummary.received,totalSales:propertySummary.totalSales},vehicles:{count:financeSplit.vehicle.count,total:financeSplit.vehicle.total,paid:financeSplit.vehicle.paid,open:financeSplit.vehicle.open},products:{count:financeSplit.product.count,total:financeSplit.product.total,paid:financeSplit.product.paid,open:financeSplit.product.open},agents:{count:agentRanking.length,volume:agentRanking.reduce((sum:number,a:any)=>sum+a.value,0),top:agentRanking[0]?.label||null},database:{id:activeDb.id,name:activeDb.name}};const response=await fetch(`/api/site-access?scope=monthly-closings&databaseId=${activeDb.id}`,{method:"POST",credentials:"include",headers:{"content-type":"application/json"},body:JSON.stringify({month:currentMonth,snapshot})});const result=await response.json().catch(()=>({}));if(!response.ok||!result?.success)throw new Error(result?.message||"Não foi possível fechar o mês.");setClosedMonths(v=>[currentMonth,...v]);toast.success("Fechamento mensal concluído e salvo no histórico.");}catch(e){toast.error(e instanceof Error?e.message:"Erro ao fechar o mês.");}finally{setClosingBusy(false)}};
-
-  if(isLoading)return <DashboardLayout><div className="space-y-4"><h1 className="text-3xl font-bold">Dashboard</h1><Card className="h-48 animate-pulse bg-muted/30"/></div></DashboardLayout>;
-  const visible=blocks.filter(b=>preferences[b.key]&&(focused===null||focused===b.key));
-  const blockShell=(key:BlockKey,title:string,Icon:any,content:React.ReactNode,chart:React.ReactNode)=>{
-    const expanded=focused===key;return <Card key={key} className={expanded?"border-primary/40 shadow-lg":""}><CardHeader className="flex flex-row items-start justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><Icon className="h-5 w-5 text-primary"/>{title}</CardTitle><p className="mt-1 text-xs text-muted-foreground">Banco ativo: {activeDb?.name||"—"}</p></div><Button size="sm" variant={expanded?"default":"outline"} onClick={()=>setFocused(expanded?null:key)}>{expanded?<><X className="mr-1 h-4 w-4"/>Voltar</>:<><Focus className="mr-1 h-4 w-4"/>Ver completo</>}</Button></CardHeader><CardContent className="space-y-5">{content}{(expanded||!focused)&&<div className={expanded?"rounded-2xl border bg-muted/20 p-5":"rounded-xl border bg-muted/20 p-4"}>{chart}</div>}</CardContent></Card>;
+  const cashSummary = useMemo(() => {
+    const input = cash
+        .filter((x: any) => x.type === "ENTRADA")
+        .reduce((s: number, x: any) => s + Number(x.amount || 0), 0),
+      out = cash
+        .filter((x: any) => x.type === "SAIDA")
+        .reduce((s: number, x: any) => s + Number(x.amount || 0), 0);
+    const months = Array.from({ length: 6 }, (_, i) => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - (5 - i));
+      return monthKey(d);
+    });
+    return {
+      input,
+      out,
+      balance: input - out,
+      chart: months.map(m => {
+        const entries = cash.filter(
+          (x: any) => String(x.movementDate || "").slice(0, 7) === m
+        );
+        return {
+          label: m.split("-").reverse().join("/"),
+          value: entries
+            .filter((x: any) => x.type === "ENTRADA")
+            .reduce((s: number, x: any) => s + Number(x.amount || 0), 0),
+        };
+      }),
+    };
+  }, [cash]);
+  const rentalSummary = useMemo(() => {
+    const current =
+      propertyData.currentMonth || new Date().toISOString().slice(0, 7);
+    const active = (propertyData.rentals || []).filter(
+      (r: any) => r.status === "ativo"
+    );
+    const expected = active.reduce(
+      (s: number, r: any) => s + Number(r.monthlyRent || 0),
+      0
+    );
+    const paid = (propertyData.payments || [])
+      .filter((p: any) => p.referenceMonth === current)
+      .reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+    const months = Array.from({ length: 6 }, (_, i) => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - (5 - i));
+      return monthKey(d);
+    });
+    return {
+      active: active.length,
+      expected,
+      paid,
+      pending: Math.max(0, expected - paid),
+      chart: months.map(m => ({
+        label: m.split("-").reverse().join("/"),
+        value: (propertyData.payments || [])
+          .filter((p: any) => p.referenceMonth === m)
+          .reduce((s: number, p: any) => s + Number(p.amount || 0), 0),
+      })),
+    };
+  }, [propertyData]);
+  const propertySummary = useMemo(() => {
+    const fs = propertyData.financings || [],
+      fps = propertyData.financingPayments || [],
+      sales = propertyData.sales || [];
+    const financed = fs.reduce(
+        (s: number, f: any) => s + Number(f.salePrice || 0),
+        0
+      ),
+      received =
+        fs.reduce((s: number, f: any) => s + Number(f.downPayment || 0), 0) +
+        fps.reduce((s: number, p: any) => s + Number(p.amount || 0), 0),
+      cashSales = sales.reduce(
+        (s: number, x: any) => s + Number(x.amount || 0),
+        0
+      );
+    const status = ["disponivel", "alugado", "financiado", "vendido"].map(
+      st => ({
+        label: st,
+        value: (propertyData.properties || []).filter(
+          (p: any) => p.status === st
+        ).length,
+        display: String(
+          (propertyData.properties || []).filter((p: any) => p.status === st)
+            .length
+        ),
+      })
+    );
+    return {
+      financed,
+      received,
+      cashSales,
+      totalSales: financed + cashSales,
+      status,
+    };
+  }, [propertyData]);
+  const financeSplit = useMemo(() => {
+    const vehicle = (financings as any[]).filter(
+        f => (f.assetType || "vehicle") !== "product"
+      ),
+      product = (financings as any[]).filter(f => f.assetType === "product");
+    const summarize = (rows: any[]) => ({
+      count: rows.length,
+      total: rows.reduce(
+        (s, f) => s + Number(f.totalAmount || f.vehiclePrice || 0),
+        0
+      ),
+      paid: rows.reduce((s, f) => s + Number(f.totalPaid || 0), 0),
+      open: rows.reduce(
+        (s, f) =>
+          s +
+          Math.max(0, Number(f.totalAmount || 0) - Number(f.totalPaid || 0)),
+        0
+      ),
+      chart: rows.slice(0, 8).map(f => ({
+        label: `#${f.id}`,
+        value: Math.max(
+          0,
+          Number(f.totalAmount || 0) - Number(f.totalPaid || 0)
+        ),
+      })),
+    });
+    return { vehicle: summarize(vehicle), product: summarize(product) };
+  }, [financings]);
+  const agentRanking = (performance?.ranking ?? []).map((a: any) => ({
+    label: a.agentName || a.name || `Agente #${a.agentId}`,
+    value: Number(a.paymentVolume || 0),
+  }));
+  const currentMonth = monthKey(new Date());
+  const currentMonthCash = useMemo(() => {
+    const rows = (cash as any[]).filter(
+      x => String(x.movementDate || "").slice(0, 7) === currentMonth
+    );
+    const input = rows
+      .filter(x => x.type === "ENTRADA")
+      .reduce((sum, x) => sum + Number(x.amount || 0), 0);
+    const output = rows
+      .filter(x => x.type === "SAIDA")
+      .reduce((sum, x) => sum + Number(x.amount || 0), 0);
+    return { input, output, balance: input - output };
+  }, [cash, currentMonth]);
+  useEffect(() => {
+    if (!activeDb?.id) {
+      setClosedMonths([]);
+      return;
+    }
+    fetch(`/api/site-access?scope=monthly-closings&databaseId=${activeDb.id}`, {
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .then(j =>
+        setClosedMonths(
+          Array.isArray(j?.closings)
+            ? j.closings.map((x: any) => String(x.month))
+            : []
+        )
+      )
+      .catch(() => {});
+  }, [activeDb?.id]);
+  const closeMonth = async () => {
+    if (!activeDb?.id) return toast.error("Selecione um banco de dados.");
+    if (closedMonths.includes(currentMonth))
+      return toast.info("Este mês já foi fechado.");
+    if (
+      !window.confirm(
+        `Confirmar o fechamento integral de ${currentMonth.split("-").reverse().join("/")}? O fechamento ficará salvo no histórico.`
+      )
+    )
+      return;
+    setClosingBusy(true);
+    try {
+      const snapshot = {
+        cash: {
+          monthlyInput: currentMonthCash.input,
+          monthlyOutput: currentMonthCash.output,
+          monthlyBalance: currentMonthCash.balance,
+          totalInput: cashSummary.input,
+          totalOutput: cashSummary.out,
+          totalBalance: cashSummary.balance,
+        },
+        loans: {
+          active: Number(stats?.activeLoans?.count || 0),
+          lent: Number(stats?.loanMetrics?.totalLent || 0),
+          received: Number(stats?.loanMetrics?.totalReceived || 0),
+          open: Number(stats?.loanMetrics?.totalOpen || 0),
+          overdue: Number(stats?.loanMetrics?.totalOverdue || 0),
+        },
+        rentals: {
+          active: rentalSummary.active,
+          expected: rentalSummary.expected,
+          paid: rentalSummary.paid,
+          pending: rentalSummary.pending,
+        },
+        properties: {
+          cashSales: propertySummary.cashSales,
+          financed: propertySummary.financed,
+          received: propertySummary.received,
+          totalSales: propertySummary.totalSales,
+        },
+        vehicles: {
+          count: financeSplit.vehicle.count,
+          total: financeSplit.vehicle.total,
+          paid: financeSplit.vehicle.paid,
+          open: financeSplit.vehicle.open,
+          overdue: Number(stats?.vehicleMetrics?.vehicleOverdueAmount || 0),
+        },
+        products: {
+          count: financeSplit.product.count,
+          total: financeSplit.product.total,
+          paid: financeSplit.product.paid,
+          open: financeSplit.product.open,
+          overdue: Number(stats?.vehicleMetrics?.productOverdueAmount || 0),
+        },
+        agents: {
+          count: agentRanking.length,
+          volume: agentRanking.reduce(
+            (sum: number, a: any) => sum + a.value,
+            0
+          ),
+          top: agentRanking[0]?.label || null,
+        },
+        database: { id: activeDb.id, name: activeDb.name },
+      };
+      const response = await fetch(
+        `/api/site-access?scope=monthly-closings&databaseId=${activeDb.id}`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ month: currentMonth, snapshot }),
+        }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success)
+        throw new Error(result?.message || "Não foi possível fechar o mês.");
+      setClosedMonths(v => [currentMonth, ...v]);
+      toast.success("Fechamento mensal concluído e salvo no histórico.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao fechar o mês.");
+    } finally {
+      setClosingBusy(false);
+    }
   };
 
-  return <DashboardLayout><div className="space-y-6">
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex items-center gap-2"><Activity className="h-7 w-7 text-primary"/><h1 className="text-3xl font-bold">Dashboard</h1></div><p className="mt-1 text-muted-foreground">Visão modular do negócio. Oculte blocos ou abra apenas um para análise completa.</p></div><Button variant="outline" onClick={()=>setSettingsOpen(v=>!v)}><Settings2 className="mr-2 h-4 w-4"/>Personalizar dashboard</Button></div>
-    {settingsOpen&&<Card><CardContent className="p-4"><div className="mb-3"><p className="font-semibold">O que você quer ver?</p><p className="text-xs text-muted-foreground">Sua escolha fica salva neste navegador.</p></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{blocks.map(b=><button key={b.key} type="button" onClick={()=>toggle(b.key)} className={`flex items-center justify-between rounded-xl border p-3 text-left text-sm transition-colors ${preferences[b.key]?"border-primary/30 bg-primary/5":"bg-muted/20 text-muted-foreground"}`}><span>{b.title}</span>{preferences[b.key]?<Eye className="h-4 w-4 text-primary"/>:<EyeOff className="h-4 w-4"/>}</button>)}</div></CardContent></Card>}
-    {focused&&<div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/5 p-3"><p className="text-sm font-medium">Modo de análise: {blocks.find(b=>b.key===focused)?.title}</p><Button size="sm" variant="ghost" onClick={()=>setFocused(null)}>Mostrar todos</Button></div>}
-    {!focused&&<Card className="border-primary/20 bg-gradient-to-br from-primary/[0.06] to-background"><CardContent className="p-5"><div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div className="flex items-start gap-3"><div className="rounded-xl bg-primary/10 p-3 text-primary"><CalendarRange className="h-6 w-6"/></div><div><p className="text-xs font-bold uppercase tracking-[.16em] text-primary">Fechamento mensal</p><h2 className="mt-1 text-xl font-bold">Fechamento integral de {currentMonth.split("-").reverse().join("/")}</h2><p className="mt-1 max-w-2xl text-sm text-muted-foreground">Salva um retrato completo do mês: entradas, saídas, saldo, empréstimos, aluguéis, imóveis, veículos, produtos e agentes. Depois você consulta tudo mês a mês na aba Fechamentos.</p></div></div><div className="min-w-[260px] rounded-xl border bg-background p-4"><div className="grid grid-cols-3 gap-2 text-center"><div><p className="text-[10px] uppercase text-muted-foreground">Entradas</p><p className="text-sm font-bold">{money(currentMonthCash.input)}</p></div><div><p className="text-[10px] uppercase text-muted-foreground">Saídas</p><p className="text-sm font-bold">{money(currentMonthCash.output)}</p></div><div><p className="text-[10px] uppercase text-muted-foreground">Saldo</p><p className="text-sm font-bold text-primary">{money(currentMonthCash.balance)}</p></div></div><div className="mt-4 flex gap-2">{closedMonths.includes(currentMonth)?<Button className="flex-1" variant="outline" disabled><CheckCircle2 className="mr-2 h-4 w-4"/>Mês fechado</Button>:<Button className="flex-1" onClick={closeMonth} disabled={closingBusy}>{closingBusy?<Loader2 className="mr-2 h-4 w-4 animate-spin"/>:<CalendarRange className="mr-2 h-4 w-4"/>}{closingBusy?"Fechando...":"Fechar mês"}</Button>}<Link href="/fechamentos"><a><Button variant="outline">Histórico</Button></a></Link></div></div></div></CardContent></Card>}
-    <div className={focused?"grid gap-5":"grid gap-5 xl:grid-cols-2"}>
-      {visible.map(b=>{
-        if(b.key==="cash")return blockShell(b.key,b.title,b.icon,<div className="grid gap-3 sm:grid-cols-3"><Metric label="Entradas" value={money(cashSummary.input)}/><Metric label="Saídas" value={money(cashSummary.out)}/><Metric label="Saldo geral" value={money(cashSummary.balance)} accent/></div>,<><p className="mb-4 text-sm font-semibold">Entradas dos últimos 6 meses</p><Bars items={cashSummary.chart}/></>);
-        if(b.key==="loans")return blockShell(b.key,b.title,b.icon,<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Metric label="Ativos" value={stats?.activeLoans?.count||0}/><Metric label="Total emprestado" value={money(stats?.loanMetrics?.totalLent||0)}/><Metric label="Recebido" value={money(stats?.loanMetrics?.totalReceived||0)}/><Metric label="Em aberto" value={money(stats?.loanMetrics?.totalOpen||0)} accent/></div>,<Bars items={[{label:"Emprestado",value:Number(stats?.loanMetrics?.totalLent||0)},{label:"Recebido",value:Number(stats?.loanMetrics?.totalReceived||0)},{label:"Em aberto",value:Number(stats?.loanMetrics?.totalOpen||0)},{label:"Vencido",value:Number(stats?.loanMetrics?.totalOverdue||0)}]}/>);
-        if(b.key==="rentals")return blockShell(b.key,b.title,b.icon,<div className="grid gap-3 sm:grid-cols-4"><Metric label="Contratos ativos" value={rentalSummary.active}/><Metric label="Previsto no mês" value={money(rentalSummary.expected)}/><Metric label="Recebido no mês" value={money(rentalSummary.paid)}/><Metric label="Pendente" value={money(rentalSummary.pending)} accent/></div>,<><p className="mb-4 text-sm font-semibold">Recebimentos de aluguel · 6 meses</p><Bars items={rentalSummary.chart}/></>);
-        if(b.key==="properties")return blockShell(b.key,b.title,b.icon,<div className="grid gap-3 sm:grid-cols-4"><Metric label="Vendas à vista" value={money(propertySummary.cashSales)}/><Metric label="Vendas financiadas" value={money(propertySummary.financed)}/><Metric label="Recebido em financiamentos" value={money(propertySummary.received)}/><Metric label="Volume total vendido" value={money(propertySummary.totalSales)} accent/></div>,<><p className="mb-4 text-sm font-semibold">Situação dos imóveis</p><Bars items={propertySummary.status}/></>);
-        if(b.key==="vehicles")return blockShell(b.key,b.title,b.icon,<div className="grid gap-3 sm:grid-cols-4"><Metric label="Contratos" value={financeSplit.vehicle.count}/><Metric label="Total contratado" value={money(financeSplit.vehicle.total)}/><Metric label="Recebido" value={money(financeSplit.vehicle.paid)}/><Metric label="Saldo em aberto" value={money(financeSplit.vehicle.open)} accent/></div>,<><p className="mb-4 text-sm font-semibold">Saldo dos financiamentos de veículos</p><Bars items={financeSplit.vehicle.chart.length?financeSplit.vehicle.chart:[{label:"Sem contratos",value:0}]}/></>);
-        if(b.key==="products")return blockShell(b.key,b.title,b.icon,<div className="grid gap-3 sm:grid-cols-4"><Metric label="Contratos" value={financeSplit.product.count}/><Metric label="Total contratado" value={money(financeSplit.product.total)}/><Metric label="Recebido" value={money(financeSplit.product.paid)}/><Metric label="Saldo em aberto" value={money(financeSplit.product.open)} accent/></div>,<><p className="mb-4 text-sm font-semibold">Saldo dos financiamentos de produtos</p><Bars items={financeSplit.product.chart.length?financeSplit.product.chart:[{label:"Sem contratos",value:0}]}/></>);
-        return blockShell(b.key,b.title,b.icon,<div className="grid gap-3 sm:grid-cols-3"><Metric label="Agentes no ranking" value={agentRanking.length}/><Metric label="Volume movimentado" value={money(agentRanking.reduce((s:number,a:any)=>s+a.value,0))}/><Metric label="Maior performance" value={agentRanking[0]?.label||"—"} accent/></div>,<><p className="mb-4 text-sm font-semibold">Ranking por volume recebido</p><Bars items={agentRanking.length?agentRanking:[{label:"Sem movimentação",value:0}]}/></>);
-      })}
-    </div>
-    {!visible.length&&<Card><CardContent className="py-14 text-center"><EyeOff className="mx-auto mb-3 h-9 w-9 text-muted-foreground"/><p className="font-semibold">Todos os blocos estão ocultos.</p><Button className="mt-3" variant="outline" onClick={()=>{setPreferences(defaults);localStorage.setItem(prefKey,JSON.stringify(defaults));}}>Mostrar dashboard completo</Button></CardContent></Card>}
-  </div></DashboardLayout>;
+  if (isLoading)
+    return (
+      <DashboardLayout>
+        <div className="space-y-4">
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <Card className="h-48 animate-pulse bg-muted/30" />
+        </div>
+      </DashboardLayout>
+    );
+  const visible = blocks.filter(
+    b => preferences[b.key] && (focused === null || focused === b.key)
+  );
+  const blockShell = (
+    key: BlockKey,
+    title: string,
+    Icon: any,
+    content: React.ReactNode,
+    chart: React.ReactNode
+  ) => {
+    const expanded = focused === key;
+    return (
+      <Card key={key} className={expanded ? "border-primary/40 shadow-lg" : ""}>
+        <CardHeader className="flex flex-row items-start justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Icon className="h-5 w-5 text-primary" />
+              {title}
+            </CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Banco ativo: {activeDb?.name || "—"}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant={expanded ? "default" : "outline"}
+            onClick={() => setFocused(expanded ? null : key)}
+          >
+            {expanded ? (
+              <>
+                <X className="mr-1 h-4 w-4" />
+                Voltar
+              </>
+            ) : (
+              <>
+                <Focus className="mr-1 h-4 w-4" />
+                Ver completo
+              </>
+            )}
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {content}
+          {(expanded || !focused) && (
+            <div
+              className={
+                expanded
+                  ? "rounded-2xl border bg-muted/20 p-5"
+                  : "rounded-xl border bg-muted/20 p-4"
+              }
+            >
+              {chart}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <Activity className="h-7 w-7 text-primary" />
+              <h1 className="text-3xl font-bold">Dashboard</h1>
+            </div>
+            <p className="mt-1 text-muted-foreground">
+              Visão modular do negócio. Oculte blocos ou abra apenas um para
+              análise completa.
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => setSettingsOpen(v => !v)}>
+            <Settings2 className="mr-2 h-4 w-4" />
+            Personalizar dashboard
+          </Button>
+        </div>
+        {settingsOpen && (
+          <Card>
+            <CardContent className="p-4">
+              <div className="mb-3">
+                <p className="font-semibold">O que você quer ver?</p>
+                <p className="text-xs text-muted-foreground">
+                  Sua escolha fica salva neste navegador.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {blocks.map(b => (
+                  <button
+                    key={b.key}
+                    type="button"
+                    onClick={() => toggle(b.key)}
+                    className={`flex items-center justify-between rounded-xl border p-3 text-left text-sm transition-colors ${preferences[b.key] ? "border-primary/30 bg-primary/5" : "bg-muted/20 text-muted-foreground"}`}
+                  >
+                    <span>{b.title}</span>
+                    {preferences[b.key] ? (
+                      <Eye className="h-4 w-4 text-primary" />
+                    ) : (
+                      <EyeOff className="h-4 w-4" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        {focused && (
+          <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/5 p-3">
+            <p className="text-sm font-medium">
+              Modo de análise: {blocks.find(b => b.key === focused)?.title}
+            </p>
+            <Button size="sm" variant="ghost" onClick={() => setFocused(null)}>
+              Mostrar todos
+            </Button>
+          </div>
+        )}
+        {!focused && (
+          <Card className="border-primary/20 bg-gradient-to-br from-primary/[0.06] to-background">
+            <CardContent className="p-5">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-primary/10 p-3 text-primary">
+                    <CalendarRange className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[.16em] text-primary">
+                      Fechamento mensal
+                    </p>
+                    <h2 className="mt-1 text-xl font-bold">
+                      Fechamento integral de{" "}
+                      {currentMonth.split("-").reverse().join("/")}
+                    </h2>
+                    <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                      Salva um retrato completo do mês: entradas, saídas, saldo,
+                      empréstimos, aluguéis, imóveis, veículos, produtos e
+                      agentes. Depois você consulta tudo mês a mês na aba
+                      Fechamentos.
+                    </p>
+                  </div>
+                </div>
+                <div className="min-w-[260px] rounded-xl border bg-background p-4">
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div>
+                      <p className="text-[10px] uppercase text-muted-foreground">
+                        Entradas
+                      </p>
+                      <p className="text-sm font-bold">
+                        {money(currentMonthCash.input)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase text-muted-foreground">
+                        Saídas
+                      </p>
+                      <p className="text-sm font-bold">
+                        {money(currentMonthCash.output)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase text-muted-foreground">
+                        Saldo
+                      </p>
+                      <p className="text-sm font-bold text-primary">
+                        {money(currentMonthCash.balance)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    {closedMonths.includes(currentMonth) ? (
+                      <Button className="flex-1" variant="outline" disabled>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Mês fechado
+                      </Button>
+                    ) : (
+                      <Button
+                        className="flex-1"
+                        onClick={closeMonth}
+                        disabled={closingBusy}
+                      >
+                        {closingBusy ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <CalendarRange className="mr-2 h-4 w-4" />
+                        )}
+                        {closingBusy ? "Fechando..." : "Fechar mês"}
+                      </Button>
+                    )}
+                    <Link href="/fechamentos">
+                      <a>
+                        <Button variant="outline">Histórico</Button>
+                      </a>
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        <div className={focused ? "grid gap-5" : "grid gap-5 xl:grid-cols-2"}>
+          {visible.map(b => {
+            if (b.key === "cash")
+              return blockShell(
+                b.key,
+                b.title,
+                b.icon,
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Metric label="Entradas" value={money(cashSummary.input)} />
+                  <Metric label="Saídas" value={money(cashSummary.out)} />
+                  <Metric
+                    label="Saldo geral"
+                    value={money(cashSummary.balance)}
+                    accent
+                  />
+                </div>,
+                <>
+                  <p className="mb-4 text-sm font-semibold">
+                    Entradas dos últimos 6 meses
+                  </p>
+                  <Bars items={cashSummary.chart} />
+                </>
+              );
+            if (b.key === "loans")
+              return blockShell(
+                b.key,
+                b.title,
+                b.icon,
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Metric
+                    label="Ativos"
+                    value={stats?.activeLoans?.count || 0}
+                  />
+                  <Metric
+                    label="Total emprestado"
+                    value={money(stats?.loanMetrics?.totalLent || 0)}
+                  />
+                  <Metric
+                    label="Recebido"
+                    value={money(stats?.loanMetrics?.totalReceived || 0)}
+                  />
+                  <Metric
+                    label="Em aberto"
+                    value={money(stats?.loanMetrics?.totalOpen || 0)}
+                    accent
+                  />
+                </div>,
+                <Bars
+                  items={[
+                    {
+                      label: "Emprestado",
+                      value: Number(stats?.loanMetrics?.totalLent || 0),
+                    },
+                    {
+                      label: "Recebido",
+                      value: Number(stats?.loanMetrics?.totalReceived || 0),
+                    },
+                    {
+                      label: "Em aberto",
+                      value: Number(stats?.loanMetrics?.totalOpen || 0),
+                    },
+                    {
+                      label: "Vencido",
+                      value: Number(stats?.loanMetrics?.totalOverdue || 0),
+                    },
+                  ]}
+                />
+              );
+            if (b.key === "rentals")
+              return blockShell(
+                b.key,
+                b.title,
+                b.icon,
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  <Metric
+                    label="Contratos ativos"
+                    value={rentalSummary.active}
+                  />
+                  <Metric
+                    label="Previsto no mês"
+                    value={money(rentalSummary.expected)}
+                  />
+                  <Metric
+                    label="Recebido no mês"
+                    value={money(rentalSummary.paid)}
+                  />
+                  <Metric
+                    label="Pendente"
+                    value={money(rentalSummary.pending)}
+                    accent
+                  />
+                </div>,
+                <>
+                  <p className="mb-4 text-sm font-semibold">
+                    Recebimentos de aluguel · 6 meses
+                  </p>
+                  <Bars items={rentalSummary.chart} />
+                </>
+              );
+            if (b.key === "properties")
+              return blockShell(
+                b.key,
+                b.title,
+                b.icon,
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <Metric
+                    label="Vendas à vista"
+                    value={money(propertySummary.cashSales)}
+                  />
+                  <Metric
+                    label="Vendas financiadas"
+                    value={money(propertySummary.financed)}
+                  />
+                  <Metric
+                    label="Recebido em financiamentos"
+                    value={money(propertySummary.received)}
+                  />
+                  <Metric
+                    label="Volume total vendido"
+                    value={money(propertySummary.totalSales)}
+                    accent
+                  />
+                </div>,
+                <>
+                  <p className="mb-4 text-sm font-semibold">
+                    Situação dos imóveis
+                  </p>
+                  <Bars items={propertySummary.status} />
+                </>
+              );
+            if (b.key === "vehicles")
+              return blockShell(
+                b.key,
+                b.title,
+                b.icon,
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <Metric
+                    label="Contratos"
+                    value={financeSplit.vehicle.count}
+                  />
+                  <Metric
+                    label="Total contratado"
+                    value={money(financeSplit.vehicle.total)}
+                  />
+                  <Metric
+                    label="Recebido"
+                    value={money(financeSplit.vehicle.paid)}
+                  />
+                  <Metric
+                    label="Saldo em aberto"
+                    value={money(financeSplit.vehicle.open)}
+                    accent
+                  />
+                  <Metric
+                    label="Valores vencidos"
+                    value={money(
+                      stats?.vehicleMetrics?.vehicleOverdueAmount || 0
+                    )}
+                  />
+                </div>,
+                <>
+                  <p className="mb-4 text-sm font-semibold">
+                    Saldo dos financiamentos de veículos
+                  </p>
+                  <Bars
+                    items={
+                      financeSplit.vehicle.chart.length
+                        ? financeSplit.vehicle.chart
+                        : [{ label: "Sem contratos", value: 0 }]
+                    }
+                  />
+                </>
+              );
+            if (b.key === "products")
+              return blockShell(
+                b.key,
+                b.title,
+                b.icon,
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  <Metric
+                    label="Contratos"
+                    value={financeSplit.product.count}
+                  />
+                  <Metric
+                    label="Total contratado"
+                    value={money(financeSplit.product.total)}
+                  />
+                  <Metric
+                    label="Recebido"
+                    value={money(financeSplit.product.paid)}
+                  />
+                  <Metric
+                    label="Saldo em aberto"
+                    value={money(financeSplit.product.open)}
+                    accent
+                  />
+                  <Metric
+                    label="Valores vencidos"
+                    value={money(
+                      stats?.vehicleMetrics?.productOverdueAmount || 0
+                    )}
+                  />
+                </div>,
+                <>
+                  <p className="mb-4 text-sm font-semibold">
+                    Saldo dos financiamentos de produtos
+                  </p>
+                  <Bars
+                    items={
+                      financeSplit.product.chart.length
+                        ? financeSplit.product.chart
+                        : [{ label: "Sem contratos", value: 0 }]
+                    }
+                  />
+                </>
+              );
+            return blockShell(
+              b.key,
+              b.title,
+              b.icon,
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Metric
+                  label="Agentes no ranking"
+                  value={agentRanking.length}
+                />
+                <Metric
+                  label="Volume movimentado"
+                  value={money(
+                    agentRanking.reduce((s: number, a: any) => s + a.value, 0)
+                  )}
+                />
+                <Metric
+                  label="Maior performance"
+                  value={agentRanking[0]?.label || "—"}
+                  accent
+                />
+              </div>,
+              <>
+                <p className="mb-4 text-sm font-semibold">
+                  Ranking por volume recebido
+                </p>
+                <Bars
+                  items={
+                    agentRanking.length
+                      ? agentRanking
+                      : [{ label: "Sem movimentação", value: 0 }]
+                  }
+                />
+              </>
+            );
+          })}
+        </div>
+        {!visible.length && (
+          <Card>
+            <CardContent className="py-14 text-center">
+              <EyeOff className="mx-auto mb-3 h-9 w-9 text-muted-foreground" />
+              <p className="font-semibold">Todos os blocos estão ocultos.</p>
+              <Button
+                className="mt-3"
+                variant="outline"
+                onClick={() => {
+                  setPreferences(defaults);
+                  localStorage.setItem(prefKey, JSON.stringify(defaults));
+                }}
+              >
+                Mostrar dashboard completo
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </DashboardLayout>
+  );
 }

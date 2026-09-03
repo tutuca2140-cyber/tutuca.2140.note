@@ -385,7 +385,9 @@ export async function isCommercialCustomerDatabase(id: number) {
     .select({ id: databases.id })
     .from(databases)
     .innerJoin(users, eq(databases.createdBy, users.id))
-    .where(and(eq(databases.id, id), eq(users.loginMethod, "commercial_signup")))
+    .where(
+      and(eq(databases.id, id), eq(users.loginMethod, "commercial_signup"))
+    )
     .limit(1);
   return Boolean(rows[0]);
 }
@@ -398,7 +400,9 @@ export async function getDatabasesForUser(userId: number, role: string) {
       .select({ database: databases })
       .from(databases)
       .leftJoin(users, eq(databases.createdBy, users.id))
-      .where(sql`COALESCE(${users.loginMethod}, 'local') NOT IN ('commercial_signup', 'commercial_subuser')`)
+      .where(
+        sql`COALESCE(${users.loginMethod}, 'local') NOT IN ('commercial_signup', 'commercial_subuser')`
+      )
       .orderBy(desc(databases.createdAt));
     return rows.map(row => row.database);
   }
@@ -1830,9 +1834,15 @@ let productInventorySchemaPromise: Promise<void> | null = null;
 async function ensureProductInventorySchema(db: any) {
   if (productInventorySchemaPromise) return productInventorySchemaPromise;
   productInventorySchemaPromise = (async () => {
-    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "color" varchar(80)`);
-    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockQuantity" numeric(15,3) DEFAULT '0.000' NOT NULL`);
-    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockUnit" varchar(20) DEFAULT 'unit' NOT NULL`);
+    await db.execute(
+      sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "color" varchar(80)`
+    );
+    await db.execute(
+      sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockQuantity" numeric(15,3) DEFAULT '0.000' NOT NULL`
+    );
+    await db.execute(
+      sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockUnit" varchar(20) DEFAULT 'unit' NOT NULL`
+    );
   })().catch((error: unknown) => {
     productInventorySchemaPromise = null;
     throw error;
@@ -2483,6 +2493,7 @@ export async function getDashboardStats(databaseId: number) {
       dueDate: Date;
       installmentNumber: number;
       contractType: "emprestimo" | "financiamento";
+      financingAssetType?: "vehicle" | "product";
     };
     const dueItems: DueItem[] = [];
     const paidKeys = new Set(
@@ -2548,6 +2559,8 @@ export async function getDashboardStats(databaseId: number) {
           ),
           installmentNumber,
           contractType: "financiamento",
+          financingAssetType:
+            financing.assetType === "product" ? "product" : "vehicle",
         });
       }
     }
@@ -2640,6 +2653,21 @@ export async function getDashboardStats(databaseId: number) {
         installmentsOverdue: overdueItems.filter(
           item => item.contractType === "financiamento"
         ).length,
+        overdueAmount: roundMoney(
+          overdueItems
+            .filter(item => item.contractType === "financiamento")
+            .reduce((sum, item) => sum + item.amount, 0)
+        ),
+        vehicleOverdueAmount: roundMoney(
+          overdueItems
+            .filter(item => item.financingAssetType === "vehicle")
+            .reduce((sum, item) => sum + item.amount, 0)
+        ),
+        productOverdueAmount: roundMoney(
+          overdueItems
+            .filter(item => item.financingAssetType === "product")
+            .reduce((sum, item) => sum + item.amount, 0)
+        ),
         totalContracts: roundMoney(totalFinancingContracts),
         totalPaid: roundMoney(totalFinancingPaid),
         remainingBalance: roundMoney(

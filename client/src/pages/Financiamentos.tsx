@@ -20,7 +20,14 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { ClipboardList, DollarSign, Edit, Eye, Plus } from "lucide-react";
+import {
+  ClipboardList,
+  ClockAlert,
+  DollarSign,
+  Edit,
+  Eye,
+  Plus,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -52,6 +59,7 @@ export default function Financiamentos() {
   const [form, setForm] = useState(emptyForm);
   const { data: financings = [], isLoading } =
     trpc.vehicleFinancings.list.useQuery();
+  const { data: payments = [] } = trpc.payments.list.useQuery();
   const { data: clients = [] } = trpc.clients.list.useQuery();
   const { data: vehicles = [] } = trpc.vehicles.list.useQuery();
   const { data: products = [] } = trpc.products.list.useQuery();
@@ -87,6 +95,49 @@ export default function Financiamentos() {
       ),
     [products]
   );
+  const overdueSummary = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const paidByInstallment = new Map<string, number>();
+
+    payments.forEach(payment => {
+      if (!payment.vehicleFinancingId || payment.status !== "pago") return;
+      const key = `${payment.vehicleFinancingId}:${payment.installmentNumber}`;
+      paidByInstallment.set(
+        key,
+        (paidByInstallment.get(key) ?? 0) + Number(payment.amount || 0)
+      );
+    });
+
+    let amount = 0;
+    const financingIds = new Set<number>();
+    financings.forEach(financing => {
+      if (["pago", "cancelado"].includes(financing.status)) return;
+      const installmentAmount = Number(financing.installmentAmount || 0);
+      const startDate = new Date(financing.startDate);
+
+      for (
+        let installment = 1;
+        installment <= financing.installments;
+        installment += 1
+      ) {
+        const dueDate = new Date(startDate);
+        dueDate.setMonth(dueDate.getMonth() + installment);
+        dueDate.setHours(0, 0, 0, 0);
+        if (dueDate >= today) continue;
+
+        const paid =
+          paidByInstallment.get(`${financing.id}:${installment}`) ?? 0;
+        const overdue = Math.max(0, installmentAmount - paid);
+        if (overdue > 0) {
+          amount += overdue;
+          financingIds.add(financing.id);
+        }
+      }
+    });
+
+    return { amount, contracts: financingIds.size };
+  }, [financings, payments]);
   const assetLabel = form.assetType === "produto" ? "produto" : "veículo";
   const calculation = useMemo(() => {
     const price = Number(form.vehiclePrice),
@@ -459,6 +510,26 @@ export default function Financiamentos() {
             </Dialog>
           )}
         </div>
+        <Card className="border-red-200 bg-red-50/70 dark:border-red-900/60 dark:bg-red-950/20">
+          <CardContent className="flex items-center justify-between gap-4 p-5">
+            <div>
+              <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                Valores vencidos
+              </p>
+              <p className="mt-1 text-2xl font-bold text-red-950 dark:text-red-100">
+                {money(overdueSummary.amount)}
+              </p>
+              <p className="mt-1 text-sm text-red-700/80 dark:text-red-300/80">
+                {overdueSummary.contracts === 1
+                  ? "1 financiamento com parcela vencida"
+                  : `${overdueSummary.contracts} financiamentos com parcelas vencidas`}
+              </p>
+            </div>
+            <div className="rounded-2xl bg-red-100 p-3 text-red-700 dark:bg-red-900/50 dark:text-red-200">
+              <ClockAlert className="h-6 w-6" aria-hidden="true" />
+            </div>
+          </CardContent>
+        </Card>
         {isLoading ? (
           <div className="py-12 text-center text-muted-foreground">
             Carregando financiamentos...
