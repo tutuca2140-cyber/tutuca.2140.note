@@ -7,6 +7,7 @@ import {
   Activity,
   BadgeDollarSign,
   Building2,
+  CalendarClock,
   CalendarRange,
   Car,
   CheckCircle2,
@@ -410,6 +411,19 @@ export default function Dashboard() {
   const visible = blocks.filter(
     b => preferences[b.key] && (focused === null || focused === b.key)
   );
+  const dueToday = stats?.collections?.dueToday ?? [];
+  const dueTodayKeys = new Set(
+    dueToday.map(
+      item =>
+        `${item.contractType}-${item.contractId}-${item.installmentNumber}`
+    )
+  );
+  const upcomingDue = (stats?.collections?.upcoming ?? []).filter(
+    item =>
+      !dueTodayKeys.has(
+        `${item.contractType}-${item.contractId}-${item.installmentNumber}`
+      )
+  );
   const blockShell = (
     key: BlockKey,
     title: string,
@@ -603,6 +617,84 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        )}
+        {!focused && (
+          <Card className="border-blue-200 dark:border-blue-900/60">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CalendarClock className="h-5 w-5 text-blue-600" />
+                Vencimentos e cobranças
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Parcelas que vencem hoje e nos próximos dois dias.
+              </p>
+            </CardHeader>
+            <CardContent className="grid gap-5 lg:grid-cols-2">
+              {[
+                { title: "Vencem hoje", items: dueToday, urgent: true },
+                {
+                  title: "Próximos dois dias",
+                  items: upcomingDue,
+                  urgent: false,
+                },
+              ].map(group => (
+                <section key={group.title}>
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="font-semibold">{group.title}</h3>
+                    <span className="rounded-full bg-muted px-2.5 py-1 text-sm font-medium">
+                      {group.items.length}
+                    </span>
+                  </div>
+                  <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+                    {group.items.length ? (
+                      group.items.map(item => (
+                        <div
+                          key={`${item.contractType}-${item.contractId}-${item.installmentNumber}`}
+                          className={`rounded-xl border p-3 ${
+                            group.urgent
+                              ? "border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20"
+                              : "bg-muted/20"
+                          }`}
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="font-semibold">{item.clientName}</p>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                {item.product} · Parcela{" "}
+                                {item.installmentNumber}
+                              </p>
+                              <p className="mt-1 text-sm">
+                                {new Date(item.dueDate).toLocaleDateString(
+                                  "pt-BR"
+                                )}{" "}
+                                · <strong>{money(item.amount)}</strong>
+                              </p>
+                            </div>
+                            {user?.canInsert ? (
+                              <Link
+                                href={`/pagamentos?novo=1&tipo=${item.contractType}&contrato=${item.contractId}&parcela=${item.installmentNumber}`}
+                              >
+                                <a>
+                                  <Button size="sm">
+                                    <CreditCard className="mr-2 h-4 w-4" />
+                                    Lançar pagamento
+                                  </Button>
+                                </a>
+                              </Link>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="rounded-xl border border-dashed p-5 text-center text-sm text-muted-foreground">
+                        Nenhum vencimento neste período.
+                      </p>
+                    )}
+                  </div>
+                </section>
+              ))}
             </CardContent>
           </Card>
         )}

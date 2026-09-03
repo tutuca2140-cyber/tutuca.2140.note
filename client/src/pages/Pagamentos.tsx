@@ -28,7 +28,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -59,18 +59,28 @@ type PaymentRow = {
 
 export default function Pagamentos() {
   const { user } = useAuth();
-  const [openCreate, setOpenCreate] = useState(false);
+  const shortcut = new URLSearchParams(window.location.search);
+  const shortcutType =
+    shortcut.get("tipo") === "financiamento" ? "financiamento" : "emprestimo";
+  const shortcutContractId = shortcut.get("contrato") || "";
+  const [openCreate, setOpenCreate] = useState(
+    () => shortcut.get("novo") === "1"
+  );
   const [editingPayment, setEditingPayment] = useState<PaymentRow | null>(null);
   const [contractType, setContractType] = useState<
     "emprestimo" | "financiamento"
-  >("emprestimo");
-  const [selectedLoan, setSelectedLoan] = useState("");
-  const [selectedFinancing, setSelectedFinancing] = useState("");
+  >(shortcutType);
+  const [selectedLoan, setSelectedLoan] = useState(
+    shortcutType === "emprestimo" ? shortcutContractId : ""
+  );
+  const [selectedFinancing, setSelectedFinancing] = useState(
+    shortcutType === "financiamento" ? shortcutContractId : ""
+  );
   const [selectedAgent, setSelectedAgent] = useState("");
   const [commissionPercentage, setCommissionPercentage] = useState("");
   const [formData, setFormData] = useState({
     amount: "",
-    installmentNumber: "1",
+    installmentNumber: shortcut.get("parcela") || "1",
     paymentDate: today(),
     notes: "",
   });
@@ -97,6 +107,14 @@ export default function Pagamentos() {
   const selectedFinancingData = financings?.find(
     financing => financing.id === Number(selectedFinancing)
   );
+  const selectedLoanData = loans?.find(
+    loan => loan.id === Number(selectedLoan)
+  );
+  const selectedContract =
+    contractType === "emprestimo" ? selectedLoanData : selectedFinancingData;
+  const selectedClient = clients?.find(
+    client => client.id === selectedContract?.clientId
+  );
   const financingExtra = selectedFinancingData
     ? Math.max(
         0,
@@ -104,6 +122,14 @@ export default function Pagamentos() {
           Number(selectedFinancingData.installmentAmount)
       )
     : 0;
+
+  useEffect(() => {
+    if (!openCreate || formData.amount || !selectedContract) return;
+    setFormData(current => ({
+      ...current,
+      amount: String(selectedContract.installmentAmount),
+    }));
+  }, [formData.amount, openCreate, selectedContract]);
 
   const invalidateFinance = async () => {
     await Promise.all([
@@ -279,7 +305,18 @@ export default function Pagamentos() {
                       <Label>Empréstimo *</Label>
                       <Select
                         value={selectedLoan}
-                        onValueChange={setSelectedLoan}
+                        onValueChange={value => {
+                          setSelectedLoan(value);
+                          const loan = loans?.find(
+                            item => item.id === Number(value)
+                          );
+                          if (loan) {
+                            setFormData(current => ({
+                              ...current,
+                              amount: String(loan.installmentAmount),
+                            }));
+                          }
+                        }}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Selecionar empréstimo" />
@@ -336,13 +373,53 @@ export default function Pagamentos() {
                                 value={String(financing.id)}
                               >
                                 Contrato #{financing.id} · parcela{" "}
-                                {formatCurrency(financing.installmentAmount)}
+                                {formatCurrency(financing.installmentAmount)} ·{" "}
+                                {clients?.find(
+                                  client => client.id === financing.clientId
+                                )?.name || `Cliente #${financing.clientId}`}
                               </SelectItem>
                             ))}
                         </SelectContent>
                       </Select>
                     </div>
                   )}
+                  {selectedContract ? (
+                    <div className="rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
+                      <p className="text-sm text-muted-foreground">
+                        Pagamento selecionado
+                      </p>
+                      <p className="mt-1 text-lg font-bold">
+                        {selectedClient?.name ||
+                          `Cliente #${selectedContract.clientId}`}
+                      </p>
+                      <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+                        <div>
+                          <p className="text-muted-foreground">Contrato</p>
+                          <p className="font-semibold">
+                            {contractType === "emprestimo"
+                              ? "Empréstimo"
+                              : "Financiamento"}{" "}
+                            #{selectedContract.id}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Parcela</p>
+                          <p className="font-semibold">
+                            {formData.installmentNumber} de{" "}
+                            {selectedContract.installments}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">
+                            Valor previsto
+                          </p>
+                          <p className="font-semibold">
+                            {formatCurrency(selectedContract.installmentAmount)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
                       <Label>

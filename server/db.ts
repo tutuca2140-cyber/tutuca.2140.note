@@ -2486,6 +2486,7 @@ export async function getDashboardStats(databaseId: number) {
     upcomingLimit.setDate(upcomingLimit.getDate() + 2);
     const upcomingLimitKey = dateKey(upcomingLimit);
     type DueItem = {
+      contractId: number;
       clientId: number;
       clientName: string;
       amount: number;
@@ -2515,6 +2516,7 @@ export async function getDashboardStats(databaseId: number) {
       ) {
         if (paidKeys.has(`loan:${loan.id}:${installmentNumber}`)) continue;
         dueItems.push({
+          contractId: loan.id,
           clientId: loan.clientId,
           clientName:
             clientNames.get(loan.clientId) ?? `Cliente #${loan.clientId}`,
@@ -2541,6 +2543,7 @@ export async function getDashboardStats(databaseId: number) {
         if (paidKeys.has(`financing:${financing.id}:${installmentNumber}`))
           continue;
         dueItems.push({
+          contractId: financing.id,
           clientId: financing.clientId,
           clientName:
             clientNames.get(financing.clientId) ??
