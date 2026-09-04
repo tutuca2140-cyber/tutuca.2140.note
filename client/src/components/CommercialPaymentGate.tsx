@@ -1,17 +1,26 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { CreditCard, LayoutDashboard, Loader2, LockKeyhole } from "lucide-react";
+import {
+  CreditCard,
+  LayoutDashboard,
+  Loader2,
+  LockKeyhole,
+} from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
 type AccountContext = {
   success?: boolean;
   commercial?: boolean;
-  plan?: "basic" | "plus" | null;
+  plan?: "free" | "basic" | "plus" | null;
   status?: string | null;
 };
 
-export default function CommercialPaymentGate({ children }: { children: ReactNode }) {
+export default function CommercialPaymentGate({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const [, navigate] = useLocation();
   const [loading, setLoading] = useState(true);
   const [context, setContext] = useState<AccountContext | null>(null);
@@ -24,7 +33,9 @@ export default function CommercialPaymentGate({ children }: { children: ReactNod
           credentials: "include",
           cache: "no-store",
         });
-        const result = (await response.json().catch(() => ({}))) as AccountContext;
+        const result = (await response
+          .json()
+          .catch(() => ({}))) as AccountContext;
         if (!cancelled && response.ok) setContext(result);
       } catch {
         // As páginas protegidas continuam responsáveis pelo próprio fluxo de autenticação.
@@ -49,7 +60,9 @@ export default function CommercialPaymentGate({ children }: { children: ReactNod
   }
 
   const paymentRequired = Boolean(
-    context?.commercial && context.status !== "active" && context.status !== "paid"
+    context?.commercial &&
+    context.status !== "active" &&
+    context.status !== "paid"
   );
 
   if (!paymentRequired) return <>{children}</>;
@@ -71,7 +84,9 @@ export default function CommercialPaymentGate({ children }: { children: ReactNod
               Sistema aguardando pagamento
             </h1>
             <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-600">
-              Sua assinatura está aguardando regularização. Enquanto o pagamento não for confirmado, sua conta permanece disponível somente para visualizar o Dashboard.
+              Sua assinatura está aguardando regularização. Enquanto o pagamento
+              não for confirmado, sua conta permanece disponível somente para
+              visualizar o Dashboard.
             </p>
             <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left text-sm text-amber-950">
               <div className="flex items-center gap-2 font-bold">
@@ -79,10 +94,14 @@ export default function CommercialPaymentGate({ children }: { children: ReactNod
                 Assinatura {context?.plan === "plus" ? "Plus" : "Basic"}
               </div>
               <p className="mt-2 leading-6">
-                Assim que o pagamento for confirmado, as funções do sistema voltam a ser liberadas conforme o seu plano e suas permissões.
+                Assim que o pagamento for confirmado, as funções do sistema
+                voltam a ser liberadas conforme o seu plano e suas permissões.
               </p>
             </div>
-            <Button className="mt-7 h-12 w-full" onClick={() => navigate("/dashboard")}>
+            <Button
+              className="mt-7 h-12 w-full"
+              onClick={() => navigate("/dashboard")}
+            >
               <LayoutDashboard className="mr-2 h-5 w-5" />
               Voltar para o Dashboard
             </Button>
