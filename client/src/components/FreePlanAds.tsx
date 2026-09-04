@@ -15,16 +15,5 @@ export default function FreePlanAds({ enabled }: { enabled: boolean }) {
     document.head.appendChild(script);
   }, [enabled]);
 
-  if (!enabled) return null;
-
-  return (
-    <div className="mb-4 rounded-xl border border-border/70 bg-background px-4 py-2 text-center text-[11px] text-muted-foreground shadow-sm">
-      <span className="font-semibold">Plano Grátis</span>
-      <span className="mx-2" aria-hidden="true">
-        •
-      </span>
-      Este acesso pode exibir anúncios. Assine um plano para usar o Note Note
-      sem publicidade.
-    </div>
-  );
+  return null;
 }
