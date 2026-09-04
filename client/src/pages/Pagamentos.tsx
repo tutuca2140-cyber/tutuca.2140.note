@@ -83,6 +83,7 @@ export default function Pagamentos() {
   const [commissionPercentage, setCommissionPercentage] = useState("");
   const [formData, setFormData] = useState({
     amount: "",
+    discountAmount: "0",
     installmentNumber: shortcut.get("parcela") || "1",
     paymentDate: today(),
     notes: "",
@@ -244,6 +245,7 @@ export default function Pagamentos() {
             : undefined,
         installmentNumber: Number(formData.installmentNumber),
         amount: formData.amount,
+        discountAmount: Number(formData.discountAmount || 0),
         paymentDate: new Date(`${formData.paymentDate}T12:00:00`).toISOString(),
         dueDate: new Date(`${formData.paymentDate}T12:00:00`).toISOString(),
         status: "pago",
@@ -258,6 +260,7 @@ export default function Pagamentos() {
       setOpenCreate(false);
       setFormData({
         amount: "",
+        discountAmount: "0",
         installmentNumber: "1",
         paymentDate: today(),
         notes: "",
@@ -532,6 +535,25 @@ export default function Pagamentos() {
                       />
                     </div>
                     <div>
+                      <Label>Desconto concedido</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={formData.discountAmount}
+                        onChange={event =>
+                          setFormData({
+                            ...formData,
+                            discountAmount: event.target.value,
+                          })
+                        }
+                        placeholder="0,00"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        O desconto abate a dívida, mas não entra no caixa.
+                      </p>
+                    </div>
+                    <div>
                       <Label>Data do pagamento *</Label>
                       <Input
                         type="date"
@@ -558,6 +580,33 @@ export default function Pagamentos() {
                       />
                     </div>
                   </div>
+                  {Number(formData.discountAmount || 0) > 0 ? (
+                    <div className="grid gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] p-4 text-sm sm:grid-cols-3">
+                      <div>
+                        <p className="text-muted-foreground">Valor recebido</p>
+                        <p className="font-semibold">
+                          {formatCurrency(formData.amount)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Desconto</p>
+                        <p className="font-semibold text-emerald-700 dark:text-emerald-400">
+                          -{formatCurrency(formData.discountAmount)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">
+                          Total abatido da dívida
+                        </p>
+                        <p className="font-bold">
+                          {formatCurrency(
+                            Number(formData.amount || 0) +
+                              Number(formData.discountAmount || 0)
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
                   {selectedFinancingData ? (
                     <div className="grid gap-3 rounded-lg border bg-muted/30 p-3 text-sm sm:grid-cols-2">
                       <div>

@@ -94,7 +94,10 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 
 const usersAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "super_admin" && !ctx.user.adminCanUsers) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Sem autorização para administrar usuários." });
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Sem autorização para administrar usuários.",
+    });
   }
   return next({ ctx });
 });
@@ -350,7 +353,9 @@ export const appRouter = router({
       .input(
         z.object({
           username: z.string().trim().min(3).max(100),
-          email: z.union([z.string().trim().email(), z.literal("")]).default(""),
+          email: z
+            .union([z.string().trim().email(), z.literal("")])
+            .default(""),
           name: z.string().trim().min(1).max(200),
           password: z.string().min(6),
           role: z.enum(["user", "admin"]).default("user"),
@@ -378,7 +383,7 @@ export const appRouter = router({
             message: "Nome de usuário já cadastrado.",
           });
         }
-        if (input.email && await db.getUserByEmail(input.email)) {
+        if (input.email && (await db.getUserByEmail(input.email))) {
           throw new TRPCError({
             code: "CONFLICT",
             message: "E-mail já cadastrado.",
@@ -667,16 +672,23 @@ export const appRouter = router({
       .input(z.object({ password: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
         const current = await db.getUserById(ctx.user.id);
-        if (!current?.passwordHash || !(await bcrypt.compare(input.password, current.passwordHash))) {
+        if (
+          !current?.passwordHash ||
+          !(await bcrypt.compare(input.password, current.passwordHash))
+        ) {
           await db.createAuditLog({
             userId: ctx.user.id,
             username: ctx.user.username || ctx.user.email || "Super Admin",
             action: "customer_database_access_denied",
             entity: "databases",
-            details: "Senha do Super Admin inválida para acessar bancos de clientes.",
+            details:
+              "Senha do Super Admin inválida para acessar bancos de clientes.",
             status: "failed",
           });
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "Senha do Super Admin inválida." });
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Senha do Super Admin inválida.",
+          });
         }
         const rows = await db.getCommercialCustomerDatabases();
         await db.createAuditLog({
@@ -691,14 +703,29 @@ export const appRouter = router({
       }),
 
     enterCustomerDatabase: superAdminProcedure
-      .input(z.object({ id: z.number().int().positive(), password: z.string().min(1) }))
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          password: z.string().min(1),
+        })
+      )
       .mutation(async ({ input, ctx }) => {
         const current = await db.getUserById(ctx.user.id);
-        if (!current?.passwordHash || !(await bcrypt.compare(input.password, current.passwordHash))) {
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "Senha do Super Admin inválida." });
+        if (
+          !current?.passwordHash ||
+          !(await bcrypt.compare(input.password, current.passwordHash))
+        ) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Senha do Super Admin inválida.",
+          });
         }
         if (!(await db.isCommercialCustomerDatabase(input.id))) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Este banco não pertence a uma conta comercial de cliente." });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Este banco não pertence a uma conta comercial de cliente.",
+          });
         }
         await db.setActiveDatabase(input.id);
         const dbInfo = await db.getDatabaseById(input.id);
@@ -744,10 +771,14 @@ export const appRouter = router({
     setActive: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
-        if (ctx.user.role === "super_admin" && (await db.isCommercialCustomerDatabase(input.id))) {
+        if (
+          ctx.user.role === "super_admin" &&
+          (await db.isCommercialCustomerDatabase(input.id))
+        ) {
           throw new TRPCError({
             code: "FORBIDDEN",
-            message: "Bancos de clientes não podem ser acessados pelo seletor Banco em operação. Use a área protegida Bancos de Clientes no Super Admin.",
+            message:
+              "Bancos de clientes não podem ser acessados pelo seletor Banco em operação. Use a área protegida Bancos de Clientes no Super Admin.",
           });
         }
         await db.setActiveDatabase(input.id);
@@ -1786,6 +1817,7 @@ export const appRouter = router({
           vehicleFinancingId: z.number().int().positive().optional(),
           installmentNumber: z.coerce.number().int().positive(),
           amount: z.string(),
+          discountAmount: z.coerce.number().min(0).optional(),
           paymentDate: z.string(),
           dueDate: z.string(),
           status: z.enum(["pago", "pendente", "atrasado"]),
@@ -1856,6 +1888,8 @@ export const appRouter = router({
             code: "BAD_REQUEST",
             message: "O valor do pagamento deve ser maior que zero.",
           });
+        const discountAmount = Number(input.discountAmount || 0);
+        const settlementAmount = roundMoney(paymentAmount + discountAmount);
         const paymentDate = new Date(input.paymentDate);
         const dueDate = new Date(input.dueDate);
         if (
@@ -1934,7 +1968,16 @@ export const appRouter = router({
             );
         const priorPaid = priorPayments
           .filter(payment => payment.status === "pago")
-          .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+          .reduce(
+            (sum, payment) =>
+              sum +
+              Math.max(
+                Number(payment.amount || 0),
+                Number(payment.principalAmount || 0) +
+                  Number(payment.interestAmount || 0)
+              ),
+            0
+          );
         const balanceBefore = loan
           ? roundMoney(contractPrincipal + accruedInterest)
           : Math.max(
@@ -1945,7 +1988,7 @@ export const appRouter = router({
                   0
               ) - priorPaid
             );
-        if (input.status === "pago" && paymentAmount > balanceBefore + 0.01)
+        if (input.status === "pago" && settlementAmount > balanceBefore + 0.01)
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "O pagamento não pode exceder o saldo do contrato.",
@@ -1954,7 +1997,7 @@ export const appRouter = router({
           input.status === "pago"
             ? loan
               ? allocateBalancePayment(
-                  paymentAmount,
+                  settlementAmount,
                   accruedInterest,
                   contractPrincipal
                 )
@@ -1970,11 +2013,11 @@ export const appRouter = router({
                     ) / vehicleFinancing!.installments
                   );
                   const regularQuota = Math.min(
-                    paymentAmount,
+                    settlementAmount,
                     installmentValue
                   );
                   const extraAmortization = roundMoney(
-                    Math.max(0, paymentAmount - regularQuota)
+                    Math.max(0, settlementAmount - regularQuota)
                   );
                   const interestAmount = roundMoney(
                     Math.min(regularQuota, installmentInterest)
@@ -1986,7 +2029,7 @@ export const appRouter = router({
                         extraAmortization
                     ),
                     remainingBalance: roundMoney(
-                      Math.max(0, balanceBefore - paymentAmount)
+                      Math.max(0, balanceBefore - settlementAmount)
                     ),
                   };
                 })()
@@ -2034,7 +2077,15 @@ export const appRouter = router({
           principalAmount: allocation.principalAmount.toFixed(2),
           interestAmount: allocation.interestAmount.toFixed(2),
           remainingBalance: allocation.remainingBalance.toFixed(2),
-          notes: input.notes,
+          notes:
+            discountAmount > 0
+              ? [
+                  input.notes,
+                  `Desconto concedido: R$ ${discountAmount.toFixed(2).replace(".", ",")}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              : input.notes,
           agentId,
           commissionPercentage: commissionPercentage.toFixed(2),
           commissionAmount: commissionAmount.toFixed(2),
@@ -2107,7 +2158,7 @@ export const appRouter = router({
           action: "create_payment",
           entity: "payments",
           databaseId: activeDb.id,
-          details: `Pagamento registrado: R$ ${paymentAmount.toFixed(2)}; comissão: R$ ${commissionAmount.toFixed(2)}`,
+          details: `Pagamento registrado: R$ ${paymentAmount.toFixed(2)}; desconto: R$ ${discountAmount.toFixed(2)}; comissão: R$ ${commissionAmount.toFixed(2)}`,
           status: "success",
         });
         return result;
@@ -2607,10 +2658,14 @@ export const appRouter = router({
             code: "BAD_REQUEST",
             message: "Nenhum banco ativo.",
           });
-        if (input.stockUnit === "unit" && !Number.isInteger(input.stockQuantity)) {
+        if (
+          input.stockUnit === "unit" &&
+          !Number.isInteger(input.stockQuantity)
+        ) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "Quando o estoque for por unidade, informe uma quantidade inteira.",
+            message:
+              "Quando o estoque for por unidade, informe uma quantidade inteira.",
           });
         }
         const created = await db.createProduct({
