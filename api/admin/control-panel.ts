@@ -57,7 +57,9 @@ async function deleteInternalUser(userId: number, currentUser: any) {
   const target = targetRows[0] as any;
 
   if (!target) {
-    throw Object.assign(new Error("Usuário não encontrado."), { statusCode: 404 });
+    throw Object.assign(new Error("Usuário não encontrado."), {
+      statusCode: 404,
+    });
   }
   if (
     target.role === "super_admin" ||
@@ -73,7 +75,9 @@ async function deleteInternalUser(userId: number, currentUser: any) {
     target.loginMethod === "commercial_subuser"
   ) {
     throw Object.assign(
-      new Error("Contas comerciais não podem ser excluídas por esta área de usuários internos."),
+      new Error(
+        "Contas comerciais não podem ser excluídas por esta área de usuários internos."
+      ),
       { statusCode: 403 }
     );
   }
@@ -109,18 +113,29 @@ async function deleteInternalUser(userId: number, currentUser: any) {
 export default async function handler(req: any, res: any) {
   if (req.method !== "GET" && req.method !== "POST") {
     res.setHeader("Allow", "GET, POST");
-    return sendJson(res, 405, { success: false, message: "Método não permitido." });
+    return sendJson(res, 405, {
+      success: false,
+      message: "Método não permitido.",
+    });
   }
 
   try {
     const currentUser = await getAuthorizedAdmin(req, "control");
-    if (!currentUser) return sendJson(res, 403, { success: false, message: "Sem autorização para o Painel de Controle." });
+    if (!currentUser)
+      return sendJson(res, 403, {
+        success: false,
+        message: "Sem autorização para o Painel de Controle.",
+      });
     const sql = getSql();
 
     await ensureTables();
 
     if (req.method === "POST") {
-      if (currentUser.role !== "super_admin") return sendJson(res, 403, { success: false, message: "Somente o Super Admin pode excluir usuários internos." });
+      if (currentUser.role !== "super_admin")
+        return sendJson(res, 403, {
+          success: false,
+          message: "Somente o Super Admin pode excluir usuários internos.",
+        });
       const body = await readJsonBody(req);
       const action = String(body?.action ?? "").trim();
       const userId = Number(body?.userId);
@@ -131,12 +146,16 @@ export default async function handler(req: any, res: any) {
         });
       }
       if (!Number.isInteger(userId) || userId <= 0) {
-        return sendJson(res, 400, { success: false, message: "Usuário inválido." });
+        return sendJson(res, 400, {
+          success: false,
+          message: "Usuário inválido.",
+        });
       }
       await deleteInternalUser(userId, currentUser);
       return sendJson(res, 200, {
         success: true,
-        message: "Usuário excluído do sistema. Bancos e dados operacionais foram preservados.",
+        message:
+          "Usuário excluído do sistema. Bancos e dados operacionais foram preservados.",
       });
     }
 
@@ -148,6 +167,7 @@ export default async function handler(req: any, res: any) {
       operationalSummary,
       databaseSummary,
       storageSummary,
+      onlineUsers,
       recentAccess,
       userRows,
       recentAudits,
@@ -210,6 +230,21 @@ export default async function handler(req: any, res: any) {
       `,
       sql`
         SELECT
+          u.id,
+          u."supportId",
+          u.name,
+          u.username,
+          u.email,
+          MAX(a."createdAt") AS "lastActivityAt",
+          (array_agg(a.path ORDER BY a."createdAt" DESC))[1] AS path
+        FROM site_access_logs a
+        JOIN users u ON u.id = a."userId"
+        WHERE a."createdAt" >= NOW() - interval '2 minutes 30 seconds'
+        GROUP BY u.id, u."supportId", u.name, u.username, u.email
+        ORDER BY "lastActivityAt" DESC
+      `,
+      sql`
+        SELECT
           a.id,
           a.path,
           a.referrer,
@@ -266,7 +301,10 @@ export default async function handler(req: any, res: any) {
       `,
     ]);
 
-    const usedBytes = Math.max(0, Number((storageSummary[0] as any)?.usedBytes || 0));
+    const usedBytes = Math.max(
+      0,
+      Number((storageSummary[0] as any)?.usedBytes || 0)
+    );
     const remainingBytes = Math.max(0, NEON_STORAGE_LIMIT_BYTES - usedBytes);
     const usedPercent = Math.min(
       100,
@@ -294,6 +332,7 @@ export default async function handler(req: any, res: any) {
         },
       },
       recentAccess,
+      onlineUsers,
       users: userRows,
       recentAudits,
     });

@@ -1,13 +1,16 @@
 import { useEffect } from "react";
 import { useLocation } from "wouter";
 
-const HEARTBEAT_MS = 5 * 60 * 1000;
+const HEARTBEAT_MS = 60 * 1000;
 
 function trackingId(storage: Storage, key: string) {
   try {
     const current = storage.getItem(key);
     if (current) return current;
-    const next = typeof window.crypto?.randomUUID === "function" ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const next =
+      typeof window.crypto?.randomUUID === "function"
+        ? window.crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     storage.setItem(key, next);
     return next;
   } catch {
