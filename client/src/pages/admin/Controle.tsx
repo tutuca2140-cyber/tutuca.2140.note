@@ -187,7 +187,11 @@ function exportCommercialExcel(accounts: any[]) {
     paymentLabel(account),
     account.status || "",
     account.isActive ? "Sim" : "Não",
-    account.plan === "plus" ? "Plus" : "Basic",
+    account.plan === "plus"
+      ? "Plus"
+      : account.plan === "basic"
+        ? "Basic"
+        : "Grátis",
     billingLabel(account),
     money.format(Number(account.priceCents || 0) / 100),
     account.provider || "",
