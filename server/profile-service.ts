@@ -65,7 +65,12 @@ function getAsaasApiKey() {
 async function deleteAsaasResource(path: string, label: string) {
   const apiKey = getAsaasApiKey();
   if (!apiKey) {
-    throw Object.assign(new Error("A integração com o Asaas não está disponível neste momento. Tente novamente mais tarde."), { statusCode: 503 });
+    throw Object.assign(
+      new Error(
+        "A integração com o Asaas não está disponível neste momento. Tente novamente mais tarde."
+      ),
+      { statusCode: 503 }
+    );
   }
   const response = await fetch(`${ASAAS_API}${path}`, {
     method: "DELETE",
@@ -74,7 +79,12 @@ async function deleteAsaasResource(path: string, label: string) {
   if (!response.ok && response.status !== 404) {
     const body = await response.json().catch(() => ({}));
     console.error("[profile-service/asaas-cancel]", { path, body });
-    throw Object.assign(new Error(`Não foi possível cancelar ${label} no Asaas. Nenhuma alteração foi feita na sua conta.`), { statusCode: 502 });
+    throw Object.assign(
+      new Error(
+        `Não foi possível cancelar ${label} no Asaas. Nenhuma alteração foi feita na sua conta.`
+      ),
+      { statusCode: 502 }
+    );
   }
   return true;
 }
@@ -101,7 +111,8 @@ async function getSubscription(client: Client, user: any) {
   const ownerId =
     user.loginMethod === "commercial_signup"
       ? Number(user.id)
-      : user.loginMethod === "commercial_subuser" && Number(user.accountOwnerId) > 0
+      : user.loginMethod === "commercial_subuser" &&
+          Number(user.accountOwnerId) > 0
         ? Number(user.accountOwnerId)
         : null;
   if (!ownerId) return null;
@@ -121,7 +132,9 @@ async function getSubscription(client: Client, user: any) {
   if (!row) return null;
 
   const now = Date.now();
-  const trialEndsAtMs = row.trialEndsAt ? new Date(row.trialEndsAt).getTime() : 0;
+  const trialEndsAtMs = row.trialEndsAt
+    ? new Date(row.trialEndsAt).getTime()
+    : 0;
   const trialActive = Boolean(trialEndsAtMs && trialEndsAtMs > now);
   const trialDaysRemaining = trialActive
     ? Math.max(1, Math.ceil((trialEndsAtMs - now) / 86400000))
@@ -136,11 +149,19 @@ async function getSubscription(client: Client, user: any) {
     provider: String(row.provider || ""),
     billingMethod: String(row.billingMethod || ""),
     providerStatus: row.providerStatus ? String(row.providerStatus) : null,
-    providerSubscriptionId: row.providerSubscriptionId ? String(row.providerSubscriptionId) : null,
-    providerCheckoutId: row.providerCheckoutId ? String(row.providerCheckoutId) : null,
-    providerCustomerId: row.providerCustomerId ? String(row.providerCustomerId) : null,
+    providerSubscriptionId: row.providerSubscriptionId
+      ? String(row.providerSubscriptionId)
+      : null,
+    providerCheckoutId: row.providerCheckoutId
+      ? String(row.providerCheckoutId)
+      : null,
+    providerCustomerId: row.providerCustomerId
+      ? String(row.providerCustomerId)
+      : null,
     lastPaymentId: row.lastPaymentId ? String(row.lastPaymentId) : null,
-    lastPaymentStatus: row.lastPaymentStatus ? String(row.lastPaymentStatus) : null,
+    lastPaymentStatus: row.lastPaymentStatus
+      ? String(row.lastPaymentStatus)
+      : null,
     lastWebhookAt: row.lastWebhookAt ?? null,
     trialEndsAt: row.trialEndsAt ?? null,
     paidUntil: row.paidUntil ?? null,
@@ -167,8 +188,17 @@ async function getProfile(client: Client, user: any) {
     commercialOwner: user.loginMethod === "commercial_signup",
     editable: user.loginMethod === "commercial_signup",
     canDeleteAccount: user.loginMethod === "commercial_signup",
-    canCancelPlan: user.loginMethod === "commercial_signup" && Boolean(subscription) && subscription?.status !== "canceled",
-    plan: subscription?.plan === "basic" || subscription?.plan === "plus" ? subscription.plan : null,
+    canCancelPlan:
+      user.loginMethod === "commercial_signup" &&
+      Boolean(subscription) &&
+      subscription?.plan !== "free" &&
+      subscription?.status !== "canceled",
+    plan:
+      subscription?.plan === "free" ||
+      subscription?.plan === "basic" ||
+      subscription?.plan === "plus"
+        ? subscription.plan
+        : null,
     subscriptionStatus: subscription?.status ?? null,
     priceCents: subscription?.priceCents ?? null,
     provider: subscription?.provider ?? null,
@@ -185,33 +215,52 @@ async function getProfile(client: Client, user: any) {
 }
 
 async function cancelProviderSubscription(subscription: any) {
-  if (!subscription) return { provider: null, resource: null, cancelled: false };
+  if (!subscription)
+    return { provider: null, resource: null, cancelled: false };
   const provider = String(subscription.provider || "");
-  if (provider !== "asaas") return { provider, resource: null, cancelled: false };
+  if (provider !== "asaas")
+    return { provider, resource: null, cancelled: false };
 
-  const subscriptionId = String(subscription.providerSubscriptionId || "").trim();
+  const subscriptionId = String(
+    subscription.providerSubscriptionId || ""
+  ).trim();
   const paymentId = String(subscription.lastPaymentId || "").trim();
 
   if (subscriptionId) {
     return {
       provider,
       resource: "subscription",
-      cancelled: await deleteAsaasResource(`/subscriptions/${encodeURIComponent(subscriptionId)}`, "a assinatura"),
+      cancelled: await deleteAsaasResource(
+        `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+        "a assinatura"
+      ),
     };
   }
 
-  if (paymentId && ["pending_payment", "past_due"].includes(String(subscription.status))) {
+  if (
+    paymentId &&
+    ["pending_payment", "past_due"].includes(String(subscription.status))
+  ) {
     return {
       provider,
       resource: "payment",
-      cancelled: await deleteAsaasResource(`/payments/${encodeURIComponent(paymentId)}`, "a cobrança pendente"),
+      cancelled: await deleteAsaasResource(
+        `/payments/${encodeURIComponent(paymentId)}`,
+        "a cobrança pendente"
+      ),
     };
   }
 
   return { provider, resource: null, cancelled: false };
 }
 
-async function cancelOwnSubscription(client: Client, req: any, res: any, user: any, body: any) {
+async function cancelOwnSubscription(
+  client: Client,
+  req: any,
+  res: any,
+  user: any,
+  body: any
+) {
   if (user.loginMethod !== "commercial_signup") {
     return sendJson(res, 403, {
       success: false,
@@ -221,15 +270,24 @@ async function cancelOwnSubscription(client: Client, req: any, res: any, user: a
 
   const currentPassword = String(body?.currentPassword ?? "");
   if (!currentPassword || !user.passwordHash) {
-    return sendJson(res, 400, { success: false, message: "Informe sua senha atual para cancelar o plano." });
+    return sendJson(res, 400, {
+      success: false,
+      message: "Informe sua senha atual para cancelar o plano.",
+    });
   }
   if (!(await bcrypt.compare(currentPassword, String(user.passwordHash)))) {
-    return sendJson(res, 401, { success: false, message: "Senha atual incorreta." });
+    return sendJson(res, 401, {
+      success: false,
+      message: "Senha atual incorreta.",
+    });
   }
 
   const subscription = await getSubscription(client, user);
   if (!subscription) {
-    return sendJson(res, 404, { success: false, message: "Nenhum plano comercial foi encontrado para esta conta." });
+    return sendJson(res, 404, {
+      success: false,
+      message: "Nenhum plano comercial foi encontrado para esta conta.",
+    });
   }
   if (subscription.status === "canceled") {
     return sendJson(res, 200, {
@@ -269,7 +327,8 @@ async function cancelOwnSubscription(client: Client, req: any, res: any, user: a
   return sendJson(res, 200, {
     success: true,
     profile: await getProfile(client, user),
-    message: "Plano cancelado. Nenhuma nova cobrança recorrente será realizada por este plano.",
+    message:
+      "Plano cancelado. Nenhuma nova cobrança recorrente será realizada por este plano.",
   });
 }
 
@@ -277,7 +336,8 @@ async function updateProfile(client: Client, req: any, res: any, user: any) {
   if (user.loginMethod !== "commercial_signup") {
     return sendJson(res, 403, {
       success: false,
-      message: "Esta conta é administrada pelo responsável que a criou e não pode alterar seus dados por esta área.",
+      message:
+        "Esta conta é administrada pelo responsável que a criou e não pode alterar seus dados por esta área.",
     });
   }
 
@@ -288,33 +348,44 @@ async function updateProfile(client: Client, req: any, res: any, user: any) {
 
   const name = String(body?.name ?? "").trim();
   const username = String(body?.username ?? "").trim();
-  const email = String(body?.email ?? "").trim().toLowerCase();
+  const email = String(body?.email ?? "")
+    .trim()
+    .toLowerCase();
   const whatsapp = normalizeWhatsapp(String(body?.whatsapp ?? ""));
   const currentPassword = String(body?.currentPassword ?? "");
   const newPassword = String(body?.newPassword ?? "");
 
   if (!isFullName(name) || name.length > 200) {
-    return sendJson(res, 400, { success: false, message: "Informe nome e sobrenome completos." });
+    return sendJson(res, 400, {
+      success: false,
+      message: "Informe nome e sobrenome completos.",
+    });
   }
   if (!isValidUsername(username)) {
     return sendJson(res, 400, {
       success: false,
-      message: "O nome de usuário deve ter de 3 a 40 caracteres e usar apenas letras, números, ponto, hífen ou sublinhado.",
+      message:
+        "O nome de usuário deve ter de 3 a 40 caracteres e usar apenas letras, números, ponto, hífen ou sublinhado.",
     });
   }
   if (!isValidEmail(email)) {
-    return sendJson(res, 400, { success: false, message: "Informe um e-mail válido." });
+    return sendJson(res, 400, {
+      success: false,
+      message: "Informe um e-mail válido.",
+    });
   }
   if (!isValidWhatsapp(whatsapp)) {
     return sendJson(res, 400, {
       success: false,
-      message: "Informe um WhatsApp brasileiro válido com DDD e celular iniciado por 9.",
+      message:
+        "Informe um WhatsApp brasileiro válido com DDD e celular iniciado por 9.",
     });
   }
   if (newPassword && !isValidPassword(newPassword)) {
     return sendJson(res, 400, {
       success: false,
-      message: "A nova senha deve ter no mínimo 8 caracteres, uma letra maiúscula e um número.",
+      message:
+        "A nova senha deve ter no mínimo 8 caracteres, uma letra maiúscula e um número.",
     });
   }
 
@@ -327,11 +398,15 @@ async function updateProfile(client: Client, req: any, res: any, user: any) {
     if (!currentPassword || !user.passwordHash) {
       return sendJson(res, 400, {
         success: false,
-        message: "Informe sua senha atual para alterar usuário, e-mail ou senha.",
+        message:
+          "Informe sua senha atual para alterar usuário, e-mail ou senha.",
       });
     }
     if (!(await bcrypt.compare(currentPassword, String(user.passwordHash)))) {
-      return sendJson(res, 401, { success: false, message: "Senha atual incorreta." });
+      return sendJson(res, 401, {
+        success: false,
+        message: "Senha atual incorreta.",
+      });
     }
   }
 
@@ -342,14 +417,20 @@ async function updateProfile(client: Client, req: any, res: any, user: any) {
     [user.id, username, email]
   );
   if (collision.rows[0]) {
-    const sameUsername = String(collision.rows[0].username || "").toLowerCase() === username.toLowerCase();
+    const sameUsername =
+      String(collision.rows[0].username || "").toLowerCase() ===
+      username.toLowerCase();
     return sendJson(res, 409, {
       success: false,
-      message: sameUsername ? "Este nome de usuário já está em uso." : "Este e-mail já está cadastrado.",
+      message: sameUsername
+        ? "Este nome de usuário já está em uso."
+        : "Este e-mail já está cadastrado.",
     });
   }
 
-  const passwordHash = newPassword ? await bcrypt.hash(newPassword, 12) : String(user.passwordHash || "");
+  const passwordHash = newPassword
+    ? await bcrypt.hash(newPassword, 12)
+    : String(user.passwordHash || "");
   await client.query(
     `UPDATE users
         SET name = $1, username = $2, email = $3, whatsapp = $4,
@@ -359,7 +440,10 @@ async function updateProfile(client: Client, req: any, res: any, user: any) {
   );
 
   if (newPassword) {
-    await client.query(`DELETE FROM local_sessions WHERE "userId" = $1 AND token <> $2`, [user.id, user.sessionToken]);
+    await client.query(
+      `DELETE FROM local_sessions WHERE "userId" = $1 AND token <> $2`,
+      [user.id, user.sessionToken]
+    );
     await client.query(
       `UPDATE password_reset_tokens SET "usedAt" = NOW()
         WHERE "userId" = $1 AND "usedAt" IS NULL`,
@@ -378,7 +462,8 @@ async function updateProfile(client: Client, req: any, res: any, user: any) {
         nameChanged: name !== String(user.name || ""),
         usernameChanged: username !== String(user.username || ""),
         emailChanged: email !== String(user.email || ""),
-        whatsappChanged: whatsapp !== normalizeWhatsapp(String(user.whatsapp || "")),
+        whatsappChanged:
+          whatsapp !== normalizeWhatsapp(String(user.whatsapp || "")),
         passwordChanged: Boolean(newPassword),
       }),
     ]
@@ -398,24 +483,43 @@ async function updateProfile(client: Client, req: any, res: any, user: any) {
 
 async function deleteOwnedDatabase(client: Client, databaseId: number) {
   for (const table of DELETE_ORDER) {
-    await client.query(`DELETE FROM ${quoteIdent(table)} WHERE "databaseId" = $1`, [databaseId]);
+    await client.query(
+      `DELETE FROM ${quoteIdent(table)} WHERE "databaseId" = $1`,
+      [databaseId]
+    );
   }
-  await client.query(`DELETE FROM user_database_access WHERE "databaseId" = $1`, [databaseId]);
-  await client.query(`DELETE FROM database_memory_backups WHERE "databaseId" = $1`, [databaseId]);
-  await client.query(`DELETE FROM "auditLogs" WHERE "databaseId" = $1`, [databaseId]);
+  await client.query(
+    `DELETE FROM user_database_access WHERE "databaseId" = $1`,
+    [databaseId]
+  );
+  await client.query(
+    `DELETE FROM database_memory_backups WHERE "databaseId" = $1`,
+    [databaseId]
+  );
+  await client.query(`DELETE FROM "auditLogs" WHERE "databaseId" = $1`, [
+    databaseId,
+  ]);
   await client.query(`DELETE FROM databases WHERE id = $1`, [databaseId]);
 }
 
-async function deleteCommercialAccount(client: Client, req: any, res: any, user: any) {
+async function deleteCommercialAccount(
+  client: Client,
+  req: any,
+  res: any,
+  user: any
+) {
   if (user.loginMethod !== "commercial_signup") {
     return sendJson(res, 403, {
       success: false,
-      message: "Somente o contratante principal pode excluir a própria conta comercial.",
+      message:
+        "Somente o contratante principal pode excluir a própria conta comercial.",
     });
   }
 
   const body = await readJsonBody(req);
-  const confirmation = String(body?.confirmation ?? "").trim().toUpperCase();
+  const confirmation = String(body?.confirmation ?? "")
+    .trim()
+    .toUpperCase();
   const currentPassword = String(body?.currentPassword ?? "");
   if (confirmation !== "EXCLUIR CONTA") {
     return sendJson(res, 400, {
@@ -424,10 +528,16 @@ async function deleteCommercialAccount(client: Client, req: any, res: any, user:
     });
   }
   if (!currentPassword || !user.passwordHash) {
-    return sendJson(res, 400, { success: false, message: "Informe sua senha atual." });
+    return sendJson(res, 400, {
+      success: false,
+      message: "Informe sua senha atual.",
+    });
   }
   if (!(await bcrypt.compare(currentPassword, String(user.passwordHash)))) {
-    return sendJson(res, 401, { success: false, message: "Senha atual incorreta." });
+    return sendJson(res, 401, {
+      success: false,
+      message: "Senha atual incorreta.",
+    });
   }
 
   const subscription = await getSubscription(client, user);
@@ -448,7 +558,10 @@ async function deleteCommercialAccount(client: Client, req: any, res: any, user:
 
   await client.query("BEGIN");
   try {
-    const databases = await client.query(`SELECT id, name FROM databases WHERE "createdBy" = $1 ORDER BY id`, [user.id]);
+    const databases = await client.query(
+      `SELECT id, name FROM databases WHERE "createdBy" = $1 ORDER BY id`,
+      [user.id]
+    );
     const members = await client.query(
       `SELECT id FROM users WHERE "loginMethod" = 'commercial_subuser' AND "accountOwnerId" = $1`,
       [user.id]
@@ -478,9 +591,17 @@ async function deleteCommercialAccount(client: Client, req: any, res: any, user:
     }
 
     for (const memberId of memberIds) {
-      await client.query(`DELETE FROM local_sessions WHERE "userId" = $1`, [memberId]);
-      await client.query(`DELETE FROM password_reset_tokens WHERE "userId" = $1`, [memberId]);
-      await client.query(`DELETE FROM user_database_access WHERE "userId" = $1`, [memberId]);
+      await client.query(`DELETE FROM local_sessions WHERE "userId" = $1`, [
+        memberId,
+      ]);
+      await client.query(
+        `DELETE FROM password_reset_tokens WHERE "userId" = $1`,
+        [memberId]
+      );
+      await client.query(
+        `DELETE FROM user_database_access WHERE "userId" = $1`,
+        [memberId]
+      );
       await client.query(
         `UPDATE users SET
           username = 'deleted-member-' || id || '-' || EXTRACT(EPOCH FROM NOW())::bigint,
@@ -495,10 +616,20 @@ async function deleteCommercialAccount(client: Client, req: any, res: any, user:
       );
     }
 
-    await client.query(`DELETE FROM local_sessions WHERE "userId" = $1`, [user.id]);
-    await client.query(`DELETE FROM password_reset_tokens WHERE "userId" = $1`, [user.id]);
-    await client.query(`DELETE FROM user_database_access WHERE "userId" = $1`, [user.id]);
-    await client.query(`DELETE FROM commercial_subscriptions WHERE "userId" = $1`, [user.id]);
+    await client.query(`DELETE FROM local_sessions WHERE "userId" = $1`, [
+      user.id,
+    ]);
+    await client.query(
+      `DELETE FROM password_reset_tokens WHERE "userId" = $1`,
+      [user.id]
+    );
+    await client.query(`DELETE FROM user_database_access WHERE "userId" = $1`, [
+      user.id,
+    ]);
+    await client.query(
+      `DELETE FROM commercial_subscriptions WHERE "userId" = $1`,
+      [user.id]
+    );
     await client.query(
       `UPDATE users SET
         username = 'deleted-account-' || id || '-' || EXTRACT(EPOCH FROM NOW())::bigint,
@@ -516,7 +647,8 @@ async function deleteCommercialAccount(client: Client, req: any, res: any, user:
     clearSessionCookie(res);
     return sendJson(res, 200, {
       success: true,
-      message: "Seu plano foi cancelado e sua conta, junto com os dados pertencentes a ela, foi excluída do Note Note.",
+      message:
+        "Seu plano foi cancelado e sua conta, junto com os dados pertencentes a ela, foi excluída do Note Note.",
     });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -527,12 +659,18 @@ async function deleteCommercialAccount(client: Client, req: any, res: any, user:
 export async function handleCommercialProfile(req: any, res: any) {
   if (!["GET", "POST", "DELETE"].includes(String(req.method))) {
     res.setHeader("Allow", "GET, POST, DELETE");
-    return sendJson(res, 405, { success: false, message: "Método não permitido." });
+    return sendJson(res, 405, {
+      success: false,
+      message: "Método não permitido.",
+    });
   }
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    return sendJson(res, 503, { success: false, message: "Banco principal não configurado." });
+    return sendJson(res, 503, {
+      success: false,
+      message: "Banco principal não configurado.",
+    });
   }
 
   const client = new Client(databaseUrl);
@@ -541,19 +679,29 @@ export async function handleCommercialProfile(req: any, res: any) {
     await client.connect();
     const user = await getViewer(client, req);
     if (!user) {
-      return sendJson(res, 401, { success: false, message: "Sessão inválida ou expirada." });
+      return sendJson(res, 401, {
+        success: false,
+        message: "Sessão inválida ou expirada.",
+      });
     }
 
     if (req.method === "GET") {
-      return sendJson(res, 200, { success: true, profile: await getProfile(client, user) });
+      return sendJson(res, 200, {
+        success: true,
+        profile: await getProfile(client, user),
+      });
     }
-    if (req.method === "POST") return await updateProfile(client, req, res, user);
+    if (req.method === "POST")
+      return await updateProfile(client, req, res, user);
     return await deleteCommercialAccount(client, req, res, user);
   } catch (error: any) {
     console.error("[profile-service]", error);
     return sendJson(res, Number(error?.statusCode || 500), {
       success: false,
-      message: error instanceof Error ? error.message : "Não foi possível concluir a operação no perfil.",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Não foi possível concluir a operação no perfil.",
     });
   } finally {
     try {
