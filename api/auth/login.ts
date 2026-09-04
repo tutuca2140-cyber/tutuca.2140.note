@@ -14,6 +14,7 @@ import { verifyLoginCaptcha } from "../../shared/login-captcha.js";
 neonConfig.webSocketConstructor = WebSocket;
 
 const PLAN_CONFIG = {
+  free: { label: "Grátis", limit: 1 },
   basic: { label: "Basic", limit: 1 },
   plus: { label: "Plus", limit: 3 },
 } as const;
@@ -21,7 +22,7 @@ const PLAN_CONFIG = {
 type PlanId = keyof typeof PLAN_CONFIG;
 
 function isPlan(value: unknown): value is PlanId {
-  return value === "basic" || value === "plus";
+  return value === "free" || value === "basic" || value === "plus";
 }
 
 function isValidCommercialPassword(value: string) {
@@ -38,7 +39,11 @@ function requestOrigin(req: any) {
   const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "https")
     .split(",")[0]
     .trim();
-  const forwardedHost = String(req?.headers?.["x-forwarded-host"] || req?.headers?.host || "notenote.com.br")
+  const forwardedHost = String(
+    req?.headers?.["x-forwarded-host"] ||
+      req?.headers?.host ||
+      "notenote.com.br"
+  )
     .split(",")[0]
     .trim();
   return `${forwardedProto}://${forwardedHost}`;
@@ -60,7 +65,8 @@ async function sendCommercialPasswordResetEmail(params: {
 }) {
   const apiKey = String(process.env.RESEND_API_KEY || "").trim();
   const from = String(
-    process.env.PASSWORD_RESET_FROM_EMAIL || "Note Note <no-reply@notenote.com.br>"
+    process.env.PASSWORD_RESET_FROM_EMAIL ||
+      "Note Note <no-reply@notenote.com.br>"
   ).trim();
 
   if (!apiKey) {
@@ -72,7 +78,10 @@ async function sendCommercialPasswordResetEmail(params: {
     );
   }
 
-  const firstName = String(params.name || "").trim().split(/\s+/)[0] || "cliente";
+  const firstName =
+    String(params.name || "")
+      .trim()
+      .split(/\s+/)[0] || "cliente";
   const safeName = escapeEmailHtml(firstName);
   const safeResetUrl = escapeEmailHtml(params.resetUrl);
   const logoUrl = "https://notenote.com.br/brand/note-note-logo-official.png";
@@ -168,12 +177,17 @@ async function sendCommercialPasswordResetEmail(params: {
 }
 
 async function handlePasswordResetRequest(req: any, res: any, body: any) {
-  const email = String(body?.email ?? "").trim().toLowerCase();
+  const email = String(body?.email ?? "")
+    .trim()
+    .toLowerCase();
   const captchaToken = String(body?.captchaToken ?? "");
   const captchaAnswer = String(body?.captchaAnswer ?? "");
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return sendJson(res, 400, { success: false, message: "Informe seu e-mail cadastrado." });
+    return sendJson(res, 400, {
+      success: false,
+      message: "Informe seu e-mail cadastrado.",
+    });
   }
   if (!verifyLoginCaptcha(captchaToken, captchaAnswer)) {
     return sendJson(res, 400, {
@@ -196,7 +210,8 @@ async function handlePasswordResetRequest(req: any, res: any, body: any) {
   if (!user || user.loginMethod !== "commercial_signup" || !user.passwordHash) {
     return sendJson(res, 200, {
       success: true,
-      message: "Se este e-mail estiver vinculado a uma conta comercial, enviaremos as instruções de recuperação.",
+      message:
+        "Se este e-mail estiver vinculado a uma conta comercial, enviaremos as instruções de recuperação.",
     });
   }
 
@@ -229,7 +244,8 @@ async function handlePasswordResetRequest(req: any, res: any, body: any) {
 
   return sendJson(res, 200, {
     success: true,
-    message: "Enviamos um link de recuperação para o e-mail cadastrado. Ele é válido por 30 minutos.",
+    message:
+      "Enviamos um link de recuperação para o e-mail cadastrado. Ele é válido por 30 minutos.",
   });
 }
 
@@ -238,12 +254,16 @@ async function handlePasswordReset(res: any, body: any) {
   const password = String(body?.password ?? "");
 
   if (!token) {
-    return sendJson(res, 400, { success: false, message: "Link de recuperação inválido." });
+    return sendJson(res, 400, {
+      success: false,
+      message: "Link de recuperação inválido.",
+    });
   }
   if (!isValidCommercialPassword(password)) {
     return sendJson(res, 400, {
       success: false,
-      message: "A nova senha deve ter no mínimo 8 caracteres, uma letra maiúscula e um número.",
+      message:
+        "A nova senha deve ter no mínimo 8 caracteres, uma letra maiúscula e um número.",
     });
   }
 
@@ -344,7 +364,9 @@ async function provisionCommercialDatabasesOnFirstLogin(userId: number) {
     const planValue = String(target.plan || "");
     if (!isPlan(planValue)) {
       throw Object.assign(
-        new Error("O plano comercial desta conta é inválido. Contate o Super Admin."),
+        new Error(
+          "O plano comercial desta conta é inválido. Contate o Super Admin."
+        ),
         { statusCode: 409 }
       );
     }
@@ -374,7 +396,9 @@ async function provisionCommercialDatabasesOnFirstLogin(userId: number) {
     }
 
     const createdDatabases: Array<{ id: number; name: string }> = [];
-    let hasActiveDatabase = existingAccess.rows.some((row: any) => row.isActive);
+    let hasActiveDatabase = existingAccess.rows.some(
+      (row: any) => row.isActive
+    );
 
     for (
       let position = existingAccess.rows.length + 1;
@@ -522,12 +546,17 @@ async function provisionCommercialDatabasesOnFirstLogin(userId: number) {
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
-    return sendJson(res, 405, { success: false, message: "Método não permitido" });
+    return sendJson(res, 405, {
+      success: false,
+      message: "Método não permitido",
+    });
   }
 
   try {
     const body = await readJsonBody(req);
-    const action = String(body?.action ?? "login").trim().toLowerCase();
+    const action = String(body?.action ?? "login")
+      .trim()
+      .toLowerCase();
 
     if (action === "request_reset") {
       return await handlePasswordResetRequest(req, res, body);
@@ -536,7 +565,10 @@ export default async function handler(req: any, res: any) {
       return await handlePasswordReset(res, body);
     }
     if (action !== "login") {
-      return sendJson(res, 400, { success: false, message: "Ação de autenticação inválida." });
+      return sendJson(res, 400, {
+        success: false,
+        message: "Ação de autenticação inválida.",
+      });
     }
 
     const username = String(body?.username ?? "").trim();
@@ -627,12 +659,36 @@ export default async function handler(req: any, res: any) {
 
     if (!user.isActive) {
       if (user.loginMethod === "commercial_signup") {
-        const pendingRows = await sql`SELECT plan,status,"billingMethod","checkoutUrl","providerStatus","pixQrCode","pixQrCodeBase64","pixExpiresAt","trialEndsAt" FROM commercial_subscriptions WHERE "userId"=${user.id} LIMIT 1`;
+        const pendingRows =
+          await sql`SELECT plan,status,"billingMethod","checkoutUrl","providerStatus","pixQrCode","pixQrCodeBase64","pixExpiresAt","trialEndsAt" FROM commercial_subscriptions WHERE "userId"=${user.id} LIMIT 1`;
         const pending = pendingRows[0] as any;
-        if (pending && ["active", "paid"].includes(String(pending.status))) { await sql`UPDATE users SET "isActive"=true,"updatedAt"=NOW() WHERE id=${user.id}`; user.isActive=true; }
-        else if (pending) return sendJson(res,402,{success:false,paymentPending:true,message:"Seu cadastro foi encontrado. Conclua a etapa de pagamento para liberar o primeiro acesso.",payment:{plan:pending.plan,status:pending.status,billingMethod:pending.billingMethod,checkoutUrl:pending.checkoutUrl,providerStatus:pending.providerStatus,pixQrCode:pending.pixQrCode,pixQrCodeBase64:pending.pixQrCodeBase64,pixExpiresAt:pending.pixExpiresAt,trialEndsAt:pending.trialEndsAt}});
+        if (pending && ["active", "paid"].includes(String(pending.status))) {
+          await sql`UPDATE users SET "isActive"=true,"updatedAt"=NOW() WHERE id=${user.id}`;
+          user.isActive = true;
+        } else if (pending)
+          return sendJson(res, 402, {
+            success: false,
+            paymentPending: true,
+            message:
+              "Seu cadastro foi encontrado. Conclua a etapa de pagamento para liberar o primeiro acesso.",
+            payment: {
+              plan: pending.plan,
+              status: pending.status,
+              billingMethod: pending.billingMethod,
+              checkoutUrl: pending.checkoutUrl,
+              providerStatus: pending.providerStatus,
+              pixQrCode: pending.pixQrCode,
+              pixQrCodeBase64: pending.pixQrCodeBase64,
+              pixExpiresAt: pending.pixExpiresAt,
+              trialEndsAt: pending.trialEndsAt,
+            },
+          });
       }
-      if (!user.isActive) return sendJson(res,403,{success:false,message:"Usuário desativado."});
+      if (!user.isActive)
+        return sendJson(res, 403, {
+          success: false,
+          message: "Usuário desativado.",
+        });
     }
 
     if (user.loginMethod === "commercial_signup") {
