@@ -8,14 +8,22 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckCircle2, CreditCard, Loader2, Mail, QrCode, ShieldCheck } from "lucide-react";
+import {
+  CheckCircle2,
+  CreditCard,
+  Loader2,
+  Mail,
+  QrCode,
+  ShieldCheck,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
 
 export default function Login() {
   const [, setLocation] = useLocation();
-  const resetToken = new URLSearchParams(window.location.search).get("reset")?.trim() || "";
+  const resetToken =
+    new URLSearchParams(window.location.search).get("reset")?.trim() || "";
   const [isLoading, setIsLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [username, setUsername] = useState("");
@@ -86,8 +94,17 @@ export default function Login() {
       });
 
       const result = await response.json();
-      if (result?.paymentPending) { setPendingPayment(result.payment || {}); toast.info(result?.message || "Conclua o pagamento para liberar o primeiro acesso."); return; }
-      if (!response.ok || !result?.success) { throw new Error(result?.message || "Usuário ou senha inválidos."); }
+      if (result?.paymentPending) {
+        setPendingPayment(result.payment || {});
+        toast.info(
+          result?.message ||
+            "Conclua o pagamento para liberar o primeiro acesso."
+        );
+        return;
+      }
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Usuário ou senha inválidos.");
+      }
 
       toast.success("Login realizado com sucesso!");
       setLocation("/dashboard");
@@ -119,12 +136,16 @@ export default function Login() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Não foi possível solicitar a recuperação.");
+        throw new Error(
+          result?.message || "Não foi possível solicitar a recuperação."
+        );
       }
       setRecoverySent(true);
       toast.success(result.message || "Verifique seu e-mail.");
     } catch (error: any) {
-      toast.error(error?.message || "Não foi possível solicitar a recuperação.");
+      toast.error(
+        error?.message || "Não foi possível solicitar a recuperação."
+      );
       resetCaptcha();
     } finally {
       setIsLoading(false);
@@ -210,7 +231,11 @@ export default function Login() {
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle>
-              {resetToken ? "Criar nova senha" : showRecovery ? "Recuperar senha" : "Bem-vindo"}
+              {resetToken
+                ? "Criar nova senha"
+                : showRecovery
+                  ? "Recuperar senha"
+                  : "Bem-vindo"}
             </CardTitle>
             <CardDescription>
               {resetToken
@@ -230,9 +255,16 @@ export default function Login() {
                   </div>
                   <div>
                     <p className="font-bold text-slate-900">Senha alterada</p>
-                    <p className="mt-1 text-sm text-muted-foreground">Sua nova senha já pode ser usada para entrar no Note Note.</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Sua nova senha já pode ser usada para entrar no Note Note.
+                    </p>
                   </div>
-                  <Button className="w-full" onClick={() => setLocation("/login")}>Ir para o login</Button>
+                  <Button
+                    className="w-full"
+                    onClick={() => setLocation("/login")}
+                  >
+                    Ir para o login
+                  </Button>
                 </div>
               ) : (
                 <form onSubmit={resetCommercialPassword} className="space-y-4">
@@ -249,13 +281,39 @@ export default function Login() {
                       className="mt-2"
                     />
                     <div className="mt-3 grid gap-1 text-xs">
-                      <span className={resetRules.length ? "text-emerald-700" : "text-slate-500"}>✓ Mínimo 8 caracteres</span>
-                      <span className={resetRules.uppercase ? "text-emerald-700" : "text-slate-500"}>✓ Pelo menos 1 letra maiúscula</span>
-                      <span className={resetRules.number ? "text-emerald-700" : "text-slate-500"}>✓ Pelo menos 1 número</span>
+                      <span
+                        className={
+                          resetRules.length
+                            ? "text-emerald-700"
+                            : "text-slate-500"
+                        }
+                      >
+                        ✓ Mínimo 8 caracteres
+                      </span>
+                      <span
+                        className={
+                          resetRules.uppercase
+                            ? "text-emerald-700"
+                            : "text-slate-500"
+                        }
+                      >
+                        ✓ Pelo menos 1 letra maiúscula
+                      </span>
+                      <span
+                        className={
+                          resetRules.number
+                            ? "text-emerald-700"
+                            : "text-slate-500"
+                        }
+                      >
+                        ✓ Pelo menos 1 número
+                      </span>
                     </div>
                   </div>
                   <div>
-                    <Label htmlFor="confirm-new-password">Confirmar nova senha</Label>
+                    <Label htmlFor="confirm-new-password">
+                      Confirmar nova senha
+                    </Label>
                     <Input
                       id="confirm-new-password"
                       type="password"
@@ -268,7 +326,14 @@ export default function Login() {
                     />
                   </div>
                   <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Salvando...</> : "Alterar senha"}
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      "Alterar senha"
+                    )}
                   </Button>
                 </form>
               )
@@ -279,9 +344,13 @@ export default function Login() {
                     <Mail className="h-7 w-7" />
                   </div>
                   <div>
-                    <p className="font-bold text-slate-900">Confira seu e-mail</p>
+                    <p className="font-bold text-slate-900">
+                      Confira seu e-mail
+                    </p>
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                      Se o endereço estiver vinculado a uma conta comercial, você receberá um link válido por 30 minutos para criar uma nova senha.
+                      Se o endereço estiver vinculado a uma conta comercial,
+                      você receberá um link válido por 30 minutos para criar uma
+                      nova senha.
                     </p>
                   </div>
                   <Button
@@ -316,10 +385,21 @@ export default function Login() {
                   {captchaBox}
                   <div className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4 text-xs leading-5 text-blue-950">
                     <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>A recuperação por e-mail é destinada às contas contratadas pelo site. O link expira em 30 minutos e só pode ser usado uma vez.</span>
+                    <span>
+                      A recuperação por e-mail é destinada às contas contratadas
+                      pelo site. O link expira em 30 minutos e só pode ser usado
+                      uma vez.
+                    </span>
                   </div>
                   <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enviando...</> : "Enviar link de recuperação"}
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Enviando...
+                      </>
+                    ) : (
+                      "Enviar link de recuperação"
+                    )}
                   </Button>
                   <Button
                     type="button"
@@ -335,7 +415,96 @@ export default function Login() {
                 </form>
               )
             ) : pendingPayment ? (
-              <div className="space-y-5"><div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-700">{pendingPayment.billingMethod === "pix_annual" ? <QrCode className="h-7 w-7" /> : <CreditCard className="h-7 w-7" />}</div><p className="mt-4 text-lg font-black text-slate-900">Continue de onde parou</p><p className="mt-2 text-sm leading-6 text-slate-600">Seu cadastro já está salvo, mas o primeiro acesso só será liberado depois que todas as etapas de pagamento forem concluídas.</p></div><div className="rounded-xl border bg-white p-4 text-sm"><p><strong>Plano:</strong> {String(pendingPayment.plan || "").toUpperCase()}</p><p className="mt-1"><strong>Etapa:</strong> {pendingPayment.billingMethod === "pix_annual" ? "Pagamento anual via Pix" : "Cadastro/validação do cartão"}</p><p className="mt-1"><strong>Status:</strong> {pendingPayment.providerStatus || pendingPayment.status || "Pendente"}</p></div>{pendingPayment.billingMethod === "pix_annual" && pendingPayment.pixQrCodeBase64 ? <img src={`data:image/png;base64,${pendingPayment.pixQrCodeBase64}`} alt="QR Code Pix" className="mx-auto h-56 w-56 rounded-xl border bg-white p-2" /> : null}{pendingPayment.billingMethod === "pix_annual" && pendingPayment.pixQrCode ? <div className="space-y-2"><Label>Código Pix copia e cola</Label><Input readOnly value={pendingPayment.pixQrCode} onFocus={e=>e.currentTarget.select()} /><Button type="button" variant="outline" className="w-full" onClick={()=>navigator.clipboard.writeText(pendingPayment.pixQrCode)}>Copiar código Pix</Button></div> : null}{pendingPayment.checkoutUrl ? <Button type="button" className="w-full" onClick={()=>window.location.href=pendingPayment.checkoutUrl}>{pendingPayment.billingMethod === "pix_annual" ? "Abrir cobrança no Asaas" : "Continuar cadastro do cartão"}</Button> : null}<Button type="button" variant="outline" className="w-full" onClick={()=>{setPendingPayment(null); resetCaptcha();}}>Voltar ao login</Button></div>
+              <div className="space-y-5">
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-center">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                    {pendingPayment.billingMethod === "pix_annual" ? (
+                      <QrCode className="h-7 w-7" />
+                    ) : (
+                      <CreditCard className="h-7 w-7" />
+                    )}
+                  </div>
+                  <p className="mt-4 text-lg font-black text-slate-900">
+                    Continue de onde parou
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Seu cadastro já está salvo, mas o primeiro acesso só será
+                    liberado depois que todas as etapas de pagamento forem
+                    concluídas.
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-white p-4 text-sm">
+                  <p>
+                    <strong>Plano:</strong>{" "}
+                    {String(pendingPayment.plan || "").toUpperCase()}
+                  </p>
+                  <p className="mt-1">
+                    <strong>Etapa:</strong>{" "}
+                    {pendingPayment.billingMethod === "pix_annual"
+                      ? "Pagamento anual via Pix"
+                      : "Cadastro/validação do cartão"}
+                  </p>
+                  <p className="mt-1">
+                    <strong>Status:</strong>{" "}
+                    {pendingPayment.providerStatus ||
+                      pendingPayment.status ||
+                      "Pendente"}
+                  </p>
+                </div>
+                {pendingPayment.billingMethod === "pix_annual" &&
+                pendingPayment.pixQrCodeBase64 ? (
+                  <img
+                    src={`data:image/png;base64,${pendingPayment.pixQrCodeBase64}`}
+                    alt="QR Code Pix"
+                    className="mx-auto h-56 w-56 rounded-xl border bg-white p-2"
+                  />
+                ) : null}
+                {pendingPayment.billingMethod === "pix_annual" &&
+                pendingPayment.pixQrCode ? (
+                  <div className="space-y-2">
+                    <Label>Código Pix copia e cola</Label>
+                    <Input
+                      readOnly
+                      value={pendingPayment.pixQrCode}
+                      onFocus={e => e.currentTarget.select()}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() =>
+                        navigator.clipboard.writeText(pendingPayment.pixQrCode)
+                      }
+                    >
+                      Copiar código Pix
+                    </Button>
+                  </div>
+                ) : null}
+                {pendingPayment.checkoutUrl ? (
+                  <Button
+                    type="button"
+                    className="w-full"
+                    onClick={() =>
+                      (window.location.href = pendingPayment.checkoutUrl)
+                    }
+                  >
+                    {pendingPayment.billingMethod === "pix_annual"
+                      ? "Abrir cobrança no Asaas"
+                      : "Continuar cadastro do cartão"}
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setPendingPayment(null);
+                    resetCaptcha();
+                  }}
+                >
+                  Voltar ao login
+                </Button>
+              </div>
             ) : (
               <>
                 <form onSubmit={handleLogin} className="space-y-4">
@@ -393,18 +562,27 @@ export default function Login() {
                 </Button>
 
                 <div className="relative py-2">
-                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t" /></div>
-                  <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">Novo cliente</span></div>
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-card px-2 text-muted-foreground">
+                      Novo cliente
+                    </span>
+                  </div>
                 </div>
 
                 <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 text-center">
-                  <p className="text-sm font-semibold text-slate-800">Quer assinar o Note Note?</p>
+                  <p className="text-sm font-semibold text-slate-800">
+                    Novo no Note Note?
+                  </p>
                   <p className="mt-1 text-xs leading-5 text-slate-600">
-                    Escolha Basic ou Plus e crie seu cadastro comercial com seus dados de acesso.
+                    Crie uma conta grátis com 1 banco de dados ou escolha um
+                    plano sem anúncios.
                   </p>
                   <Link href="/planos">
                     <a className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-lg border border-blue-200 bg-white px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-100">
-                      Cadastre-se para assinar
+                      Cadastre-se grátis
                     </a>
                   </Link>
                 </div>

@@ -900,14 +900,18 @@ async function getCommercialCustomerDatabases() {
 async function isCommercialCustomerDatabase(id) {
   const db = await getDb();
   if (!db) return false;
-  const rows = await db.select({ id: databases.id }).from(databases).innerJoin(users, eq(databases.createdBy, users.id)).where(and(eq(databases.id, id), eq(users.loginMethod, "commercial_signup"))).limit(1);
+  const rows = await db.select({ id: databases.id }).from(databases).innerJoin(users, eq(databases.createdBy, users.id)).where(
+    and(eq(databases.id, id), eq(users.loginMethod, "commercial_signup"))
+  ).limit(1);
   return Boolean(rows[0]);
 }
 async function getDatabasesForUser(userId, role) {
   const db = await getDb();
   if (!db) return [];
   if (role === "super_admin") {
-    const rows = await db.select({ database: databases }).from(databases).leftJoin(users, eq(databases.createdBy, users.id)).where(sql`COALESCE(${users.loginMethod}, 'local') NOT IN ('commercial_signup', 'commercial_subuser')`).orderBy(desc(databases.createdAt));
+    const rows = await db.select({ database: databases }).from(databases).leftJoin(users, eq(databases.createdBy, users.id)).where(
+      sql`COALESCE(${users.loginMethod}, 'local') NOT IN ('commercial_signup', 'commercial_subuser')`
+    ).orderBy(desc(databases.createdAt));
     return rows.map((row) => row.database);
   }
   const assigned = await db.select({ database: databases }).from(userDatabaseAccess).innerJoin(databases, eq(userDatabaseAccess.databaseId, databases.id)).where(eq(userDatabaseAccess.userId, userId));
@@ -1735,9 +1739,15 @@ var productInventorySchemaPromise = null;
 async function ensureProductInventorySchema(db) {
   if (productInventorySchemaPromise) return productInventorySchemaPromise;
   productInventorySchemaPromise = (async () => {
-    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "color" varchar(80)`);
-    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockQuantity" numeric(15,3) DEFAULT '0.000' NOT NULL`);
-    await db.execute(sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockUnit" varchar(20) DEFAULT 'unit' NOT NULL`);
+    await db.execute(
+      sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "color" varchar(80)`
+    );
+    await db.execute(
+      sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockQuantity" numeric(15,3) DEFAULT '0.000' NOT NULL`
+    );
+    await db.execute(
+      sql`ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "stockUnit" varchar(20) DEFAULT 'unit' NOT NULL`
+    );
   })().catch((error) => {
     productInventorySchemaPromise = null;
     throw error;
@@ -2160,6 +2170,7 @@ async function getDashboardStats(databaseId) {
       for (let installmentNumber = 1; installmentNumber <= loan.installments; installmentNumber += 1) {
         if (paidKeys.has(`loan:${loan.id}:${installmentNumber}`)) continue;
         dueItems.push({
+          contractId: loan.id,
           clientId: loan.clientId,
           clientName: clientNames.get(loan.clientId) ?? `Cliente #${loan.clientId}`,
           amount: Number(loan.installmentAmount),
@@ -2181,6 +2192,7 @@ async function getDashboardStats(databaseId) {
         if (paidKeys.has(`financing:${financing.id}:${installmentNumber}`))
           continue;
         dueItems.push({
+          contractId: financing.id,
           clientId: financing.clientId,
           clientName: clientNames.get(financing.clientId) ?? `Cliente #${financing.clientId}`,
           amount: Number(financing.installmentAmount),
@@ -2191,7 +2203,8 @@ async function getDashboardStats(databaseId) {
             "month"
           ),
           installmentNumber,
-          contractType: "financiamento"
+          contractType: "financiamento",
+          financingAssetType: financing.assetType === "product" ? "product" : "vehicle"
         });
       }
     }
@@ -2266,6 +2279,15 @@ async function getDashboardStats(databaseId) {
         installmentsOverdue: overdueItems.filter(
           (item) => item.contractType === "financiamento"
         ).length,
+        overdueAmount: roundMoney(
+          overdueItems.filter((item) => item.contractType === "financiamento").reduce((sum, item) => sum + item.amount, 0)
+        ),
+        vehicleOverdueAmount: roundMoney(
+          overdueItems.filter((item) => item.financingAssetType === "vehicle").reduce((sum, item) => sum + item.amount, 0)
+        ),
+        productOverdueAmount: roundMoney(
+          overdueItems.filter((item) => item.financingAssetType === "product").reduce((sum, item) => sum + item.amount, 0)
+        ),
         totalContracts: roundMoney(totalFinancingContracts),
         totalPaid: roundMoney(totalFinancingPaid),
         remainingBalance: roundMoney(
@@ -2301,7 +2323,7 @@ async function createLocalUser(data) {
   try {
     const result = await db.insert(users).values({
       username: data.username,
-      email: data.email,
+      email: data.email?.trim() || null,
       name: data.name,
       passwordHash: data.passwordHash,
       loginMethod: "local",
@@ -2313,6 +2335,13 @@ async function createLocalUser(data) {
       canGenerateReports: data.canGenerateReports ?? false,
       canAccessSettings: data.canAccessSettings ?? false,
       dashboardOnly: data.dashboardOnly ?? false,
+      adminCanControlPanel: data.adminCanControlPanel ?? false,
+      adminCanSubscriptions: data.adminCanSubscriptions ?? false,
+      adminCanMarketing: data.adminCanMarketing ?? false,
+      adminCanSupport: data.adminCanSupport ?? false,
+      adminCanUsers: data.adminCanUsers ?? false,
+      adminCanDatabases: data.adminCanDatabases ?? false,
+      adminCanAudit: data.adminCanAudit ?? false,
       isActive: true,
       emailVerified: false,
       lastSignedIn: /* @__PURE__ */ new Date()
@@ -2481,7 +2510,10 @@ var adminProcedure2 = protectedProcedure2.use(({ ctx, next }) => {
 });
 var usersAdminProcedure = protectedProcedure2.use(({ ctx, next }) => {
   if (ctx.user.role !== "super_admin" && !ctx.user.adminCanUsers) {
-    throw new TRPCError3({ code: "FORBIDDEN", message: "Sem autoriza\xE7\xE3o para administrar usu\xE1rios." });
+    throw new TRPCError3({
+      code: "FORBIDDEN",
+      message: "Sem autoriza\xE7\xE3o para administrar usu\xE1rios."
+    });
   }
   return next({ ctx });
 });
@@ -2679,7 +2711,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
     create: superAdminProcedure.input(
       z2.object({
         username: z2.string().trim().min(3).max(100),
-        email: z2.string().trim().email(),
+        email: z2.union([z2.string().trim().email(), z2.literal("")]).default(""),
         name: z2.string().trim().min(1).max(200),
         password: z2.string().min(6),
         role: z2.enum(["user", "admin"]).default("user"),
@@ -2706,7 +2738,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           message: "Nome de usu\xE1rio j\xE1 cadastrado."
         });
       }
-      if (await getUserByEmail(input.email)) {
+      if (input.email && await getUserByEmail(input.email)) {
         throw new TRPCError3({
           code: "CONFLICT",
           message: "E-mail j\xE1 cadastrado."
@@ -2964,7 +2996,10 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           details: "Senha do Super Admin inv\xE1lida para acessar bancos de clientes.",
           status: "failed"
         });
-        throw new TRPCError3({ code: "UNAUTHORIZED", message: "Senha do Super Admin inv\xE1lida." });
+        throw new TRPCError3({
+          code: "UNAUTHORIZED",
+          message: "Senha do Super Admin inv\xE1lida."
+        });
       }
       const rows = await getCommercialCustomerDatabases();
       await createAuditLog({
@@ -2977,13 +3012,24 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
       });
       return rows;
     }),
-    enterCustomerDatabase: superAdminProcedure.input(z2.object({ id: z2.number().int().positive(), password: z2.string().min(1) })).mutation(async ({ input, ctx }) => {
+    enterCustomerDatabase: superAdminProcedure.input(
+      z2.object({
+        id: z2.number().int().positive(),
+        password: z2.string().min(1)
+      })
+    ).mutation(async ({ input, ctx }) => {
       const current = await getUserById(ctx.user.id);
       if (!current?.passwordHash || !await bcrypt.compare(input.password, current.passwordHash)) {
-        throw new TRPCError3({ code: "UNAUTHORIZED", message: "Senha do Super Admin inv\xE1lida." });
+        throw new TRPCError3({
+          code: "UNAUTHORIZED",
+          message: "Senha do Super Admin inv\xE1lida."
+        });
       }
       if (!await isCommercialCustomerDatabase(input.id)) {
-        throw new TRPCError3({ code: "BAD_REQUEST", message: "Este banco n\xE3o pertence a uma conta comercial de cliente." });
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Este banco n\xE3o pertence a uma conta comercial de cliente."
+        });
       }
       await setActiveDatabase(input.id);
       const dbInfo = await getDatabaseById(input.id);
@@ -3890,6 +3936,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         vehicleFinancingId: z2.number().int().positive().optional(),
         installmentNumber: z2.coerce.number().int().positive(),
         amount: z2.string(),
+        discountAmount: z2.coerce.number().min(0).optional(),
         paymentDate: z2.string(),
         dueDate: z2.string(),
         status: z2.enum(["pago", "pendente", "atrasado"]),
@@ -3937,6 +3984,8 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           code: "BAD_REQUEST",
           message: "O valor do pagamento deve ser maior que zero."
         });
+      const discountAmount = Number(input.discountAmount || 0);
+      const settlementAmount = roundMoney(paymentAmount + discountAmount);
       const paymentDate = new Date(input.paymentDate);
       const dueDate = new Date(input.dueDate);
       if (Number.isNaN(paymentDate.getTime()) || Number.isNaN(dueDate.getTime()))
@@ -3989,20 +4038,26 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0
         ) - contractPrincipal
       );
-      const priorPaid = priorPayments.filter((payment) => payment.status === "pago").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+      const priorPaid = priorPayments.filter((payment) => payment.status === "pago").reduce(
+        (sum, payment) => sum + Math.max(
+          Number(payment.amount || 0),
+          Number(payment.principalAmount || 0) + Number(payment.interestAmount || 0)
+        ),
+        0
+      );
       const balanceBefore = loan ? roundMoney(contractPrincipal + accruedInterest) : Math.max(
         0,
         Number(
           vehicleFinancing?.totalAmount || vehicleFinancing?.financedAmount || 0
         ) - priorPaid
       );
-      if (input.status === "pago" && paymentAmount > balanceBefore + 0.01)
+      if (input.status === "pago" && settlementAmount > balanceBefore + 0.01)
         throw new TRPCError3({
           code: "BAD_REQUEST",
           message: "O pagamento n\xE3o pode exceder o saldo do contrato."
         });
       const allocation = input.status === "pago" ? loan ? allocateBalancePayment(
-        paymentAmount,
+        settlementAmount,
         accruedInterest,
         contractPrincipal
       ) : (() => {
@@ -4016,11 +4071,11 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
           ) / vehicleFinancing.installments
         );
         const regularQuota = Math.min(
-          paymentAmount,
+          settlementAmount,
           installmentValue
         );
         const extraAmortization = roundMoney(
-          Math.max(0, paymentAmount - regularQuota)
+          Math.max(0, settlementAmount - regularQuota)
         );
         const interestAmount = roundMoney(
           Math.min(regularQuota, installmentInterest)
@@ -4031,7 +4086,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
             Math.max(0, regularQuota - interestAmount) + extraAmortization
           ),
           remainingBalance: roundMoney(
-            Math.max(0, balanceBefore - paymentAmount)
+            Math.max(0, balanceBefore - settlementAmount)
           )
         };
       })() : {
@@ -4072,7 +4127,10 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         principalAmount: allocation.principalAmount.toFixed(2),
         interestAmount: allocation.interestAmount.toFixed(2),
         remainingBalance: allocation.remainingBalance.toFixed(2),
-        notes: input.notes,
+        notes: discountAmount > 0 ? [
+          input.notes,
+          `Desconto concedido: R$ ${discountAmount.toFixed(2).replace(".", ",")}`
+        ].filter(Boolean).join(" \xB7 ") : input.notes,
         agentId,
         commissionPercentage: commissionPercentage.toFixed(2),
         commissionAmount: commissionAmount.toFixed(2),
@@ -4128,7 +4186,7 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
         action: "create_payment",
         entity: "payments",
         databaseId: activeDb.id,
-        details: `Pagamento registrado: R$ ${paymentAmount.toFixed(2)}; comiss\xE3o: R$ ${commissionAmount.toFixed(2)}`,
+        details: `Pagamento registrado: R$ ${paymentAmount.toFixed(2)}; desconto: R$ ${discountAmount.toFixed(2)}; comiss\xE3o: R$ ${commissionAmount.toFixed(2)}`,
         status: "success"
       });
       return result;
@@ -5004,6 +5062,9 @@ Link v\xE1lido por 30 minutos: ${input.origin}/login?reset=${token}`
             financings: 0,
             installmentsPaid: 0,
             installmentsOverdue: 0,
+            overdueAmount: 0,
+            vehicleOverdueAmount: 0,
+            productOverdueAmount: 0,
             totalContracts: 0,
             totalPaid: 0,
             remainingBalance: 0

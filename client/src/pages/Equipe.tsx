@@ -2,10 +2,23 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Edit3, Loader2, Plus, ShieldCheck, Trash2, UserCheck, Users } from "lucide-react";
+import {
+  Edit3,
+  Loader2,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  UserCheck,
+  Users,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -31,7 +44,7 @@ type Member = Permissions & {
 
 type TeamData = {
   success: boolean;
-  plan: "basic" | "plus";
+  plan: "free" | "basic" | "plus";
   status: string;
   isOwner: boolean;
   canManageTeam: boolean;
@@ -81,12 +94,14 @@ const permissionOptions: Array<{
   {
     key: "canView",
     title: "Visualizar",
-    description: "Consultar clientes, contratos, produtos, veículos e demais informações.",
+    description:
+      "Consultar clientes, contratos, produtos, veículos e demais informações.",
   },
   {
     key: "canInsert",
     title: "Fazer lançamentos e cadastros",
-    description: "Cadastrar clientes, empréstimos, produtos, veículos, pagamentos e movimentações permitidas.",
+    description:
+      "Cadastrar clientes, empréstimos, produtos, veículos, pagamentos e movimentações permitidas.",
   },
   {
     key: "canEdit",
@@ -106,19 +121,22 @@ const permissionOptions: Array<{
   {
     key: "canManageUsers",
     title: "Administrar usuários da conta",
-    description: "Criar e editar usuários da própria conta Plus, respeitando o limite do plano.",
+    description:
+      "Criar e editar usuários da própria conta Plus, respeitando o limite do plano.",
     sensitive: true,
   },
   {
     key: "canManageDatabases",
     title: "Editar ou apagar bancos",
-    description: "Renomear, limpar memória, restaurar ou excluir bancos do contratante.",
+    description:
+      "Renomear, limpar memória, restaurar ou excluir bancos do contratante.",
     sensitive: true,
   },
   {
     key: "canDeleteCashFlow",
     title: "Apagar lançamentos do caixa",
-    description: "Excluir movimentações do fluxo de caixa com registro em auditoria.",
+    description:
+      "Excluir movimentações do fluxo de caixa com registro em auditoria.",
     sensitive: true,
   },
 ];
@@ -141,11 +159,17 @@ export default function Equipe() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Não foi possível carregar os usuários da conta.");
+        throw new Error(
+          result?.message || "Não foi possível carregar os usuários da conta."
+        );
       }
       setData(result);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Não foi possível carregar a equipe.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível carregar a equipe."
+      );
     } finally {
       setLoading(false);
     }
@@ -156,7 +180,11 @@ export default function Equipe() {
   }, []);
 
   const remaining = useMemo(
-    () => Math.max(0, Number(data?.teamLimit || 0) - Number(data?.members.length || 0)),
+    () =>
+      Math.max(
+        0,
+        Number(data?.teamLimit || 0) - Number(data?.members.length || 0)
+      ),
     [data]
   );
 
@@ -226,14 +254,20 @@ export default function Equipe() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Não foi possível salvar o usuário.");
+        throw new Error(
+          result?.message || "Não foi possível salvar o usuário."
+        );
       }
       toast.success(result.message || "Usuário salvo.");
       setOpen(false);
       setForm(emptyForm());
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Não foi possível salvar o usuário.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar o usuário."
+      );
     } finally {
       setSaving(false);
     }
@@ -253,17 +287,24 @@ export default function Equipe() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Não foi possível alterar o usuário.");
+        throw new Error(
+          result?.message || "Não foi possível alterar o usuário."
+        );
       }
       toast.success(result.message);
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Não foi possível alterar o usuário.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível alterar o usuário."
+      );
     }
   };
 
   const removeMember = async (member: Member) => {
-    if (!window.confirm(`Excluir o usuário “${member.username}” da sua conta?`)) return;
+    if (!window.confirm(`Excluir o usuário “${member.username}” da sua conta?`))
+      return;
     try {
       const response = await fetch(TEAM_ENDPOINT, {
         method: "POST",
@@ -273,12 +314,18 @@ export default function Equipe() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Não foi possível excluir o usuário.");
+        throw new Error(
+          result?.message || "Não foi possível excluir o usuário."
+        );
       }
       toast.success(result.message);
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Não foi possível excluir o usuário.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível excluir o usuário."
+      );
     }
   };
 
@@ -291,9 +338,13 @@ export default function Equipe() {
               <ShieldCheck className="h-4 w-4" />
               Usuários da sua conta
             </div>
-            <h1 className="mt-2 text-3xl font-black tracking-tight">Equipe e Permissões</h1>
+            <h1 className="mt-2 text-3xl font-black tracking-tight">
+              Equipe e Permissões
+            </h1>
             <p className="mt-2 max-w-3xl text-muted-foreground">
-              No Plus, o contratante pode cadastrar até cinco usuários adicionais e escolher exatamente quais bancos e operações cada pessoa poderá usar.
+              No Plus, o contratante pode cadastrar até cinco usuários
+              adicionais e escolher exatamente quais bancos e operações cada
+              pessoa poderá usar.
             </p>
           </div>
           {data?.canManageTeam && (
@@ -311,12 +362,17 @@ export default function Equipe() {
               Carregando equipe...
             </CardContent>
           </Card>
-        ) : data?.plan === "basic" ? (
+        ) : data?.plan === "basic" || data?.plan === "free" ? (
           <Card className="border-blue-200 bg-blue-50/50">
             <CardContent className="p-6">
-              <h2 className="text-xl font-bold">Plano Basic: uso individual</h2>
+              <h2 className="text-xl font-bold">
+                Plano {data.plan === "free" ? "Grátis" : "Basic"}: uso
+                individual
+              </h2>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                O Basic permite somente o próprio contratante utilizando o sistema. O cadastro de até cinco usuários adicionais e a divisão de permissões entre os seus bancos são benefícios do plano Plus.
+                Este plano permite somente o próprio titular utilizando o
+                sistema. O cadastro de até cinco usuários adicionais e a divisão
+                de permissões entre bancos são benefícios do plano Plus.
               </p>
             </CardContent>
           </Card>
@@ -325,7 +381,9 @@ export default function Equipe() {
             <div className="grid gap-4 sm:grid-cols-3">
               <Card>
                 <CardContent className="p-5">
-                  <p className="text-sm text-muted-foreground">Usuários cadastrados</p>
+                  <p className="text-sm text-muted-foreground">
+                    Usuários cadastrados
+                  </p>
                   <p className="mt-1 text-3xl font-black">
                     {data.members.length}/{data.teamLimit}
                   </p>
@@ -333,7 +391,9 @@ export default function Equipe() {
               </Card>
               <Card>
                 <CardContent className="p-5">
-                  <p className="text-sm text-muted-foreground">Vagas disponíveis</p>
+                  <p className="text-sm text-muted-foreground">
+                    Vagas disponíveis
+                  </p>
                   <p className="mt-1 text-3xl font-black">{remaining}</p>
                 </CardContent>
               </Card>
@@ -342,19 +402,25 @@ export default function Equipe() {
                   <p className="text-sm text-muted-foreground">
                     Bancos disponíveis para compartilhar
                   </p>
-                  <p className="mt-1 text-3xl font-black">{data.databases.length}</p>
+                  <p className="mt-1 text-3xl font-black">
+                    {data.databases.length}
+                  </p>
                 </CardContent>
               </Card>
             </div>
 
             {!data.canManageTeam && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                Você pode consultar esta área, mas não possui permissão do contratante para cadastrar ou editar usuários.
+                Você pode consultar esta área, mas não possui permissão do
+                contratante para cadastrar ou editar usuários.
               </div>
             )}
 
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
-              <strong>Proteção padrão:</strong> usuários criados pelo contratante não podem administrar usuários, editar/apagar bancos nem apagar lançamentos do caixa. Essas três permissões precisam ser liberadas explicitamente pelo contratante.
+              <strong>Proteção padrão:</strong> usuários criados pelo
+              contratante não podem administrar usuários, editar/apagar bancos
+              nem apagar lançamentos do caixa. Essas três permissões precisam
+              ser liberadas explicitamente pelo contratante.
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
@@ -362,8 +428,12 @@ export default function Equipe() {
                 <Card key={member.id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between gap-3">
-                      <span className="truncate">{member.name || member.username}</span>
-                      <Badge variant={member.isActive ? "default" : "secondary"}>
+                      <span className="truncate">
+                        {member.name || member.username}
+                      </span>
+                      <Badge
+                        variant={member.isActive ? "default" : "secondary"}
+                      >
                         {member.isActive ? "Ativo" : "Inativo"}
                       </Badge>
                     </CardTitle>
@@ -395,7 +465,10 @@ export default function Equipe() {
                       {permissionOptions
                         .filter(option => member[option.key])
                         .map(option => (
-                          <div key={option.key} className="flex items-center gap-2 text-xs">
+                          <div
+                            key={option.key}
+                            className="flex items-center gap-2 text-xs"
+                          >
                             <UserCheck className="h-3.5 w-3.5 text-emerald-600" />
                             {option.title}
                           </div>
@@ -403,14 +476,26 @@ export default function Equipe() {
                     </div>
                     {data.canManageTeam && (
                       <div className="flex flex-wrap gap-2 border-t pt-4">
-                        <Button size="sm" variant="outline" onClick={() => openEdit(member)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openEdit(member)}
+                        >
                           <Edit3 className="mr-2 h-4 w-4" />
                           Editar
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => toggleActive(member)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => toggleActive(member)}
+                        >
                           {member.isActive ? "Desativar" : "Ativar"}
                         </Button>
-                        <Button size="sm" variant="destructive" onClick={() => removeMember(member)}>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => removeMember(member)}
+                        >
                           <Trash2 className="mr-2 h-4 w-4" />
                           Excluir
                         </Button>
@@ -423,7 +508,9 @@ export default function Equipe() {
                 <Card className="lg:col-span-2">
                   <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                     <Users className="mb-3 h-10 w-10 text-muted-foreground" />
-                    <p className="font-semibold">Nenhum usuário adicional cadastrado.</p>
+                    <p className="font-semibold">
+                      Nenhum usuário adicional cadastrado.
+                    </p>
                     <p className="mt-1 text-sm text-muted-foreground">
                       Você pode cadastrar até cinco pessoas no plano Plus.
                     </p>
@@ -439,7 +526,9 @@ export default function Equipe() {
         <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {form.id ? "Editar usuário e permissões" : "Cadastrar usuário da conta"}
+              {form.id
+                ? "Editar usuário e permissões"
+                : "Cadastrar usuário da conta"}
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={save} className="space-y-6">
@@ -449,7 +538,10 @@ export default function Equipe() {
                 <Input
                   value={form.name}
                   onChange={event =>
-                    setForm(current => ({ ...current, name: event.target.value }))
+                    setForm(current => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
                   }
                   required
                 />
@@ -459,7 +551,10 @@ export default function Equipe() {
                 <Input
                   value={form.username}
                   onChange={event =>
-                    setForm(current => ({ ...current, username: event.target.value }))
+                    setForm(current => ({
+                      ...current,
+                      username: event.target.value,
+                    }))
                   }
                   required
                 />
@@ -470,7 +565,10 @@ export default function Equipe() {
                   type="email"
                   value={form.email}
                   onChange={event =>
-                    setForm(current => ({ ...current, email: event.target.value }))
+                    setForm(current => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
                   }
                   required
                 />
@@ -481,7 +579,10 @@ export default function Equipe() {
                   type="password"
                   value={form.password}
                   onChange={event =>
-                    setForm(current => ({ ...current, password: event.target.value }))
+                    setForm(current => ({
+                      ...current,
+                      password: event.target.value,
+                    }))
                   }
                   required={!form.id}
                   placeholder="8+ caracteres, maiúscula e número"
@@ -520,23 +621,30 @@ export default function Equipe() {
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 {permissionOptions.map(option => {
                   const viewerCanGrant =
-                    data?.isOwner || Boolean(data?.viewerPermissions?.[option.key]);
+                    data?.isOwner ||
+                    Boolean(data?.viewerPermissions?.[option.key]);
                   return (
                     <label
                       key={option.key}
                       className={`flex items-start gap-3 rounded-xl border p-4 ${
-                        option.sensitive ? "border-amber-200 bg-amber-50/40" : ""
+                        option.sensitive
+                          ? "border-amber-200 bg-amber-50/40"
+                          : ""
                       }`}
                     >
                       <input
                         type="checkbox"
                         className="mt-1 h-4 w-4"
                         checked={form.permissions[option.key]}
-                        onChange={event => setPermission(option.key, event.target.checked)}
+                        onChange={event =>
+                          setPermission(option.key, event.target.checked)
+                        }
                         disabled={!viewerCanGrant}
                       />
                       <span>
-                        <span className="block text-sm font-semibold">{option.title}</span>
+                        <span className="block text-sm font-semibold">
+                          {option.title}
+                        </span>
                         <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                           {option.description}
                         </span>

@@ -22,6 +22,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 
 const plans = {
+  free: {
+    name: "Grátis",
+    monthly: "R$ 0",
+    annualPix: "R$ 0",
+    savings: "",
+    databaseAccess: "1 banco de dados",
+  },
   basic: {
     name: "Basic",
     monthly: "R$ 29,90/mês",
@@ -39,7 +46,7 @@ const plans = {
 } as const;
 
 type PlanId = keyof typeof plans;
-type BillingMethod = "card_monthly" | "pix_annual";
+type BillingMethod = "free" | "card_monthly" | "pix_annual";
 type PixInfo = {
   paymentId: string;
   qrCode: string;
@@ -52,14 +59,27 @@ function readSelectedPlan(): PlanId | null {
   const query = new URLSearchParams(window.location.search)
     .get("plano")
     ?.toLowerCase();
-  if (query === "basic" || query === "plus") return query;
+  if (query === "free" || query === "basic" || query === "plus") return query;
   try {
     const stored = sessionStorage.getItem("notenote:selected-plan");
-    if (stored === "basic" || stored === "plus") return stored;
+    if (stored === "free" || stored === "basic" || stored === "plus")
+      return stored;
   } catch {}
-  return null;
+  return "free";
 }
 function readBillingMethod(): BillingMethod {
+  const selectedPlan = new URLSearchParams(window.location.search)
+    .get("plano")
+    ?.toLowerCase();
+  if (selectedPlan === "free") return "free";
+  if (!selectedPlan) {
+    try {
+      if (sessionStorage.getItem("notenote:selected-plan") === "free")
+        return "free";
+    } catch {
+      return "free";
+    }
+  }
   const query = new URLSearchParams(window.location.search)
     .get("cobranca")
     ?.toLowerCase();
@@ -155,13 +175,16 @@ export default function Cadastro() {
   const fullNameValid = validFullName(name);
   const whatsappValid = validWhatsapp(whatsapp);
   const cpfValid = validCpf(cpf);
+  const isFreePlan = plan === "free";
   const selectedPrice = plan
     ? billingMethod === "pix_annual"
       ? plans[plan].annualPix
       : plans[plan].monthly
     : "";
   const legalAccepted =
-    termsAccepted && privacyAccepted && trialCancellationAccepted;
+    termsAccepted &&
+    privacyAccepted &&
+    (isFreePlan || trialCancellationAccepted);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -173,7 +196,7 @@ export default function Cadastro() {
       return setError(
         "Informe um WhatsApp brasileiro válido com DDD e número iniciado por 9."
       );
-    if (billingMethod === "pix_annual" && !cpfValid)
+    if (!isFreePlan && billingMethod === "pix_annual" && !cpfValid)
       return setError("Informe um CPF válido para gerar o Pix do Asaas.");
     if (!passwordValid)
       return setError("A senha ainda não atende aos requisitos obrigatórios.");
@@ -211,6 +234,10 @@ export default function Cadastro() {
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j?.success)
         throw new Error(j?.message || "Não foi possível concluir o cadastro.");
+      if (isFreePlan) {
+        setSuccess(true);
+        return;
+      }
       const paymentUrl = String(j?.subscription?.checkoutUrl ?? "").trim();
       if (billingMethod === "pix_annual") {
         const pix = j?.subscription?.pix as PixInfo | undefined;
@@ -277,13 +304,20 @@ export default function Cadastro() {
                 <strong>{plans[plan].name}</strong> — {selectedPrice}.
               </p>
               <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-left text-xs text-blue-950">
-                Seu aceite dos Termos de Uso, Política de Privacidade e
-                condições do teste/cancelamento foi registrado.{" "}
+                {isFreePlan
+                  ? "Seu aceite dos Termos de Uso e da Política de Privacidade foi registrado. "
+                  : "Seu aceite dos Termos de Uso, Política de Privacidade e condições do teste/cancelamento foi registrado. "}
                 {marketingOptIn
                   ? "Você também autorizou comunicações promocionais por e-mail."
                   : "Você não autorizou comunicações promocionais por e-mail."}
               </div>
-              {billingMethod === "pix_annual" && pixInfo ? (
+              {isFreePlan ? (
+                <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4 text-left text-sm leading-6 text-blue-950">
+                  Sua conta está ativa, com direito a 1 banco de dados. O plano
+                  grátis exibe anúncios apenas dentro do sistema. Você pode
+                  contratar um plano sem anúncios quando quiser.
+                </div>
+              ) : billingMethod === "pix_annual" && pixInfo ? (
                 <div className="mt-6 text-left">
                   <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
                     <strong>Seu Pix anual foi gerado pelo Asaas.</strong>{" "}
@@ -341,14 +375,16 @@ export default function Cadastro() {
                   condições aceitas.
                 </div>
               )}
-              {billingMethod === "card_monthly" && checkoutUrl && (
-                <a
-                  href={checkoutUrl}
-                  className="mt-6 inline-flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-5 font-bold text-white"
-                >
-                  Continuar no Asaas
-                </a>
-              )}
+              {!isFreePlan &&
+                billingMethod === "card_monthly" &&
+                checkoutUrl && (
+                  <a
+                    href={checkoutUrl}
+                    className="mt-6 inline-flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-5 font-bold text-white"
+                  >
+                    Continuar no Asaas
+                  </a>
+                )}
               <Link href="/login">
                 <a className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl border border-blue-200 px-5 font-bold text-blue-700">
                   Ir para o login
@@ -379,11 +415,14 @@ export default function Cadastro() {
         <Card className="border-blue-100 shadow-2xl shadow-blue-900/10">
           <CardHeader>
             <CardTitle className="text-2xl">
-              Crie sua conta e teste por 7 dias
+              {isFreePlan
+                ? "Crie sua conta grátis"
+                : "Crie sua conta e teste por 7 dias"}
             </CardTitle>
             <CardDescription>
-              Conclua seu cadastro e revise os aceites da contratação antes de
-              continuar.
+              {isFreePlan
+                ? "Comece sem informar cartão e tenha 1 banco de dados exclusivo."
+                : "Conclua seu cadastro e revise os aceites da contratação antes de continuar."}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -403,8 +442,10 @@ export default function Cadastro() {
                   </p>
                 </div>
                 <p className="mt-3 border-t border-blue-200 pt-3 text-sm font-semibold text-blue-950">
-                  Inclui {plans[plan].databaseAccess}. 7 dias grátis para novos
-                  usuários.
+                  Inclui {plans[plan].databaseAccess}.{" "}
+                  {isFreePlan
+                    ? "Sem cartão e com anúncios dentro do sistema."
+                    : "7 dias grátis para novos usuários."}
                 </p>
               </div>
             ) : (
@@ -416,7 +457,7 @@ export default function Cadastro() {
                 .
               </div>
             )}
-            {plan && (
+            {plan && !isFreePlan && (
               <div className="mb-6 grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"
@@ -507,7 +548,7 @@ export default function Cadastro() {
                   className="mt-2"
                 />
               </div>
-              {billingMethod === "pix_annual" && (
+              {!isFreePlan && billingMethod === "pix_annual" && (
                 <div>
                   <Label htmlFor="signup-cpf">CPF do pagador</Label>
                   <Input
@@ -567,7 +608,9 @@ export default function Cadastro() {
               </div>
               <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
                 <p className="font-bold text-slate-900">
-                  Aceites da contratação
+                  {isFreePlan
+                    ? "Termos e privacidade"
+                    : "Aceites da contratação"}
                 </p>
                 <label className="flex items-start gap-3 text-sm">
                   <input
@@ -609,21 +652,23 @@ export default function Cadastro() {
                     .
                   </span>
                 </label>
-                <label className="flex items-start gap-3 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={trialCancellationAccepted}
-                    onChange={e =>
-                      setTrialCancellationAccepted(e.target.checked)
-                    }
-                    className="mt-1 h-4 w-4"
-                  />
-                  <span>
-                    Estou ciente de que o teste gratuito dura{" "}
-                    <strong>7 dias</strong> e li as regras de cancelamento
-                    previstas nos Termos de Uso.
-                  </span>
-                </label>
+                {!isFreePlan && (
+                  <label className="flex items-start gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={trialCancellationAccepted}
+                      onChange={e =>
+                        setTrialCancellationAccepted(e.target.checked)
+                      }
+                      className="mt-1 h-4 w-4"
+                    />
+                    <span>
+                      Estou ciente de que o teste gratuito dura{" "}
+                      <strong>7 dias</strong> e li as regras de cancelamento
+                      previstas nos Termos de Uso.
+                    </span>
+                  </label>
+                )}
                 <div className="border-t border-blue-100 pt-3">
                   <label className="flex items-start gap-3 text-sm">
                     <input
@@ -682,11 +727,12 @@ export default function Cadastro() {
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950">
                 <div className="flex items-center gap-2 font-bold">
                   <ShieldCheck className="h-4 w-4" />
-                  Teste gratuito de 7 dias
+                  {isFreePlan ? "Plano grátis" : "Teste gratuito de 7 dias"}
                 </div>
                 <p className="mt-1">
-                  As condições de cobrança e cancelamento do teste fazem parte
-                  dos Termos aceitos acima.
+                  {isFreePlan
+                    ? "Sem cobrança e sem cartão. Anúncios aparecem somente dentro da conta grátis."
+                    : "As condições de cobrança e cancelamento do teste fazem parte dos Termos aceitos acima."}
                 </p>
               </div>
               <Button
@@ -699,6 +745,8 @@ export default function Cadastro() {
                     <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                     Criando sua conta...
                   </>
+                ) : isFreePlan ? (
+                  "Criar conta grátis"
                 ) : billingMethod === "pix_annual" ? (
                   "Contratar e gerar Pix"
                 ) : (

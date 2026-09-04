@@ -11,14 +11,20 @@ import {
 const MERCADO_PAGO_API = "https://api.mercadopago.com";
 const ASAAS_API = "https://api.asaas.com/v3";
 const PLAN_CONFIG = {
-  basic: { label: "Basic", limit: 1, monthlyCents: 2990, annualPixCents: 19990 },
+  free: { label: "Grátis", limit: 1, monthlyCents: 0, annualPixCents: 0 },
+  basic: {
+    label: "Basic",
+    limit: 1,
+    monthlyCents: 2990,
+    annualPixCents: 19990,
+  },
   plus: { label: "Plus", limit: 3, monthlyCents: 4990, annualPixCents: 39990 },
 } as const;
 
 type PlanId = keyof typeof PLAN_CONFIG;
 
 function isPlan(value: unknown): value is PlanId {
-  return value === "basic" || value === "plus";
+  return value === "free" || value === "basic" || value === "plus";
 }
 
 async function ensureTables() {
@@ -68,7 +74,8 @@ async function ensureTables() {
   await sql`CREATE INDEX IF NOT EXISTS site_access_logs_user_idx ON site_access_logs ("userId", "createdAt" DESC)`;
 }
 
-async function getSuperAdmin(req: any) { return getAuthorizedAdmin(req, "subscriptions");
+async function getSuperAdmin(req: any) {
+  return getAuthorizedAdmin(req, "subscriptions");
 }
 
 async function listCommercialAccounts() {
@@ -125,17 +132,24 @@ async function listCommercialAccounts() {
     const planValue = String(row.plan || "");
     const plan: PlanId | null = isPlan(planValue) ? planValue : null;
     const usageMinutes = Number(row.usageMinutes || 0);
-    const trialEndsAt = row.trialEndsAt ? new Date(row.trialEndsAt).getTime() : 0;
-    const trialActive = Boolean(trialEndsAt && trialEndsAt > now && !row.lastPaymentStatus?.includes?.("RECEIVED"));
-    const paymentState = row.status === "past_due"
-      ? "unpaid"
-      : row.status === "canceled"
-        ? "canceled"
-        : trialActive
-          ? "trial"
-          : row.status === "active" || row.status === "paid"
-            ? "paid"
-            : "pending";
+    const trialEndsAt = row.trialEndsAt
+      ? new Date(row.trialEndsAt).getTime()
+      : 0;
+    const trialActive = Boolean(
+      trialEndsAt &&
+      trialEndsAt > now &&
+      !row.lastPaymentStatus?.includes?.("RECEIVED")
+    );
+    const paymentState =
+      row.status === "past_due"
+        ? "unpaid"
+        : row.status === "canceled"
+          ? "canceled"
+          : trialActive
+            ? "trial"
+            : row.status === "active" || row.status === "paid"
+              ? "paid"
+              : "pending";
     return {
       ...row,
       usageMinutes,
@@ -146,23 +160,38 @@ async function listCommercialAccounts() {
     };
   });
 
-  const active = accounts.filter((item: any) => item.status === "active" || item.status === "paid");
+  const active = accounts.filter(
+    (item: any) => item.status === "active" || item.status === "paid"
+  );
   return {
     accounts,
     summary: {
       total: accounts.length,
-      trial: accounts.filter((item: any) => item.paymentState === "trial").length,
-      pending: accounts.filter((item: any) => item.status === "pending_payment").length,
-      overdue: accounts.filter((item: any) => item.status === "past_due").length,
+      trial: accounts.filter((item: any) => item.paymentState === "trial")
+        .length,
+      pending: accounts.filter((item: any) => item.status === "pending_payment")
+        .length,
+      overdue: accounts.filter((item: any) => item.status === "past_due")
+        .length,
       active: active.length,
-      canceled: accounts.filter((item: any) => item.status === "canceled").length,
+      canceled: accounts.filter((item: any) => item.status === "canceled")
+        .length,
       monthlyActiveCents: active
         .filter((item: any) => String(item.billingMethod) === "card_monthly")
-        .reduce((sum: number, item: any) => sum + Number(item.priceCents || 0), 0),
+        .reduce(
+          (sum: number, item: any) => sum + Number(item.priceCents || 0),
+          0
+        ),
       annualPixActiveCents: active
         .filter((item: any) => String(item.billingMethod) === "pix_annual")
-        .reduce((sum: number, item: any) => sum + Number(item.priceCents || 0), 0),
-      totalUsageMinutes: accounts.reduce((sum: number, item: any) => sum + Number(item.usageMinutes || 0), 0),
+        .reduce(
+          (sum: number, item: any) => sum + Number(item.priceCents || 0),
+          0
+        ),
+      totalUsageMinutes: accounts.reduce(
+        (sum: number, item: any) => sum + Number(item.usageMinutes || 0),
+        0
+      ),
     },
   };
 }
@@ -183,12 +212,19 @@ async function getCommercialAccount(userId: number) {
   `;
   const target = rows[0] as any;
   if (!target || target.loginMethod !== "commercial_signup") {
-    throw Object.assign(new Error("Conta comercial não encontrada."), { statusCode: 404 });
+    throw Object.assign(new Error("Conta comercial não encontrada."), {
+      statusCode: 404,
+    });
   }
   return target;
 }
 
-async function writeSubscriptionAudit(admin: any, target: any, action: string, details: any) {
+async function writeSubscriptionAudit(
+  admin: any,
+  target: any,
+  action: string,
+  details: any
+) {
   const sql = getSql();
   await sql`
     INSERT INTO "auditLogs"
@@ -202,17 +238,27 @@ async function writeSubscriptionAudit(admin: any, target: any, action: string, d
 
 async function verifyAdminPassword(admin: any, password: string) {
   if (!password || !admin.passwordHash) {
-    throw Object.assign(new Error("Digite a senha do Super Administrador para confirmar."), { statusCode: 400 });
+    throw Object.assign(
+      new Error("Digite a senha do Super Administrador para confirmar."),
+      { statusCode: 400 }
+    );
   }
   const ok = await bcrypt.compare(password, String(admin.passwordHash));
-  if (!ok) throw Object.assign(new Error("Senha do Super Administrador incorreta."), { statusCode: 403 });
+  if (!ok)
+    throw Object.assign(new Error("Senha do Super Administrador incorreta."), {
+      statusCode: 403,
+    });
 }
 
 async function approveCommercialAccount(userId: number, admin: any) {
   const sql = getSql();
   const target = await getCommercialAccount(userId);
   const planValue = String(target.plan || "");
-  if (!isPlan(planValue)) throw Object.assign(new Error("Plano comercial inválido para esta conta."), { statusCode: 409 });
+  if (!isPlan(planValue))
+    throw Object.assign(
+      new Error("Plano comercial inválido para esta conta."),
+      { statusCode: 409 }
+    );
   const config = PLAN_CONFIG[planValue];
   await sql`UPDATE users SET "isActive" = true, "failedLoginAttempts" = 0, "updatedAt" = NOW() WHERE id = ${userId}`;
   await sql`UPDATE commercial_subscriptions SET status = 'active', "updatedAt" = NOW() WHERE "userId" = ${userId}`;
@@ -222,34 +268,65 @@ async function approveCommercialAccount(userId: number, admin: any) {
     provisioning: "first_login",
     alreadyProvisioned: Boolean(target.provisionedAt),
   });
-  return { plan: planValue, planLabel: config.label, databaseLimit: config.limit, alreadyProvisioned: Boolean(target.provisionedAt) };
+  return {
+    plan: planValue,
+    planLabel: config.label,
+    databaseLimit: config.limit,
+    alreadyProvisioned: Boolean(target.provisionedAt),
+  };
 }
 
-async function setPaymentStatus(userId: number, admin: any, status: "active" | "past_due") {
+async function setPaymentStatus(
+  userId: number,
+  admin: any,
+  status: "active" | "past_due"
+) {
   const sql = getSql();
   const target = await getCommercialAccount(userId);
   const planValue = String(target.plan || "");
-  if (!isPlan(planValue)) throw Object.assign(new Error("Plano comercial inválido para esta conta."), { statusCode: 409 });
+  if (!isPlan(planValue))
+    throw Object.assign(
+      new Error("Plano comercial inválido para esta conta."),
+      { statusCode: 409 }
+    );
   await sql`UPDATE users SET "isActive" = true, "failedLoginAttempts" = 0, "updatedAt" = NOW() WHERE id = ${userId}`;
   await sql`UPDATE commercial_subscriptions SET status = ${status}, "updatedAt" = NOW() WHERE "userId" = ${userId}`;
-  await writeSubscriptionAudit(admin, target, status === "past_due" ? "mark_subscription_past_due" : "mark_subscription_paid", {
-    previousStatus: target.status,
-    newStatus: status,
-    accessMode: status === "past_due" ? "dashboard_only" : "full_plan_access",
-  });
+  await writeSubscriptionAudit(
+    admin,
+    target,
+    status === "past_due"
+      ? "mark_subscription_past_due"
+      : "mark_subscription_paid",
+    {
+      previousStatus: target.status,
+      newStatus: status,
+      accessMode: status === "past_due" ? "dashboard_only" : "full_plan_access",
+    }
+  );
   return { status, plan: planValue, planLabel: PLAN_CONFIG[planValue].label };
 }
 
 async function cancelMercadoPagoSubscription(providerSubscriptionId: string) {
   const accessToken = String(process.env.MERCADOPAGO_ACCESS_TOKEN ?? "").trim();
   if (!accessToken || !providerSubscriptionId) return false;
-  const response = await fetch(`${MERCADO_PAGO_API}/preapproval/${encodeURIComponent(providerSubscriptionId)}`, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ status: "cancelled" }),
-  });
+  const response = await fetch(
+    `${MERCADO_PAGO_API}/preapproval/${encodeURIComponent(providerSubscriptionId)}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ status: "cancelled" }),
+    }
+  );
   if (!response.ok && response.status !== 404) {
-    throw Object.assign(new Error("Não foi possível cancelar a cobrança no Mercado Pago. A conta não foi excluída por segurança."), { statusCode: 502 });
+    throw Object.assign(
+      new Error(
+        "Não foi possível cancelar a cobrança no Mercado Pago. A conta não foi excluída por segurança."
+      ),
+      { statusCode: 502 }
+    );
   }
   return true;
 }
@@ -260,7 +337,13 @@ function getAsaasApiKey() {
 
 async function deleteAsaasResource(path: string, label: string) {
   const apiKey = getAsaasApiKey();
-  if (!apiKey) throw Object.assign(new Error("A chave da API Asaas não está configurada. A conta não foi excluída por segurança."), { statusCode: 503 });
+  if (!apiKey)
+    throw Object.assign(
+      new Error(
+        "A chave da API Asaas não está configurada. A conta não foi excluída por segurança."
+      ),
+      { statusCode: 503 }
+    );
   const response = await fetch(`${ASAAS_API}${path}`, {
     method: "DELETE",
     headers: { accept: "application/json", access_token: apiKey },
@@ -268,7 +351,12 @@ async function deleteAsaasResource(path: string, label: string) {
   if (!response.ok && response.status !== 404) {
     const body = await response.json().catch(() => ({}));
     console.error("[admin/commercial-accounts/asaas-delete]", { path, body });
-    throw Object.assign(new Error(`Não foi possível cancelar ${label} no Asaas. A conta não foi excluída por segurança.`), { statusCode: 502 });
+    throw Object.assign(
+      new Error(
+        `Não foi possível cancelar ${label} no Asaas. A conta não foi excluída por segurança.`
+      ),
+      { statusCode: 502 }
+    );
   }
   return true;
 }
@@ -279,20 +367,45 @@ async function cancelProviderForDeletion(target: any) {
   const paymentId = String(target.lastPaymentId || "").trim();
 
   if (provider === "mercadopago" && subscriptionId) {
-    return { provider, resource: "subscription", cancelled: await cancelMercadoPagoSubscription(subscriptionId) };
+    return {
+      provider,
+      resource: "subscription",
+      cancelled: await cancelMercadoPagoSubscription(subscriptionId),
+    };
   }
   if (provider === "asaas") {
     if (subscriptionId) {
-      return { provider, resource: "subscription", cancelled: await deleteAsaasResource(`/subscriptions/${encodeURIComponent(subscriptionId)}`, "a assinatura") };
+      return {
+        provider,
+        resource: "subscription",
+        cancelled: await deleteAsaasResource(
+          `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+          "a assinatura"
+        ),
+      };
     }
-    if (paymentId && ["pending_payment", "past_due"].includes(String(target.status))) {
-      return { provider, resource: "payment", cancelled: await deleteAsaasResource(`/payments/${encodeURIComponent(paymentId)}`, "a cobrança") };
+    if (
+      paymentId &&
+      ["pending_payment", "past_due"].includes(String(target.status))
+    ) {
+      return {
+        provider,
+        resource: "payment",
+        cancelled: await deleteAsaasResource(
+          `/payments/${encodeURIComponent(paymentId)}`,
+          "a cobrança"
+        ),
+      };
     }
   }
   return { provider, resource: null, cancelled: false };
 }
 
-async function cancelCommercialSubscription(userId: number, admin: any, password: string) {
+async function cancelCommercialSubscription(
+  userId: number,
+  admin: any,
+  password: string
+) {
   const sql = getSql();
   const target = await getCommercialAccount(userId);
   await verifyAdminPassword(admin, password);
@@ -300,26 +413,41 @@ async function cancelCommercialSubscription(userId: number, admin: any, password
   await sql`UPDATE commercial_subscriptions SET status='canceled', "providerStatus"='CANCELED_BY_ADMIN', "updatedAt"=NOW() WHERE "userId"=${userId}`;
   await sql`UPDATE users SET "isActive"=false, "updatedAt"=NOW() WHERE id=${userId}`;
   await sql`DELETE FROM local_sessions WHERE "userId"=${userId}`;
-  await writeSubscriptionAudit(admin, target, "cancel_commercial_subscription", {
-    previousStatus: target.status,
-    provider: target.provider,
-    providerResourceCancelled: providerResult.cancelled,
-    providerResource: providerResult.resource,
-  });
+  await writeSubscriptionAudit(
+    admin,
+    target,
+    "cancel_commercial_subscription",
+    {
+      previousStatus: target.status,
+      provider: target.provider,
+      providerResourceCancelled: providerResult.cancelled,
+      providerResource: providerResult.resource,
+    }
+  );
   return { username: String(target.username || "cliente"), providerResult };
 }
 
-async function deleteUnpaidCommercialAccount(userId: number, admin: any, password: string) {
+async function deleteUnpaidCommercialAccount(
+  userId: number,
+  admin: any,
+  password: string
+) {
   const sql = getSql();
   const target = await getCommercialAccount(userId);
   if (target.status !== "past_due" && target.status !== "pending_payment") {
-    throw Object.assign(new Error("Só é permitido excluir clientes sem pagamento confirmado."), { statusCode: 409 });
+    throw Object.assign(
+      new Error("Só é permitido excluir clientes sem pagamento confirmado."),
+      { statusCode: 409 }
+    );
   }
   await verifyAdminPassword(admin, password);
   const providerResult = await cancelProviderForDeletion(target);
 
-  const childRows = await sql`SELECT id FROM users WHERE "loginMethod"='commercial_subuser' AND "accountOwnerId"=${userId}`;
-  const childIds = childRows.map((row: any) => Number(row.id)).filter((id: number) => Number.isInteger(id) && id > 0);
+  const childRows =
+    await sql`SELECT id FROM users WHERE "loginMethod"='commercial_subuser' AND "accountOwnerId"=${userId}`;
+  const childIds = childRows
+    .map((row: any) => Number(row.id))
+    .filter((id: number) => Number.isInteger(id) && id > 0);
   for (const childId of childIds) {
     await sql`DELETE FROM local_sessions WHERE "userId"=${childId}`;
     await sql`DELETE FROM user_database_access WHERE "userId"=${childId}`;
@@ -332,28 +460,49 @@ async function deleteUnpaidCommercialAccount(userId: number, admin: any, passwor
   await sql`DELETE FROM "auditLogs" WHERE "userId"=${userId}`;
   await sql`DELETE FROM users WHERE "loginMethod"='commercial_subuser' AND "accountOwnerId"=${userId}`;
   await sql`DELETE FROM commercial_subscriptions WHERE "userId"=${userId}`;
-  const deleted = await sql`DELETE FROM users WHERE id=${userId} AND "loginMethod"='commercial_signup' RETURNING id, username`;
-  if (!deleted[0]) throw Object.assign(new Error("Conta comercial não encontrada para exclusão."), { statusCode: 404 });
+  const deleted =
+    await sql`DELETE FROM users WHERE id=${userId} AND "loginMethod"='commercial_signup' RETURNING id, username`;
+  if (!deleted[0])
+    throw Object.assign(
+      new Error("Conta comercial não encontrada para exclusão."),
+      { statusCode: 404 }
+    );
 
-  await writeSubscriptionAudit(admin, target, "delete_unpaid_commercial_account", {
-    deletedUsername: target.username,
-    previousStatus: target.status,
-    provider: target.provider,
-    providerResourceCancelled: providerResult.cancelled,
-    providerResource: providerResult.resource,
+  await writeSubscriptionAudit(
+    admin,
+    target,
+    "delete_unpaid_commercial_account",
+    {
+      deletedUsername: target.username,
+      previousStatus: target.status,
+      provider: target.provider,
+      providerResourceCancelled: providerResult.cancelled,
+      providerResource: providerResult.resource,
+      deletedSubusers: childIds.length,
+    }
+  );
+  return {
+    username: String(target.username || "cliente"),
     deletedSubusers: childIds.length,
-  });
-  return { username: String(target.username || "cliente"), deletedSubusers: childIds.length, providerResult };
+    providerResult,
+  };
 }
 
 export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "GET" && req.method !== "POST") {
       res.setHeader("Allow", "GET, POST");
-      return sendJson(res, 405, { success: false, message: "Método não permitido." });
+      return sendJson(res, 405, {
+        success: false,
+        message: "Método não permitido.",
+      });
     }
     const admin = await getSuperAdmin(req);
-    if (!admin) return sendJson(res, 403, { success: false, message: "Área exclusiva do Super Administrador." });
+    if (!admin)
+      return sendJson(res, 403, {
+        success: false,
+        message: "Área exclusiva do Super Administrador.",
+      });
     await ensureTables();
 
     if (req.method === "GET") {
@@ -362,37 +511,83 @@ export default async function handler(req: any, res: any) {
     }
 
     const body = await readJsonBody(req);
-    if (admin.role !== "super_admin") return sendJson(res, 403, { success: false, message: "Somente o Super Admin pode alterar assinaturas." });
+    if (admin.role !== "super_admin")
+      return sendJson(res, 403, {
+        success: false,
+        message: "Somente o Super Admin pode alterar assinaturas.",
+      });
     const action = String(body?.action ?? "approve");
     const userId = Number(body?.userId);
-    if (!Number.isInteger(userId) || userId <= 0) return sendJson(res, 400, { success: false, message: "Usuário inválido." });
+    if (!Number.isInteger(userId) || userId <= 0)
+      return sendJson(res, 400, {
+        success: false,
+        message: "Usuário inválido.",
+      });
 
     if (action === "approve") {
       const approval = await approveCommercialAccount(userId, admin);
-      return sendJson(res, 200, { success: true, approval, message: approval.alreadyProvisioned ? `Conta ${approval.planLabel} aprovada e ativa.` : `Conta ${approval.planLabel} aprovada. Os bancos serão criados automaticamente no primeiro login.` });
+      return sendJson(res, 200, {
+        success: true,
+        approval,
+        message: approval.alreadyProvisioned
+          ? `Conta ${approval.planLabel} aprovada e ativa.`
+          : `Conta ${approval.planLabel} aprovada. Os bancos serão criados automaticamente no primeiro login.`,
+      });
     }
     if (action === "mark_unpaid") {
       const payment = await setPaymentStatus(userId, admin, "past_due");
-      return sendJson(res, 200, { success: true, payment, message: "Assinatura marcada como não paga. O cliente ficará restrito ao Dashboard." });
+      return sendJson(res, 200, {
+        success: true,
+        payment,
+        message:
+          "Assinatura marcada como não paga. O cliente ficará restrito ao Dashboard.",
+      });
     }
     if (action === "mark_paid") {
       const payment = await setPaymentStatus(userId, admin, "active");
-      return sendJson(res, 200, { success: true, payment, message: "Pagamento confirmado. As funções do plano foram liberadas novamente." });
+      return sendJson(res, 200, {
+        success: true,
+        payment,
+        message:
+          "Pagamento confirmado. As funções do plano foram liberadas novamente.",
+      });
     }
     if (action === "cancel_subscription") {
-      const canceled = await cancelCommercialSubscription(userId, admin, String(body?.password ?? ""));
-      return sendJson(res, 200, { success: true, canceled, message: `Assinatura de ${canceled.username} cancelada.` });
+      const canceled = await cancelCommercialSubscription(
+        userId,
+        admin,
+        String(body?.password ?? "")
+      );
+      return sendJson(res, 200, {
+        success: true,
+        canceled,
+        message: `Assinatura de ${canceled.username} cancelada.`,
+      });
     }
     if (action === "delete_unpaid") {
-      const deleted = await deleteUnpaidCommercialAccount(userId, admin, String(body?.password ?? ""));
-      return sendJson(res, 200, { success: true, deleted, message: `Conta de ${deleted.username} excluída com segurança.` });
+      const deleted = await deleteUnpaidCommercialAccount(
+        userId,
+        admin,
+        String(body?.password ?? "")
+      );
+      return sendJson(res, 200, {
+        success: true,
+        deleted,
+        message: `Conta de ${deleted.username} excluída com segurança.`,
+      });
     }
-    return sendJson(res, 400, { success: false, message: "Ação comercial não reconhecida." });
+    return sendJson(res, 400, {
+      success: false,
+      message: "Ação comercial não reconhecida.",
+    });
   } catch (error: any) {
     console.error("[admin/commercial-accounts]", error);
     return sendJson(res, Number(error?.statusCode || 500), {
       success: false,
-      message: error instanceof Error ? error.message : "Não foi possível concluir a operação comercial.",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Não foi possível concluir a operação comercial.",
     });
   }
 }

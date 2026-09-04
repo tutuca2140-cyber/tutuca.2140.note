@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import FinancialSummaryDonut from "@/components/FinancialSummaryDonut";
+import FreePlanAds from "@/components/FreePlanAds";
 import GlobalSearch from "@/components/GlobalSearch";
 import ThemeToggle from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
@@ -126,6 +127,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const isSuperAdmin = user?.role === "super_admin";
   const regularAccess = !user?.dashboardOnly;
   const commercialAccount = Boolean(commercialContext?.commercial);
+  const freePlanWithAds = Boolean(
+    commercialContext?.commercial && commercialContext.plan === "free"
+  );
   const canManageOwnDatabases = Boolean(
     commercialAccount && commercialContext?.permissions.canManageDatabases
   );
@@ -425,7 +429,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       ? "Super Administrador"
       : commercialContext?.commercial
         ? commercialContext.isOwner
-          ? `Contratante ${commercialContext.plan === "plus" ? "Plus" : "Basic"}`
+          ? commercialContext.plan === "free"
+            ? "Conta Grátis"
+            : `Contratante ${commercialContext.plan === "plus" ? "Plus" : "Basic"}`
           : "Usuário da conta"
         : user.role;
   const visibleNavigation = navigation.filter(item => item.show);
@@ -607,6 +613,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       <div className="lg:pl-64">
         <main className="app-mobile-content px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] pt-[4.25rem] sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto w-full max-w-[1600px]">
+            <FreePlanAds enabled={freePlanWithAds} />
             {renderedChildren}
           </div>
         </main>
