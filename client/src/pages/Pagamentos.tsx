@@ -24,10 +24,12 @@ import { loanContractName } from "@/lib/contract-name";
 import {
   ClipboardList,
   CreditCard,
+  Download,
   FilePenLine,
   Plus,
   Trash2,
 } from "lucide-react";
+import { jsPDF } from "jspdf";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -50,6 +52,7 @@ type PaymentRow = {
   notes: string | null;
   loanId: number | null;
   vehicleFinancingId: number | null;
+  installmentNumber: number;
   interestAmount: string;
   principalAmount: string;
   commissionAmount: string;
@@ -122,6 +125,76 @@ export default function Pagamentos() {
           Number(selectedFinancingData.installmentAmount)
       )
     : 0;
+
+  const paymentIdentity = (payment: PaymentRow) => {
+    const contract = payment.loanId
+      ? loans?.find(item => item.id === payment.loanId)
+      : financings?.find(item => item.id === payment.vehicleFinancingId);
+    const client = clients?.find(item => item.id === contract?.clientId);
+    return {
+      clientName: client?.name || `Cliente #${contract?.clientId || "—"}`,
+      contractLabel: payment.loanId
+        ? `Empréstimo #${payment.loanId}`
+        : `Financiamento #${payment.vehicleFinancingId}`,
+      whatsapp: client?.whatsapp || client?.phone || "",
+    };
+  };
+
+  const downloadReceipt = (payment: PaymentRow) => {
+    const identity = paymentIdentity(payment);
+    const document = new jsPDF();
+    document.setFillColor(37, 99, 235);
+    document.rect(0, 0, 210, 38, "F");
+    document.setTextColor(255, 255, 255);
+    document.setFontSize(22);
+    document.setFont("helvetica", "bold");
+    document.text("NOTE NOTE", 18, 18);
+    document.setFontSize(11);
+    document.setFont("helvetica", "normal");
+    document.text("Seu caderninho digital", 18, 27);
+    document.setTextColor(15, 23, 42);
+    document.setFontSize(18);
+    document.setFont("helvetica", "bold");
+    document.text("Comprovante de pagamento", 18, 57);
+    document.setFontSize(10);
+    document.setFont("helvetica", "normal");
+    document.setTextColor(100, 116, 139);
+    document.text(`Comprovante nº ${payment.id}`, 18, 66);
+    const fields = [
+      ["Cliente", identity.clientName],
+      ["Contrato", identity.contractLabel],
+      ["Parcela", `${payment.installmentNumber}`],
+      ["Data do pagamento", formatDate(payment.paymentDate)],
+      ["Valor recebido", formatCurrency(payment.amount)],
+      ["Situação", payment.status.toUpperCase()],
+    ];
+    let y = 84;
+    fields.forEach(([label, value]) => {
+      document.setTextColor(100, 116, 139);
+      document.setFont("helvetica", "normal");
+      document.text(label, 18, y);
+      document.setTextColor(15, 23, 42);
+      document.setFont("helvetica", "bold");
+      document.text(String(value), 72, y);
+      y += 13;
+    });
+    if (payment.notes) {
+      document.setTextColor(100, 116, 139);
+      document.setFont("helvetica", "normal");
+      document.text("Observações", 18, y + 3);
+      document.setTextColor(15, 23, 42);
+      document.text(document.splitTextToSize(payment.notes, 115), 72, y + 3);
+    }
+    document.setDrawColor(203, 213, 225);
+    document.line(18, 178, 192, 178);
+    document.setFontSize(9);
+    document.setTextColor(100, 116, 139);
+    document.text("Pagamento registrado no sistema Note Note.", 18, 188);
+    document.text(`Emitido em ${new Date().toLocaleString("pt-BR")}`, 18, 195);
+    document.save(
+      `comprovante-${payment.id}-${identity.clientName.replace(/[^a-zA-Z0-9]/g, "-")}.pdf`
+    );
+  };
 
   useEffect(() => {
     if (!openCreate || formData.amount || !selectedContract) return;
@@ -764,6 +837,14 @@ export default function Pagamentos() {
                           Editar pagamento
                         </Button>
                       )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadReceipt(payment as PaymentRow)}
+                      >
+                        <Download className="mr-1.5 h-4 w-4" />
+                        Baixar comprovante
+                      </Button>
                       {user?.canDelete && (
                         <Button
                           size="sm"
