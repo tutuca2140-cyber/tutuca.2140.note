@@ -1,7 +1,29 @@
-import { ArrowLeft, ArrowRight, Check, Crown, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Crown,
+  Gift,
+  Sparkles,
+} from "lucide-react";
 import { Link } from "wouter";
 
 const plans = [
+  {
+    id: "free",
+    name: "Grátis",
+    monthlyPrice: "0",
+    annualPixPrice: null,
+    annualSavings: null,
+    description: "Para começar a organizar sua operação sem informar cartão.",
+    badge: "Comece agora",
+    databaseAccess: "1 banco de dados exclusivo",
+    automaticCreation: "Criado automaticamente no primeiro acesso",
+    userAccess: "Uso individual",
+    permissionBenefit: "Anúncios aparecem somente dentro da conta grátis",
+    featured: false,
+    icon: Gift,
+  },
   {
     id: "basic",
     name: "Basic",
@@ -39,8 +61,8 @@ const plans = [
     icon: Crown,
   },
 ] as const;
-type PlanId = "basic" | "plus";
-type BillingMethod = "card_monthly" | "pix_annual";
+type PlanId = "free" | "basic" | "plus";
+type BillingMethod = "free" | "card_monthly" | "pix_annual";
 function choosePlan(planId: PlanId, billingMethod: BillingMethod) {
   try {
     window.sessionStorage.setItem("notenote:selected-plan", planId);
@@ -88,11 +110,11 @@ export default function Planos() {
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
               Novos usuários elegíveis têm <strong>7 dias grátis</strong>. O
-              plano mensal não possui fidelidade e pode ser cancelado a
-              qualquer momento.
+              plano mensal não possui fidelidade e pode ser cancelado a qualquer
+              momento.
             </p>
           </div>
-          <div className="mx-auto mt-12 grid max-w-4xl gap-6 md:grid-cols-2">
+          <div className="mx-auto mt-12 grid max-w-6xl gap-6 md:grid-cols-3">
             {plans.map(plan => {
               const Icon = plan.icon;
               return (
@@ -125,17 +147,31 @@ export default function Planos() {
                       /mês
                     </span>
                   </div>
-                  <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                    <p className="text-xs font-extrabold uppercase text-emerald-700">
-                      Pix anual
-                    </p>
-                    <p className="mt-1 text-2xl font-black text-emerald-950">
-                      R$ {plan.annualPixPrice}
-                    </p>
-                    <p className="mt-2 text-xs font-semibold text-emerald-800">
-                      12 meses de acesso · economia de R$ {plan.annualSavings}
-                    </p>
-                  </div>
+                  {plan.id !== "free" ? (
+                    <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                      <p className="text-xs font-extrabold uppercase text-emerald-700">
+                        Pix anual
+                      </p>
+                      <p className="mt-1 text-2xl font-black text-emerald-950">
+                        R$ {plan.annualPixPrice}
+                      </p>
+                      <p className="mt-2 text-xs font-semibold text-emerald-800">
+                        12 meses de acesso · economia de R$ {plan.annualSavings}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                      <p className="text-xs font-extrabold uppercase text-blue-700">
+                        Sem cobrança
+                      </p>
+                      <p className="mt-1 text-2xl font-black text-blue-950">
+                        Sem cartão
+                      </p>
+                      <p className="mt-2 text-xs font-semibold text-blue-800">
+                        Com anúncios apenas dentro do sistema
+                      </p>
+                    </div>
+                  )}
                   <p className="mt-5 min-h-14 text-sm leading-6 text-slate-600">
                     {plan.description}
                   </p>
@@ -159,34 +195,55 @@ export default function Planos() {
                       </div>
                     </div>
                     <div className="flex gap-3">
-                      <Check className="h-5 w-5 text-emerald-600" />7 dias de
-                      teste grátis
+                      <Check className="h-5 w-5 text-emerald-600" />
+                      {plan.id === "free"
+                        ? "Acesso grátis contínuo"
+                        : "7 dias de teste grátis"}
                     </div>
                     <div className="flex gap-3">
                       <Check className="h-5 w-5 text-emerald-600" />
-                      Mensal no cartão ou anual no Pix
+                      {plan.id === "free"
+                        ? "Anúncios dentro do sistema"
+                        : "Mensal no cartão ou anual no Pix"}
                     </div>
                   </div>
                   <div className="mt-7 grid gap-3">
-                    <button
-                      onClick={() => choosePlan(plan.id, "card_monthly")}
-                      className={`h-14 rounded-xl font-extrabold ${plan.featured ? "bg-blue-600 text-white" : "border border-blue-200 bg-blue-50 text-blue-700"}`}
-                    >
-                      Assinar mensal
-                    </button>
-                    <button
-                      onClick={() => choosePlan(plan.id, "pix_annual")}
-                      className="h-14 rounded-xl border border-emerald-300 bg-emerald-50 font-extrabold text-emerald-800"
-                    >
-                      Pix anual — R$ {plan.annualPixPrice}
-                    </button>
+                    {plan.id === "free" ? (
+                      <button
+                        onClick={() => choosePlan("free", "free")}
+                        className="h-14 rounded-xl border border-blue-200 bg-blue-50 font-extrabold text-blue-700"
+                      >
+                        Criar conta grátis
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => choosePlan(plan.id, "card_monthly")}
+                          className={`h-14 rounded-xl font-extrabold ${plan.featured ? "bg-blue-600 text-white" : "border border-blue-200 bg-blue-50 text-blue-700"}`}
+                        >
+                          Assinar mensal
+                        </button>
+                        <button
+                          onClick={() => choosePlan(plan.id, "pix_annual")}
+                          className="h-14 rounded-xl border border-emerald-300 bg-emerald-50 font-extrabold text-emerald-800"
+                        >
+                          Pix anual — R$ {plan.annualPixPrice}
+                        </button>
+                      </>
+                    )}
                   </div>
                   <p className="mt-4 text-[11px] leading-4 text-slate-500">
-                    * Novos usuários elegíveis têm 7 dias grátis. O plano mensal
-                    não possui fidelidade e pode ser cancelado a qualquer
-                    momento, ressalvados valores já vencidos e ciclos de
-                    cobrança já iniciados. O plano anual via Pix corresponde a
-                    12 meses pagos antecipadamente.
+                    {plan.id === "free"
+                      ? "* O plano grátis não exige forma de pagamento e pode exibir publicidade dentro do sistema."
+                      : "* Novos usuários elegíveis têm 7 dias grátis. O plano mensal "}
+                    {plan.id !== "free" && (
+                      <>
+                        não possui fidelidade e pode ser cancelado a qualquer
+                        momento, ressalvados valores já vencidos e ciclos de
+                        cobrança já iniciados. O plano anual via Pix corresponde
+                        a 12 meses pagos antecipadamente.
+                      </>
+                    )}
                   </p>
                 </article>
               );
