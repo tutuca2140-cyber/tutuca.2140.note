@@ -20,7 +20,7 @@ const plans = [
     databaseAccess: "1 banco de dados exclusivo",
     automaticCreation: "Criado automaticamente no primeiro acesso",
     userAccess: "Uso individual",
-    permissionBenefit: "Anúncios aparecem somente dentro da conta grátis",
+    permissionBenefit: "Comece agora e organize sua operação",
     featured: false,
     icon: Gift,
   },
@@ -168,7 +168,7 @@ export default function Planos() {
                         Sem cartão
                       </p>
                       <p className="mt-2 text-xs font-semibold text-blue-800">
-                        Com anúncios apenas dentro do sistema
+                        Comece a usar o Note Note agora
                       </p>
                     </div>
                   )}
@@ -203,9 +203,15 @@ export default function Planos() {
                     <div className="flex gap-3">
                       <Check className="h-5 w-5 text-emerald-600" />
                       {plan.id === "free"
-                        ? "Anúncios dentro do sistema"
+                        ? "Sem cartão e sem cobrança"
                         : "Mensal no cartão ou anual no Pix"}
                     </div>
+                    {plan.id !== "free" && (
+                      <div className="flex gap-3">
+                        <Check className="h-5 w-5 text-emerald-600" />
+                        Sem anúncios
+                      </div>
+                    )}
                   </div>
                   <div className="mt-7 grid gap-3">
                     {plan.id === "free" ? (
@@ -234,7 +240,7 @@ export default function Planos() {
                   </div>
                   <p className="mt-4 text-[11px] leading-4 text-slate-500">
                     {plan.id === "free"
-                      ? "* O plano grátis não exige forma de pagamento e pode exibir publicidade dentro do sistema."
+                      ? "* O plano grátis não exige forma de pagamento."
                       : "* Novos usuários elegíveis têm 7 dias grátis. O plano mensal "}
                     {plan.id !== "free" && (
                       <>
