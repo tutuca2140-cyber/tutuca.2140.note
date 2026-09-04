@@ -46,7 +46,9 @@ function isValidPassword(value: string) {
 
 function getScope(req: any) {
   const raw = req?.query?.scope;
-  return String(Array.isArray(raw) ? raw[0] : raw ?? "").trim().toLowerCase();
+  return String(Array.isArray(raw) ? raw[0] : (raw ?? ""))
+    .trim()
+    .toLowerCase();
 }
 
 async function getSessionUser(req: any) {
@@ -72,7 +74,8 @@ async function getAccountContext(user: any) {
   const sql = getSql();
   const isOwner = user?.loginMethod === "commercial_signup";
   const isSubuser =
-    user?.loginMethod === "commercial_subuser" && Number(user?.accountOwnerId) > 0;
+    user?.loginMethod === "commercial_subuser" &&
+    Number(user?.accountOwnerId) > 0;
   if (!isOwner && !isSubuser) return null;
 
   const ownerId = isOwner ? Number(user.id) : Number(user.accountOwnerId);
@@ -98,7 +101,10 @@ async function getAccountContext(user: any) {
 async function handleContext(req: any, res: any, viewer: any) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
-    return sendJson(res, 405, { success: false, message: "Método não permitido." });
+    return sendJson(res, 405, {
+      success: false,
+      message: "Método não permitido.",
+    });
   }
 
   if (viewer.role === "super_admin") {
@@ -140,7 +146,14 @@ async function handleContext(req: any, res: any, viewer: any) {
     });
   }
 
-  const plan = account.plan === "plus" ? "plus" : account.plan === "basic" ? "basic" : null;
+  const plan =
+    account.plan === "plus"
+      ? "plus"
+      : account.plan === "basic"
+        ? "basic"
+        : account.plan === "free"
+          ? "free"
+          : null;
   return sendJson(res, 200, {
     success: true,
     commercial: true,
@@ -150,10 +163,13 @@ async function handleContext(req: any, res: any, viewer: any) {
     status: account.status,
     ownerId: account.ownerId,
     teamLimit: plan === "plus" ? TEAM_LIMIT : 0,
-    databaseLimit: plan === "plus" ? 3 : plan === "basic" ? 1 : 0,
+    databaseLimit:
+      plan === "plus" ? 3 : plan === "basic" || plan === "free" ? 1 : 0,
     permissions: {
       canManageUsers: Boolean(
-        account.active && plan === "plus" && (account.isOwner || viewer.canManageUsers)
+        account.active &&
+        plan === "plus" &&
+        (account.isOwner || viewer.canManageUsers)
       ),
       canManageDatabases: Boolean(
         account.active && (account.isOwner || viewer.canManageDatabases)
@@ -208,7 +224,9 @@ async function validateDatabaseIds(ownerId: number, databaseIds: number[]) {
   );
   if (uniqueIds.length > 3) {
     throw Object.assign(
-      new Error("Um usuário pode receber no máximo os três bancos do plano Plus."),
+      new Error(
+        "Um usuário pode receber no máximo os três bancos do plano Plus."
+      ),
       { statusCode: 400 }
     );
   }
@@ -286,7 +304,10 @@ async function writeTeamAudit(
 async function handleTeam(req: any, res: any, viewer: any) {
   if (req.method !== "GET" && req.method !== "POST") {
     res.setHeader("Allow", "GET, POST");
-    return sendJson(res, 405, { success: false, message: "Método não permitido." });
+    return sendJson(res, 405, {
+      success: false,
+      message: "Método não permitido.",
+    });
   }
 
   const account = await getAccountContext(viewer);
@@ -299,8 +320,8 @@ async function handleTeam(req: any, res: any, viewer: any) {
 
   const canManageTeam = Boolean(
     account.active &&
-      account.plan === "plus" &&
-      (account.isOwner || viewer.canManageUsers)
+    account.plan === "plus" &&
+    (account.isOwner || viewer.canManageUsers)
   );
 
   if (req.method === "GET") {
@@ -324,7 +345,9 @@ async function handleTeam(req: any, res: any, viewer: any) {
         canDelete: Boolean(viewer.canDelete),
         canGenerateReports: Boolean(viewer.canGenerateReports),
         canManageUsers: Boolean(account.isOwner || viewer.canManageUsers),
-        canManageDatabases: Boolean(account.isOwner || viewer.canManageDatabases),
+        canManageDatabases: Boolean(
+          account.isOwner || viewer.canManageDatabases
+        ),
         canDeleteCashFlow: Boolean(account.isOwner || viewer.canDeleteCashFlow),
       },
     });
@@ -333,12 +356,11 @@ async function handleTeam(req: any, res: any, viewer: any) {
   if (!canManageTeam) {
     return sendJson(res, 403, {
       success: false,
-      message:
-        !account.active
-          ? "Sistema aguardando pagamento. Regularize sua assinatura para administrar usuários."
-          : account.plan === "basic"
-            ? "O plano Basic permite somente o próprio contratante. Usuários adicionais estão disponíveis no Plus."
-            : "O contratante não liberou a permissão de administrar usuários para esta conta.",
+      message: !account.active
+        ? "Sistema aguardando pagamento. Regularize sua assinatura para administrar usuários."
+        : account.plan === "basic"
+          ? "O plano Basic permite somente o próprio contratante. Usuários adicionais estão disponíveis no Plus."
+          : "O contratante não liberou a permissão de administrar usuários para esta conta.",
     });
   }
 
@@ -357,7 +379,9 @@ async function handleTeam(req: any, res: any, viewer: any) {
 
     const username = String(body?.username ?? "").trim();
     const name = String(body?.name ?? "").trim();
-    const email = String(body?.email ?? "").trim().toLowerCase();
+    const email = String(body?.email ?? "")
+      .trim()
+      .toLowerCase();
     const password = String(body?.password ?? "");
     const permissions = requestedPermissions(body);
     assertDelegationAllowed(viewer, account.isOwner, permissions);
@@ -428,12 +452,17 @@ async function handleTeam(req: any, res: any, viewer: any) {
       throw error;
     }
 
-    await writeTeamAudit(viewer, "create_commercial_subuser", Number(member.id), {
-      ownerId: account.ownerId,
-      username,
-      databaseIds,
-      permissions,
-    });
+    await writeTeamAudit(
+      viewer,
+      "create_commercial_subuser",
+      Number(member.id),
+      {
+        ownerId: account.ownerId,
+        username,
+        databaseIds,
+        permissions,
+      }
+    );
     return sendJson(res, 201, {
       success: true,
       message: "Usuário da conta criado com sucesso.",
@@ -483,7 +512,9 @@ async function handleTeam(req: any, res: any, viewer: any) {
     if (!isActive) {
       await sql`DELETE FROM local_sessions WHERE "userId" = ${userId}`;
     }
-    await writeTeamAudit(viewer, "toggle_commercial_subuser", userId, { isActive });
+    await writeTeamAudit(viewer, "toggle_commercial_subuser", userId, {
+      isActive,
+    });
     return sendJson(res, 200, {
       success: true,
       message: isActive ? "Usuário ativado." : "Usuário desativado.",
@@ -493,7 +524,9 @@ async function handleTeam(req: any, res: any, viewer: any) {
   if (action === "update") {
     const username = String(body?.username ?? target.username ?? "").trim();
     const name = String(body?.name ?? target.name ?? "").trim();
-    const email = String(body?.email ?? target.email ?? "").trim().toLowerCase();
+    const email = String(body?.email ?? target.email ?? "")
+      .trim()
+      .toLowerCase();
     const password = String(body?.password ?? "");
     const permissions = requestedPermissions(body);
     assertDelegationAllowed(viewer, account.isOwner, permissions);
@@ -575,7 +608,9 @@ async function handleTeam(req: any, res: any, viewer: any) {
       }
     } catch (error) {
       for (let index = 0; index < previousDatabaseIds.length; index++) {
-        const databaseId = Number((previousDatabaseIds[index] as any).databaseId);
+        const databaseId = Number(
+          (previousDatabaseIds[index] as any).databaseId
+        );
         await sql`
           INSERT INTO user_database_access ("userId", "databaseId", "isActive", "createdAt")
           VALUES (${userId}, ${databaseId}, ${index === 0}, NOW())
@@ -597,13 +632,19 @@ async function handleTeam(req: any, res: any, viewer: any) {
     });
   }
 
-  return sendJson(res, 400, { success: false, message: "Ação não reconhecida." });
+  return sendJson(res, 400, {
+    success: false,
+    message: "Ação não reconhecida.",
+  });
 }
 
 async function handleCashDelete(req: any, res: any, viewer: any) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
-    return sendJson(res, 405, { success: false, message: "Método não permitido." });
+    return sendJson(res, 405, {
+      success: false,
+      message: "Método não permitido.",
+    });
   }
 
   if (viewer.role !== "super_admin") {
@@ -713,7 +754,8 @@ export default async function handler(req: any, res: any) {
 
     if (scope === "context") return await handleContext(req, res, viewer);
     if (scope === "team") return await handleTeam(req, res, viewer);
-    if (scope === "cash-delete") return await handleCashDelete(req, res, viewer);
+    if (scope === "cash-delete")
+      return await handleCashDelete(req, res, viewer);
 
     return sendJson(res, 400, {
       success: false,
