@@ -313,9 +313,8 @@ export default function Cadastro() {
               </div>
               {isFreePlan ? (
                 <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4 text-left text-sm leading-6 text-blue-950">
-                  Sua conta está ativa, com direito a 1 banco de dados. O plano
-                  grátis exibe anúncios apenas dentro do sistema. Você pode
-                  contratar um plano sem anúncios quando quiser.
+                  Sua conta está ativa, com direito a 1 banco de dados
+                  exclusivo. Você já pode entrar e começar a usar o Note Note.
                 </div>
               ) : billingMethod === "pix_annual" && pixInfo ? (
                 <div className="mt-6 text-left">
@@ -444,7 +443,7 @@ export default function Cadastro() {
                 <p className="mt-3 border-t border-blue-200 pt-3 text-sm font-semibold text-blue-950">
                   Inclui {plans[plan].databaseAccess}.{" "}
                   {isFreePlan
-                    ? "Sem cartão e com anúncios dentro do sistema."
+                    ? "Sem cartão e sem cobrança."
                     : "7 dias grátis para novos usuários."}
                 </p>
               </div>
@@ -731,7 +730,7 @@ export default function Cadastro() {
                 </div>
                 <p className="mt-1">
                   {isFreePlan
-                    ? "Sem cobrança e sem cartão. Anúncios aparecem somente dentro da conta grátis."
+                    ? "Sem cobrança e sem cartão. Comece a usar agora."
                     : "As condições de cobrança e cancelamento do teste fazem parte dos Termos aceitos acima."}
                 </p>
               </div>
