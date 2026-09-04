@@ -574,9 +574,9 @@ export default function Home() {
                 receber, caixa e relatórios em uma única plataforma.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <Link href="/planos">
-                  <a className="inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-blue-600 px-7 text-base font-bold text-white shadow-xl shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700">
-                    Ver planos <ArrowRight className="h-5 w-5" />
+                <Link href="/cadastro?plano=free">
+                  <a className="inline-flex min-h-16 w-full items-center justify-center gap-3 rounded-2xl bg-blue-600 px-8 py-5 text-xl font-black uppercase tracking-wide text-white shadow-2xl shadow-blue-600/30 transition hover:-translate-y-1 hover:bg-blue-700 sm:w-auto sm:px-12 sm:text-2xl">
+                    Cadastre-se grátis <ArrowRight className="h-7 w-7" />
                   </a>
                 </Link>
                 <a
