@@ -483,13 +483,15 @@ export default function Cadastro() {
                   className={`rounded-2xl border p-4 text-left ${billingMethod === "card_monthly" ? "border-blue-500 bg-blue-50 ring-2 ring-blue-100" : "border-slate-200 bg-white"}`}
                 >
                   <p className="text-xs font-extrabold uppercase tracking-wide text-blue-600">
-                    Cartão mensal
+                    Cartão de crédito · cobrança recorrente
                   </p>
                   <p className="mt-1 text-xl font-black">
                     {plans[plan].monthly}
                   </p>
                   <p className="mt-2 text-xs text-slate-600">
-                    Primeira cobrança após os 7 dias grátis.
+                    {plan === "barber"
+                      ? "R$ 14,99 cobrados automaticamente a cada mês após o período grátis."
+                      : "Primeira cobrança após os 7 dias grátis."}
                   </p>
                 </button>
                 {plan !== "barber" && (
