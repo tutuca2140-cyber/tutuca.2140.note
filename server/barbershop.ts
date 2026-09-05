@@ -178,21 +178,31 @@ export async function handleBarbershop(req: any, res: any) {
         });
       const date = str(req.query.date);
       const barberId = str(req.query.barber);
-      const product = state.products.find(
-        (p: any) => p.id === str(req.query.product) && p.active
+      const requestedProductIds = str(
+        req.query.products || req.query.product,
+        1200
+      )
+        .split(",")
+        .filter(Boolean);
+      const selectedProducts = state.products.filter(
+        (p: any) => requestedProductIds.includes(p.id) && p.active
+      );
+      const totalDuration = selectedProducts.reduce(
+        (total: number, p: any) => total + Number(p.duration || 0),
+        0
       );
       const slots = [];
       if (
-        product &&
+        selectedProducts.length > 0 &&
         state.barbers.some((b: any) => b.id === barberId && b.active)
       )
         for (
           let m = minutes(state.open);
-          m + product.duration <= minutes(state.close);
+          m + totalDuration <= minutes(state.close);
           m += 15
         ) {
           const time = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-          if (slotFree(state, barberId, date, time, product.duration))
+          if (slotFree(state, barberId, date, time, totalDuration))
             slots.push(time);
         }
       return sendJson(res, 200, {
@@ -298,21 +308,37 @@ export async function handleBarbershop(req: any, res: any) {
         ? customer
         : state.clients.find((c: any) => c.id === body.clientId);
       if (!c) fail("Cadastre-se ou entre antes de agendar.", 401);
-      const p = state.products.find(
-        (p: any) => p.id === body.productId && p.active
+      const requestedProductIds = Array.isArray(body.productIds)
+        ? Array.from(
+            new Set<string>(
+              body.productIds.map((value: unknown) => str(value))
+            )
+          )
+        : [str(body.productId)].filter(Boolean);
+      const selectedProducts = state.products.filter(
+        (p: any) => requestedProductIds.includes(p.id) && p.active
       );
       if (
-        !p ||
+        !selectedProducts.length ||
+        selectedProducts.length !== requestedProductIds.length ||
         !state.barbers.some((b: any) => b.id === body.barberId && b.active)
       )
-        fail("Escolha um serviço e um barbeiro.");
+        fail("Escolha pelo menos um serviço e um barbeiro.");
+      const totalDuration = selectedProducts.reduce(
+        (total: number, p: any) => total + Number(p.duration || 0),
+        0
+      );
+      const totalPrice = selectedProducts.reduce(
+        (total: number, p: any) => total + Number(p.price || 0),
+        0
+      );
       if (
         !slotFree(
           state,
           body.barberId,
           str(body.date),
           str(body.time),
-          p.duration
+          totalDuration
         )
       )
         fail("Horário indisponível. Escolha outro horário.", 409);
@@ -320,14 +346,27 @@ export async function handleBarbershop(req: any, res: any) {
         id: id(),
         clientId: c.id,
         barberId: body.barberId,
-        productId: p.id,
-        productName: p.name,
-        price: p.price,
-        duration: p.duration,
+        productId: selectedProducts[0].id,
+        productIds: selectedProducts.map((p: any) => p.id),
+        productName: selectedProducts.map((p: any) => p.name).join(" + "),
+        price: totalPrice,
+        duration: totalDuration,
         date: str(body.date),
         time: str(body.time),
         status: "agendado",
       });
+    } else if (action === "confirm") {
+      const a = state.appointments.find((a: any) => a.id === body.id);
+      if (!a || a.status !== "agendado")
+        fail("Somente agendamentos pendentes podem ser confirmados.", 409);
+      a.status = "confirmado";
+      a.confirmedAt = new Date().toISOString();
+    } else if (action === "checkin") {
+      const a = state.appointments.find((a: any) => a.id === body.id);
+      if (!a || !["agendado", "confirmado"].includes(a.status))
+        fail("Este cliente não pode fazer check-in agora.", 409);
+      a.status = "check-in";
+      a.checkedInAt = new Date().toISOString();
     } else if (action === "cancel") {
       const a = state.appointments.find((a: any) => a.id === body.id);
       if (!a || state.payments.some((p: any) => p.appointmentId === a.id))
