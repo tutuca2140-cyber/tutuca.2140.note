@@ -20,4 +20,13 @@ describe('barbearia: disponibilidade',()=>{
  vi.useFakeTimers();vi.setSystemTime(new Date('2029-01-01'));
  const s=base();s.appointments[0].status='cancelado';expect(slotFree(s,'a','2030-01-07','10:00',30)).toBe(true);
  });
+ it('respeita jornada, intervalo e bloqueio individual do barbeiro',()=>{
+ vi.useFakeTimers();vi.setSystemTime(new Date('2029-01-01'));
+ const s:any=base();s.appointments=[];s.barbers=[{id:'a',days:[1,2,3,4,5],open:'10:00',close:'18:00',breakStart:'13:00',breakEnd:'14:00'}];
+ s.blocks=[{barberId:'a',date:'2030-01-07',start:'15:00',end:'16:00'}];
+ expect(slotFree(s,'a','2030-01-07','09:30',30)).toBe(false);
+ expect(slotFree(s,'a','2030-01-07','12:45',30)).toBe(false);
+ expect(slotFree(s,'a','2030-01-07','15:30',30)).toBe(false);
+ expect(slotFree(s,'a','2030-01-07','16:00',30)).toBe(true);
+ });
 });
