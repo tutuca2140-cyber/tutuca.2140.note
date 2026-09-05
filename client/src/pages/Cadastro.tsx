@@ -476,7 +476,7 @@ export default function Cadastro() {
               </div>
             )}
             {plan && !isFreePlan && (
-              <div className="mb-6 grid gap-3 sm:grid-cols-2">
+              <div className={`mb-6 grid gap-3 ${plan === "barber" ? "" : "sm:grid-cols-2"}`}>
                 <button
                   type="button"
                   onClick={() => setBillingMethod("card_monthly")}
@@ -492,22 +492,23 @@ export default function Cadastro() {
                     Primeira cobrança após os 7 dias grátis.
                   </p>
                 </button>
-                <button
-                  type="button"
-                  disabled={plan === "barber"}
-                  onClick={() => setBillingMethod("pix_annual")}
-                  className={`rounded-2xl border p-4 text-left ${billingMethod === "pix_annual" ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100" : "border-slate-200 bg-white"}`}
-                >
-                  <p className="text-xs font-extrabold uppercase tracking-wide text-emerald-700">
-                    Pix anual
-                  </p>
-                  <p className="mt-1 text-xl font-black">
-                    {plans[plan].annualPix}
-                  </p>
-                  <p className="mt-2 text-xs font-bold text-emerald-700">
-                    Economize {plans[plan].savings} no ano
-                  </p>
-                </button>
+                {plan !== "barber" && (
+                  <button
+                    type="button"
+                    onClick={() => setBillingMethod("pix_annual")}
+                    className={`rounded-2xl border p-4 text-left ${billingMethod === "pix_annual" ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100" : "border-slate-200 bg-white"}`}
+                  >
+                    <p className="text-xs font-extrabold uppercase tracking-wide text-emerald-700">
+                      Pix anual
+                    </p>
+                    <p className="mt-1 text-xl font-black">
+                      {plans[plan].annualPix}
+                    </p>
+                    <p className="mt-2 text-xs font-bold text-emerald-700">
+                      Economize {plans[plan].savings} no ano
+                    </p>
+                  </button>
+                )}
               </div>
             )}
             <form onSubmit={handleSubmit} className="space-y-5">
