@@ -9,6 +9,7 @@ import {
   Scissors,
   CalendarDays,
   Users,
+  UserCheck,
   Wallet,
   Package,
   Settings,
@@ -30,6 +31,16 @@ const today = () =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(
     new Date()
   );
+const weekDays = (value: string) => {
+  const anchor = new Date(`${value}T12:00:00`);
+  const mondayOffset = (anchor.getDay() + 6) % 7;
+  anchor.setDate(anchor.getDate() - mondayOffset);
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(anchor);
+    day.setDate(anchor.getDate() + index);
+    return day.toLocaleDateString("en-CA");
+  });
+};
 const methods: any = {
   cash: "Dinheiro",
   pix: "Pix",
@@ -74,14 +85,14 @@ export default function Barbearia() {
     [drawerOpen, setDrawerOpen] = useState(false);
   const [date, setDate] = useState(today),
     [barber, setBarber] = useState(""),
-    [product, setProduct] = useState(""),
+    [selectedProducts, setSelectedProducts] = useState<string[]>([]),
     [time, setTime] = useState(""),
     [client, setClient] = useState(""),
     [login, setLogin] = useState(false);
   const endpoint =
     "/api/barbershop" +
     (pub
-      ? `?shop=${encodeURIComponent(slug)}&date=${date}&barber=${barber}&product=${product}`
+      ? `?shop=${encodeURIComponent(slug)}&date=${date}&barber=${barber}&products=${encodeURIComponent(selectedProducts.join(","))}`
       : "");
   async function load() {
     try {
@@ -131,6 +142,7 @@ export default function Barbearia() {
     ["Dashboard", LayoutDashboard],
     ["Barbeiros", Scissors],
     ["Agenda", CalendarDays],
+    ["Confirmações", UserCheck],
     ["Clientes", Users],
     ["Produtos", Package],
     ["Caixa", Wallet],
@@ -140,6 +152,14 @@ export default function Barbearia() {
   const names = (list: any[], id: string) =>
     list?.find(x => x.id === id)?.name || "—";
   const appointments = s?.appointments || [];
+  const calendarDays = weekDays(date);
+  const statusLabel: Record<string, string> = {
+    agendado: "Aguardando confirmação",
+    confirmado: "Confirmado",
+    "check-in": "Cliente chegou",
+    concluido: "Concluído",
+    cancelado: "Cancelado",
+  };
   const payments = s?.payments || [];
   const expenses = s?.expenses || [];
   const dayPayments = payments.filter(
@@ -172,7 +192,7 @@ export default function Barbearia() {
             date,
             time,
             barberId: barber,
-            productId: product,
+            productIds: selectedProducts,
             clientId: client,
           })
         )
@@ -200,21 +220,46 @@ export default function Barbearia() {
       >
         {options(s?.barbers)}
       </SelectField>
-      <SelectField
-        label="Produto / serviço"
-        required
-        value={product}
-        onChange={(e: any) => {
-          setProduct(e.target.value);
-          setTime("");
-        }}
-      >
-        {s?.products?.map((p: any) => (
-          <option key={p.id} value={p.id}>
-            {p.name} · {money(p.price)} · {p.duration} min
-          </option>
-        ))}
-      </SelectField>
+      <fieldset className="space-y-2 sm:col-span-2">
+        <legend className="text-sm font-medium">Serviços do atendimento</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {s?.products?.filter((p: any) => p.active).map((p: any) => (
+            <label
+              key={p.id}
+              className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${selectedProducts.includes(p.id) ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40" : "border-slate-200 bg-background hover:border-blue-300 dark:border-slate-700"}`}
+            >
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4"
+                checked={selectedProducts.includes(p.id)}
+                onChange={e => {
+                  setSelectedProducts(current =>
+                    e.target.checked
+                      ? [...current, p.id]
+                      : current.filter(id => id !== p.id)
+                  );
+                  setTime("");
+                }}
+              />
+              <span>
+                <strong className="block text-sm">{p.name}</strong>
+                <span className="text-xs text-muted-foreground">
+                  {money(p.price)} · {p.duration} min
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {selectedProducts.length > 0 ? (
+          <p className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+            Total: {money(s.products.filter((p: any) => selectedProducts.includes(p.id)).reduce((total: number, p: any) => total + p.price, 0))} · {s.products.filter((p: any) => selectedProducts.includes(p.id)).reduce((total: number, p: any) => total + p.duration, 0)} minutos
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Selecione um ou mais serviços.
+          </p>
+        )}
+      </fieldset>
       <Field
         label="Dia"
         type="date"
@@ -246,13 +291,15 @@ export default function Barbearia() {
           onChange={(e: any) => setTime(e.target.value)}
         />
       )}
-      {pub && product && barber && !data?.slots?.length && (
+      {pub && selectedProducts.length > 0 && barber && !data?.slots?.length && (
         <p className="text-sm text-muted-foreground">
           Nenhum horário livre nesta data. Escolha outro dia.
         </p>
       )}
       <Button
-        disabled={busy || (pub && !data?.customer)}
+        disabled={
+          busy || selectedProducts.length === 0 || (pub && !data?.customer)
+        }
         className="sm:col-span-2"
       >
         Reservar horário
@@ -373,6 +420,11 @@ export default function Barbearia() {
                             ? "Entre para agendar"
                             : "Cadastre-se para agendar"}
                         </h2>
+                        {!login ? (
+                          <p className="text-sm text-muted-foreground">
+                            Informe seu e-mail e WhatsApp para reservar o corte e acompanhar a confirmação e o check-in.
+                          </p>
+                        ) : null}
                         <form
                           onSubmit={submit(login ? "login" : "register")}
                           className="space-y-4"
@@ -513,6 +565,22 @@ export default function Barbearia() {
                     <section className="min-w-0 space-y-6 [&_[data-slot=card]]:rounded-2xl [&_[data-slot=card]]:border-slate-200/80 [&_[data-slot=card]]:shadow-sm dark:[&_[data-slot=card]]:border-slate-800">
                   {(tab === "Dashboard" || tab === "Caixa") && (
                     <>
+                      {tab === "Dashboard" ? (
+                        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/30">
+                          <div>
+                            <p className="flex items-center gap-2 font-bold text-emerald-800 dark:text-emerald-200">
+                              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                              Link de agendamento ativo
+                            </p>
+                            <a className="mt-1 block break-all text-sm text-emerald-700 underline dark:text-emerald-300" href={`/b/${data.shop.slug}`} target="_blank" rel="noreferrer">
+                              {window.location.origin}/b/{data.shop.slug}
+                            </a>
+                          </div>
+                          <Button variant="outline" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/b/${data.shop.slug}`).then(() => toast.success("Link copiado."))}>
+                            <Copy className="mr-2 h-4 w-4" /> Copiar link
+                          </Button>
+                        </div>
+                      ) : null}
                       <Field
                         label="Dia do fluxo"
                         type="date"
@@ -684,7 +752,7 @@ export default function Barbearia() {
                             <Button
                               variant="outline"
                               onClick={() => {
-                                setProduct(p.id);
+                                setSelectedProducts([p.id]);
                                 setTab("Agenda");
                               }}
                             >
@@ -695,81 +763,158 @@ export default function Barbearia() {
                       </CardContent>
                     </Card>
                   )}
-                  {(tab === "Agenda" || tab === "Dashboard") && (
+                  {tab === "Agenda" && (
+                    <>
+                      <Card>
+                        <CardContent className="space-y-5 p-6">
+                          <div>
+                            <h2 className="text-xl font-bold">Novo agendamento</h2>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Selecione quantos serviços o cliente desejar no mesmo horário.
+                            </p>
+                          </div>
+                          {booking}
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="space-y-5 p-6">
+                          <div className="flex flex-wrap items-end justify-between gap-4">
+                            <div>
+                              <h2 className="text-xl font-bold">Agenda semanal</h2>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                Visualize a semana completa e filtre por barbeiro.
+                              </p>
+                            </div>
+                            <div className="grid w-full gap-3 sm:w-auto sm:grid-cols-2">
+                              <Field
+                                label="Semana"
+                                type="date"
+                                value={date}
+                                onChange={(e: any) => setDate(e.target.value)}
+                              />
+                              <SelectField
+                                label="Barbeiro"
+                                value={barber}
+                                onChange={(e: any) => setBarber(e.target.value)}
+                              >
+                                {options(s.barbers)}
+                              </SelectField>
+                            </div>
+                          </div>
+                          <div className="overflow-x-auto pb-2">
+                            <div className="grid min-w-[980px] grid-cols-7 gap-3">
+                              {calendarDays.map(day => {
+                                const dayAppointments = appointments
+                                  .filter(
+                                    (a: any) =>
+                                      a.date === day &&
+                                      a.status !== "cancelado" &&
+                                      (!barber || a.barberId === barber)
+                                  )
+                                  .sort((a: any, b: any) =>
+                                    a.time.localeCompare(b.time)
+                                  );
+                                return (
+                                  <div key={day} className="min-h-72 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                                    <div className="mb-3 border-b border-slate-200 pb-3 dark:border-slate-800">
+                                      <p className="text-xs font-bold uppercase text-blue-600">
+                                        {new Date(`${day}T12:00:00`).toLocaleDateString("pt-BR", { weekday: "short" })}
+                                      </p>
+                                      <p className="font-bold">
+                                        {new Date(`${day}T12:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
+                                      </p>
+                                    </div>
+                                    <div className="space-y-2">
+                                      {dayAppointments.length ? (
+                                        dayAppointments.map((a: any) => (
+                                          <div key={a.id} className={`rounded-xl border-l-4 bg-white p-3 shadow-sm dark:bg-slate-950 ${a.status === "check-in" ? "border-l-emerald-500" : a.status === "confirmado" ? "border-l-blue-500" : "border-l-amber-500"}`}>
+                                            <p className="text-sm font-black">{a.time}</p>
+                                            <p className="mt-1 truncate text-sm font-semibold">
+                                              {names(s.clients, a.clientId)}
+                                            </p>
+                                            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                                              {a.productName}
+                                            </p>
+                                            <p className="mt-2 text-xs font-semibold text-blue-700 dark:text-blue-300">
+                                              {names(s.barbers, a.barberId)}
+                                            </p>
+                                          </div>
+                                        ))
+                                      ) : (
+                                        <p className="py-6 text-center text-xs text-muted-foreground">Livre</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </>
+                  )}
+                  {tab === "Dashboard" && (
+                    <Card>
+                      <CardContent className="space-y-4 p-6">
+                        <h2 className="text-xl font-bold">Agenda do dia</h2>
+                        {appointments
+                          .filter((a: any) => a.date === date && a.status !== "cancelado")
+                          .sort((a: any, b: any) => a.time.localeCompare(b.time))
+                          .map((a: any) => (
+                            <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
+                              <div>
+                                <p className="font-bold">{a.time} · {names(s.clients, a.clientId)}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  {names(s.barbers, a.barberId)} · {a.productName} · {money(a.price)}
+                                </p>
+                              </div>
+                              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+                                {statusLabel[a.status] || a.status}
+                              </span>
+                            </div>
+                          ))}
+                      </CardContent>
+                    </Card>
+                  )}
+                  {tab === "Confirmações" && (
                     <Card>
                       <CardContent className="space-y-5 p-6">
-                        <h2 className="text-xl font-bold">
-                          {tab === "Agenda"
-                            ? "Novo agendamento"
-                            : "Agenda do dia"}
-                        </h2>
-                        {tab === "Agenda" && booking}
-                        <h3 className="font-semibold">
-                          {tab === "Agenda"
-                            ? "Agendamentos dos próximos 7 dias"
-                            : "Clientes agendados"}
-                        </h3>
+                        <div>
+                          <h2 className="text-xl font-bold">Confirmações e check-in</h2>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Confirme a reserva e registre a chegada do cliente.
+                          </p>
+                        </div>
                         {appointments
-                          .filter(
-                            (a: any) =>
-                              a.date >= date &&
-                              (tab === "Dashboard"
-                                ? a.date === date
-                                : new Date(a.date + "T12:00:00").getTime() <
-                                  new Date(date + "T12:00:00").getTime() +
-                                    7 * 86400000) &&
-                              (!barber || a.barberId === barber)
-                          )
-                          .sort((a: any, b: any) =>
-                            (a.date + a.time).localeCompare(b.date + b.time)
-                          )
+                          .filter((a: any) => a.date >= today() && !["cancelado", "concluido"].includes(a.status))
+                          .sort((a: any, b: any) => (a.date + a.time).localeCompare(b.date + b.time))
                           .map((a: any) => {
-                            const c = s.clients.find(
-                              (c: any) => c.id === a.clientId
-                            );
-                            let phone = String(c?.whatsapp || "").replace(
-                              /\D/g,
-                              ""
-                            );
+                            const c = s.clients.find((clientItem: any) => clientItem.id === a.clientId);
+                            let phone = String(c?.whatsapp || "").replace(/\D/g, "");
                             if (phone.length <= 11) phone = "55" + phone;
-                            const msg = `Olá, ${c?.name}! Confirmamos sua reserva na ${s.name} em ${a.date.split("-").reverse().join("/")} às ${a.time}, com ${names(s.barbers, a.barberId)}?`;
+                            const msg = `Olá, ${c?.name}! Sua reserva na ${s.name} está marcada para ${a.date.split("-").reverse().join("/")} às ${a.time}, com ${names(s.barbers, a.barberId)}. Podemos confirmar?`;
                             return (
-                              <div
-                                key={a.id}
-                                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"
-                              >
-                                <div>
-                                  <p className="font-semibold">
-                                    {a.date.split("-").reverse().join("/")} ·{" "}
-                                    {a.time} · {c?.name}
-                                  </p>
-                                  <p>
-                                    {names(s.barbers, a.barberId)} ·{" "}
-                                    {a.productName} · {money(a.price)} ·{" "}
-                                    {a.status}
-                                  </p>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                  <a
-                                    href={`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-flex items-center gap-2 rounded-lg border p-2 text-sm"
-                                  >
-                                    <MessageCircle className="h-4 w-4" />
-                                    Confirmar no WhatsApp
-                                  </a>
-                                  {a.status === "agendado" && (
-                                    <Button
-                                      variant="outline"
-                                      disabled={busy}
-                                      onClick={() =>
-                                        act("cancel", { id: a.id })
-                                      }
-                                    >
-                                      Cancelar
-                                    </Button>
-                                  )}
+                              <div key={a.id} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <p className="font-bold">{c?.name} · {a.date.split("-").reverse().join("/")} às {a.time}</p>
+                                    <p className="mt-1 text-sm text-muted-foreground">{a.productName} · {names(s.barbers, a.barberId)} · {money(a.price)}</p>
+                                    <p className="mt-2 text-xs font-bold uppercase tracking-wide text-blue-600">{statusLabel[a.status] || a.status}</p>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <a href={`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-sm font-semibold">
+                                      <MessageCircle className="h-4 w-4" /> WhatsApp
+                                    </a>
+                                    {a.status === "agendado" ? (
+                                      <Button disabled={busy} onClick={() => act("confirm", { id: a.id })}>Confirmar</Button>
+                                    ) : null}
+                                    {["agendado", "confirmado"].includes(a.status) ? (
+                                      <Button variant="outline" disabled={busy} onClick={() => act("checkin", { id: a.id })}>Fazer check-in</Button>
+                                    ) : null}
+                                    {["agendado", "confirmado"].includes(a.status) ? (
+                                      <Button variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" disabled={busy} onClick={() => act("cancel", { id: a.id })}>Cancelar</Button>
+                                    ) : null}
+                                  </div>
                                 </div>
                               </div>
                             );
