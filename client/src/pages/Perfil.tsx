@@ -49,7 +49,7 @@ type Profile = {
   editable: boolean;
   canDeleteAccount: boolean;
   canCancelPlan: boolean;
-  plan: "free" | "basic" | "plus" | null;
+  plan: "barber" | "free" | "basic" | "plus" | null;
   subscriptionStatus: string | null;
   priceCents: number | null;
   provider?: string | null;
@@ -365,13 +365,15 @@ export default function Perfil() {
   };
 
   const planName =
-    profile?.plan === "plus"
-      ? "Plus"
-      : profile?.plan === "basic"
-        ? "Basic"
-        : profile?.plan === "free"
-          ? "Grátis"
-          : null;
+    profile?.plan === "barber"
+      ? "Barbearia"
+      : profile?.plan === "plus"
+        ? "Plus"
+        : profile?.plan === "basic"
+          ? "Basic"
+          : profile?.plan === "free"
+            ? "Grátis"
+            : null;
   const activeSubscription =
     profile?.subscriptionStatus === "active" ||
     profile?.subscriptionStatus === "paid";

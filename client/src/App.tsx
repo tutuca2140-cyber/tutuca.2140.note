@@ -1,14 +1,16 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { lazy, Suspense } from "react";
-import { Route, Switch } from "wouter";
+import { lazy, Suspense, useEffect } from "react";
+import { Route, Switch, useLocation } from "wouter";
 import CommercialPaymentGate from "./components/CommercialPaymentGate";
 import ErrorBoundary from "./components/ErrorBoundary";
 import FloatingTutorial from "./components/FloatingTutorial";
 import SiteAccessTracker from "./components/SiteAccessTracker";
 import { ThemeProvider } from "./contexts/ThemeContext";
 
+import { useCommercialContext } from "./hooks/useCommercialContext";
+const Barbearia = lazy(() => import("./pages/Barbearia"));
 const Home = lazy(() => import("./pages/Home"));
 const Login = lazy(() => import("./pages/Login"));
 const Planos = lazy(() => import("./pages/Planos"));
@@ -43,22 +45,86 @@ const AdminConfiguracoes = lazy(() => import("./pages/admin/Configuracoes"));
 const AdminVisitantes = lazy(() => import("./pages/admin/Visitantes"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
-const PaidClientes = () => <CommercialPaymentGate><Clientes /></CommercialPaymentGate>;
-const PaidEmprestimos = () => <CommercialPaymentGate><Emprestimos /></CommercialPaymentGate>;
-const PaidPagamentos = () => <CommercialPaymentGate><Pagamentos /></CommercialPaymentGate>;
-const PaidCaixa = () => <CommercialPaymentGate><Caixa /></CommercialPaymentGate>;
-const PaidAgentes = () => <CommercialPaymentGate><Agentes /></CommercialPaymentGate>;
-const PaidVeiculos = () => <CommercialPaymentGate><Veiculos /></CommercialPaymentGate>;
-const PaidProdutos = () => <CommercialPaymentGate><Produtos /></CommercialPaymentGate>;
-const PaidImoveis = () => <CommercialPaymentGate><Imoveis /></CommercialPaymentGate>;
-const PaidAlugueis = () => <CommercialPaymentGate><Alugueis /></CommercialPaymentGate>;
-const PaidFinanciamentos = () => <CommercialPaymentGate><Financiamentos /></CommercialPaymentGate>;
-const PaidContasAReceber = () => <CommercialPaymentGate><ContasAReceber /></CommercialPaymentGate>;
-const PaidRelatorios = () => <CommercialPaymentGate><Relatorios /></CommercialPaymentGate>;
-const PaidMeuBanco = () => <CommercialPaymentGate><MeuBanco /></CommercialPaymentGate>;
-const PaidEquipe = () => <CommercialPaymentGate><Equipe /></CommercialPaymentGate>;
-const PaidTutorial = () => <CommercialPaymentGate><Tutorial /></CommercialPaymentGate>;
-const PaidFechamentos = () => <CommercialPaymentGate><Fechamentos /></CommercialPaymentGate>;
+const PaidClientes = () => (
+  <CommercialPaymentGate>
+    <Clientes />
+  </CommercialPaymentGate>
+);
+const PaidEmprestimos = () => (
+  <CommercialPaymentGate>
+    <Emprestimos />
+  </CommercialPaymentGate>
+);
+const PaidPagamentos = () => (
+  <CommercialPaymentGate>
+    <Pagamentos />
+  </CommercialPaymentGate>
+);
+const PaidCaixa = () => (
+  <CommercialPaymentGate>
+    <Caixa />
+  </CommercialPaymentGate>
+);
+const PaidAgentes = () => (
+  <CommercialPaymentGate>
+    <Agentes />
+  </CommercialPaymentGate>
+);
+const PaidVeiculos = () => (
+  <CommercialPaymentGate>
+    <Veiculos />
+  </CommercialPaymentGate>
+);
+const PaidProdutos = () => (
+  <CommercialPaymentGate>
+    <Produtos />
+  </CommercialPaymentGate>
+);
+const PaidImoveis = () => (
+  <CommercialPaymentGate>
+    <Imoveis />
+  </CommercialPaymentGate>
+);
+const PaidAlugueis = () => (
+  <CommercialPaymentGate>
+    <Alugueis />
+  </CommercialPaymentGate>
+);
+const PaidFinanciamentos = () => (
+  <CommercialPaymentGate>
+    <Financiamentos />
+  </CommercialPaymentGate>
+);
+const PaidContasAReceber = () => (
+  <CommercialPaymentGate>
+    <ContasAReceber />
+  </CommercialPaymentGate>
+);
+const PaidRelatorios = () => (
+  <CommercialPaymentGate>
+    <Relatorios />
+  </CommercialPaymentGate>
+);
+const PaidMeuBanco = () => (
+  <CommercialPaymentGate>
+    <MeuBanco />
+  </CommercialPaymentGate>
+);
+const PaidEquipe = () => (
+  <CommercialPaymentGate>
+    <Equipe />
+  </CommercialPaymentGate>
+);
+const PaidTutorial = () => (
+  <CommercialPaymentGate>
+    <Tutorial />
+  </CommercialPaymentGate>
+);
+const PaidFechamentos = () => (
+  <CommercialPaymentGate>
+    <Fechamentos />
+  </CommercialPaymentGate>
+);
 
 function AuthenticatedSystemGuide() {
   const { user, loading } = useAuth();
@@ -67,8 +133,26 @@ function AuthenticatedSystemGuide() {
 }
 
 function Router() {
+  const { data: commercial, loading: checking } = useCommercialContext();
+  const [path, navigate] = useLocation();
+  const barberRestricted =
+    commercial?.plan === "barber" &&
+    !["/barbearia", "/perfil", "/login"].includes(path) &&
+    !path.startsWith("/b/");
+  useEffect(() => {
+    if (barberRestricted) navigate("/barbearia", { replace: true });
+  }, [barberRestricted, navigate]);
+  if (
+    barberRestricted ||
+    (checking &&
+      !["/", "/login", "/cadastro", "/planos"].includes(path) &&
+      !path.startsWith("/b/"))
+  )
+    return <p className="p-8">Carregando sua área...</p>;
   return (
     <Switch>
+      <Route path="/barbearia" component={Barbearia} />
+      <Route path="/b/:slug" component={Barbearia} />
       <Route path={"/login"} component={Login} />
       <Route path={"/planos"} component={Planos} />
       <Route path={"/cadastro"} component={Cadastro} />
@@ -115,7 +199,13 @@ function App() {
           <Toaster />
           <SiteAccessTracker />
           <AuthenticatedSystemGuide />
-          <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Carregando...</div>}>
+          <Suspense
+            fallback={
+              <div className="min-h-screen grid place-items-center text-muted-foreground">
+                Carregando...
+              </div>
+            }
+          >
             <Router />
           </Suspense>
         </TooltipProvider>

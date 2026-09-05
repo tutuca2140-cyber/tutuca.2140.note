@@ -194,6 +194,7 @@ async function getProfile(client: Client, user: any) {
       subscription?.plan !== "free" &&
       subscription?.status !== "canceled",
     plan:
+      subscription?.plan === "barber" ||
       subscription?.plan === "free" ||
       subscription?.plan === "basic" ||
       subscription?.plan === "plus"

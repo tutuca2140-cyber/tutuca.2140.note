@@ -383,6 +383,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       </div>
     );
   if (!user) return null;
+  if (commercialContext?.plan === "barber")
+    return (
+      <div className="min-h-screen bg-background p-5">
+        <a href="/barbearia" className="mb-6 inline-block text-primary">
+          ← Voltar à barbearia
+        </a>
+        {children}
+      </div>
+    );
 
   let renderedChildren = children;
   if (location === "/dashboard" && isValidElement(children)) {
