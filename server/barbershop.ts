@@ -41,14 +41,38 @@ export function slotFree(
   )
     return false;
   const day = new Date(`${date}T12:00:00-03:00`);
-  if (Number.isNaN(day.getTime()) || !state.days.includes(day.getUTCDay()))
+  const barber = state.barbers?.find((b: any) => b.id === barberId);
+  const workingDays = barber?.days?.length ? barber.days : state.days;
+  const openingTime = barber?.open || state.open;
+  const closingTime = barber?.close || state.close;
+  if (
+    Number.isNaN(day.getTime()) ||
+    !workingDays.includes(day.getUTCDay())
+  )
     return false;
   const start = minutes(time),
     end = start + duration;
   if (
-    start < minutes(state.open) ||
-    end > minutes(state.close) ||
+    start < minutes(openingTime) ||
+    end > minutes(closingTime) ||
     new Date(`${date}T${time}:00-03:00`).getTime() <= Date.now()
+  )
+    return false;
+  if (
+    barber?.breakStart &&
+    barber?.breakEnd &&
+    start < minutes(barber.breakEnd) &&
+    end > minutes(barber.breakStart)
+  )
+    return false;
+  if (
+    (state.blocks || []).some(
+      (block: any) =>
+        block.barberId === barberId &&
+        block.date === date &&
+        start < minutes(block.end) &&
+        end > minutes(block.start)
+    )
   )
     return false;
   return !state.appointments.some(
@@ -142,6 +166,7 @@ export async function handleBarbershop(req: any, res: any) {
         appointments: [],
         payments: [],
         expenses: [],
+        blocks: [],
         rates: { credit: 0, debit: 0 },
       };
       rows =
@@ -274,7 +299,57 @@ export async function handleBarbershop(req: any, res: any) {
       state.days = body.days;
     } else if (action === "barber") {
       if (str(body.name).length < 2) fail("Informe o nome do barbeiro.");
-      state.barbers.push({ id: id(), name: str(body.name), active: true });
+      const commissionType = body.commissionType === "fixed" ? "fixed" : "percent";
+      const commissionValue =
+        commissionType === "fixed" ? cents(body.commissionValue || 0) : Number(body.commissionValue || 0);
+      if (commissionType === "percent" && (!Number.isFinite(commissionValue) || commissionValue < 0 || commissionValue > 100))
+        fail("A comissão percentual deve estar entre 0 e 100%.");
+      const days = Array.isArray(body.days) && body.days.length ? body.days.map(Number) : state.days;
+      const open = str(body.open) || state.open;
+      const close = str(body.close) || state.close;
+      if (minutes(open) >= minutes(close)) fail("Confira o horário do barbeiro.");
+      state.barbers.push({
+        id: id(),
+        name: str(body.name),
+        active: true,
+        commissionType,
+        commissionValue,
+        days,
+        open,
+        close,
+        breakStart: str(body.breakStart) || null,
+        breakEnd: str(body.breakEnd) || null,
+      });
+    } else if (action === "updateBarber") {
+      const professional = state.barbers.find((b: any) => b.id === body.id);
+      if (!professional) fail("Barbeiro não encontrado.", 404);
+      const commissionType = body.commissionType === "fixed" ? "fixed" : "percent";
+      const commissionValue = commissionType === "fixed" ? cents(body.commissionValue || 0) : Number(body.commissionValue || 0);
+      if (commissionType === "percent" && (!Number.isFinite(commissionValue) || commissionValue < 0 || commissionValue > 100))
+        fail("A comissão percentual deve estar entre 0 e 100%.");
+      const days = Array.isArray(body.days) && body.days.length ? body.days.map(Number) : state.days;
+      const open = str(body.open) || state.open;
+      const close = str(body.close) || state.close;
+      if (minutes(open) >= minutes(close)) fail("Confira o horário do barbeiro.");
+      Object.assign(professional, {
+        name: str(body.name) || professional.name,
+        commissionType,
+        commissionValue,
+        days,
+        open,
+        close,
+        breakStart: str(body.breakStart) || null,
+        breakEnd: str(body.breakEnd) || null,
+      });
+    } else if (action === "block") {
+      const start = str(body.start), end = str(body.end), blockDate = str(body.date);
+      if (!state.barbers.some((b: any) => b.id === body.barberId) || !/^\d{4}-\d{2}-\d{2}$/.test(blockDate) || minutes(start) >= minutes(end))
+        fail("Confira o barbeiro, a data e o período do bloqueio.");
+      state.blocks ||= [];
+      state.blocks.push({ id: id(), barberId: body.barberId, date: blockDate, start, end, reason: str(body.reason) || "Horário indisponível" });
+    } else if (action === "unblock") {
+      state.blocks ||= [];
+      state.blocks = state.blocks.filter((block: any) => block.id !== body.id);
     } else if (action === "product") {
       const duration = Number(body.duration);
       if (
@@ -390,6 +465,10 @@ export async function handleBarbershop(req: any, res: any) {
         fail("Forma de pagamento inválida.");
       const rate = state.rates[method] || 0;
       const fee = Math.round((a.price * rate) / 100);
+      const professional = state.barbers.find((b: any) => b.id === a.barberId);
+      const commission = professional?.commissionType === "fixed"
+        ? Math.min(a.price, Number(professional.commissionValue || 0))
+        : Math.round((a.price * Number(professional?.commissionValue || 0)) / 100);
       state.payments.push({
         id: id(),
         appointmentId: a.id,
@@ -397,6 +476,9 @@ export async function handleBarbershop(req: any, res: any) {
         amount: a.price,
         fee,
         net: a.price - fee,
+        businessNet: a.price - fee - commission,
+        commission,
+        barberId: a.barberId,
         rate,
         method,
         date: new Date().toISOString(),
