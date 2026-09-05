@@ -14,7 +14,10 @@ import {
   Settings,
   LayoutDashboard,
   Copy,
+  ChevronRight,
+  Menu,
   MessageCircle,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -67,7 +70,8 @@ export default function Barbearia() {
   const [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
-    [tab, setTab] = useState("Dashboard");
+    [tab, setTab] = useState("Dashboard"),
+    [drawerOpen, setDrawerOpen] = useState(false);
   const [date, setDate] = useState(today),
     [barber, setBarber] = useState(""),
     [product, setProduct] = useState(""),
@@ -123,6 +127,16 @@ export default function Barbearia() {
     };
   }
   const s = pub ? data?.shop : data?.shop?.data;
+  const navigation = [
+    ["Dashboard", LayoutDashboard],
+    ["Barbeiros", Scissors],
+    ["Agenda", CalendarDays],
+    ["Clientes", Users],
+    ["Produtos", Package],
+    ["Caixa", Wallet],
+    ["Pagamento", Wallet],
+    ["Perfil", Settings],
+  ] as const;
   const names = (list: any[], id: string) =>
     list?.find(x => x.id === id)?.name || "—";
   const appointments = s?.appointments || [];
@@ -247,19 +261,35 @@ export default function Barbearia() {
   );
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <header className="border-b bg-white dark:bg-slate-900">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 p-5">
+      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/95">
+        <div className="mx-auto flex min-h-[76px] max-w-[1600px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
-            <span className="rounded-xl bg-blue-600 p-3 text-white">
+            {!pub && s ? (
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-11 w-11 rounded-xl lg:hidden"
+                onClick={() => setDrawerOpen(true)}
+                aria-label="Abrir menu da barbearia"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            ) : null}
+            <span className="rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 p-3 text-white shadow-lg shadow-blue-600/20">
               <Scissors />
             </span>
             <div>
-              <p className="text-sm font-semibold text-blue-600">
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-600">
                 Note Note · Barbearia
               </p>
               <h1 className="text-xl font-bold">
                 {s?.name || "Sua barbearia"}
               </h1>
+              {!pub && s ? (
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {tab}
+                </p>
+              ) : null}
             </div>
           </div>
           {!pub && (
@@ -290,7 +320,7 @@ export default function Barbearia() {
           )}
         </div>
       </header>
-      <main className="mx-auto max-w-7xl space-y-6 p-5 sm:p-8">
+      <main className={`${pub ? "mx-auto max-w-7xl" : "mx-auto max-w-[1600px]"} space-y-6 p-4 sm:p-6 lg:p-8`}>
         {error ? (
           <Card>
             <CardContent className="space-y-3 p-6">
@@ -409,27 +439,78 @@ export default function Barbearia() {
                 </div>
               ) : (
                 <>
-                  <nav className="flex flex-wrap gap-2">
-                    {[
-                      ["Dashboard", LayoutDashboard],
-                      ["Barbeiros", Scissors],
-                      ["Agenda", CalendarDays],
-                      ["Clientes", Users],
-                      ["Produtos", Package],
-                      ["Caixa", Wallet],
-                      ["Pagamento", Wallet],
-                      ["Perfil", Settings],
-                    ].map(([name, Icon]: any) => (
-                      <Button
-                        key={name}
-                        variant={tab === name ? "default" : "outline"}
-                        onClick={() => setTab(name)}
-                      >
-                        <Icon className="mr-2 h-4 w-4" />
-                        {name}
-                      </Button>
-                    ))}
-                  </nav>
+                  {drawerOpen ? (
+                    <>
+                      <button
+                        type="button"
+                        aria-label="Fechar menu"
+                        className="fixed inset-0 z-50 bg-slate-950/55 backdrop-blur-sm lg:hidden"
+                        onClick={() => setDrawerOpen(false)}
+                      />
+                      <aside className="fixed inset-y-0 left-0 z-[60] flex w-[min(86vw,320px)] flex-col bg-slate-950 p-4 text-white shadow-2xl lg:hidden">
+                        <div className="mb-5 flex items-center justify-between border-b border-white/10 pb-4">
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-300">
+                              Menu
+                            </p>
+                            <p className="mt-1 font-bold">{s.name}</p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-white hover:bg-white/10 hover:text-white"
+                            onClick={() => setDrawerOpen(false)}
+                            aria-label="Fechar menu"
+                          >
+                            <X className="h-5 w-5" />
+                          </Button>
+                        </div>
+                        <nav className="space-y-1 overflow-y-auto">
+                          {navigation.map(([name, Icon]) => (
+                            <button
+                              key={name}
+                              type="button"
+                              onClick={() => {
+                                setTab(name);
+                                setDrawerOpen(false);
+                              }}
+                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition-colors ${tab === name ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}
+                            >
+                              <Icon className="h-5 w-5" />
+                              <span className="flex-1">{name}</span>
+                              <ChevronRight className="h-4 w-4 opacity-60" />
+                            </button>
+                          ))}
+                        </nav>
+                      </aside>
+                    </>
+                  ) : null}
+                  <div className="grid items-start gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+                    <aside className="sticky top-24 hidden rounded-3xl bg-slate-950 p-4 text-white shadow-xl lg:block">
+                      <div className="mb-4 border-b border-white/10 px-2 pb-4">
+                        <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-300">
+                          Gestão da barbearia
+                        </p>
+                        <p className="mt-2 text-sm text-slate-400">
+                          Escolha uma área para gerenciar.
+                        </p>
+                      </div>
+                      <nav className="space-y-1">
+                        {navigation.map(([name, Icon]) => (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => setTab(name)}
+                            className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition-colors ${tab === name ? "bg-blue-600 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}
+                          >
+                            <Icon className="h-5 w-5" />
+                            <span className="flex-1">{name}</span>
+                            <ChevronRight className="h-4 w-4 opacity-60" />
+                          </button>
+                        ))}
+                      </nav>
+                    </aside>
+                    <section className="min-w-0 space-y-6 [&_[data-slot=card]]:rounded-2xl [&_[data-slot=card]]:border-slate-200/80 [&_[data-slot=card]]:shadow-sm dark:[&_[data-slot=card]]:border-slate-800">
                   {(tab === "Dashboard" || tab === "Caixa") && (
                     <>
                       <Field
@@ -856,6 +937,8 @@ export default function Barbearia() {
                       </CardContent>
                     </Card>
                   )}
+                    </section>
+                  </div>
                 </>
               )}
             </>
