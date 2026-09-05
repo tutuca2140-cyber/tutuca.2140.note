@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  CreditCard,
   Crown,
   Gift,
   Sparkles,
@@ -131,13 +132,13 @@ export default function Planos() {
               momento.
             </p>
           </div>
-          <div className="mx-auto mt-12 grid max-w-6xl gap-6 md:grid-cols-3">
+          <div className="mx-auto mt-12 grid max-w-7xl gap-6 md:grid-cols-2 xl:grid-cols-4">
             {plans.map(plan => {
               const Icon = plan.icon;
               return (
                 <article
                   key={plan.id}
-                  className={`relative overflow-hidden rounded-[2rem] border bg-white p-7 shadow-xl sm:p-9 ${plan.featured ? "border-blue-500 shadow-blue-600/15" : "border-slate-200"}`}
+                  className={`relative overflow-hidden rounded-[2rem] border bg-white p-7 shadow-xl sm:p-8 ${plan.featured ? "border-blue-500 shadow-blue-600/15" : plan.id === "barber" ? "border-indigo-300 shadow-indigo-600/10" : "border-slate-200"}`}
                 >
                   {plan.featured && (
                     <div className="absolute right-0 top-0 rounded-bl-2xl bg-blue-600 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-white">
@@ -174,6 +175,19 @@ export default function Planos() {
                       </p>
                       <p className="mt-2 text-xs font-semibold text-emerald-800">
                         12 meses de acesso · economia de R$ {plan.annualSavings}
+                      </p>
+                    </div>
+                  ) : plan.id === "barber" ? (
+                    <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                      <p className="flex items-center gap-2 text-xs font-extrabold uppercase text-blue-700">
+                        <CreditCard className="h-4 w-4" />
+                        Cobrança recorrente
+                      </p>
+                      <p className="mt-1 text-2xl font-black text-blue-950">
+                        Cartão de crédito
+                      </p>
+                      <p className="mt-2 text-xs font-semibold text-blue-800">
+                        R$ 14,99 cobrados automaticamente todo mês
                       </p>
                     </div>
                   ) : (
@@ -221,7 +235,9 @@ export default function Planos() {
                       <Check className="h-5 w-5 text-emerald-600" />
                       {plan.id === "free"
                         ? "Sem cartão e sem cobrança"
-                        : "Mensal no cartão ou anual no Pix"}
+                        : plan.id === "barber"
+                          ? "Cobrança recorrente mensal no cartão"
+                          : "Mensal no cartão ou anual no Pix"}
                     </div>
                     {plan.id !== "free" && (
                       <div className="flex gap-3">
@@ -244,7 +260,9 @@ export default function Planos() {
                           onClick={() => choosePlan(plan.id, "card_monthly")}
                           className={`h-14 rounded-xl font-extrabold ${plan.featured ? "bg-blue-600 text-white" : "border border-blue-200 bg-blue-50 text-blue-700"}`}
                         >
-                          Assinar mensal
+                          {plan.id === "barber"
+                            ? "Assinar no cartão — R$ 14,99/mês"
+                            : "Assinar mensal"}
                         </button>
                         <button
                           hidden={plan.id === "barber"}
@@ -260,7 +278,13 @@ export default function Planos() {
                     {plan.id === "free"
                       ? "* O plano grátis não exige forma de pagamento."
                       : "* Novos usuários elegíveis têm 7 dias grátis. O plano mensal "}
-                    {plan.id !== "free" && (
+                    {plan.id === "barber" ? (
+                      <>
+                        A cobrança de R$ 14,99 é renovada mensalmente no cartão
+                        de crédito e pode ser cancelada a qualquer momento,
+                        ressalvados valores já vencidos e ciclos iniciados.
+                      </>
+                    ) : plan.id !== "free" && (
                       <>
                         não possui fidelidade e pode ser cancelado a qualquer
                         momento, ressalvados valores já vencidos e ciclos de
