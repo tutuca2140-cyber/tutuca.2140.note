@@ -52,6 +52,7 @@ const plans = {
   },
 } as const;
 
+const BARBER_PLAN_SALES_ENABLED = false;
 type PlanId = keyof typeof plans;
 type BillingMethod = "free" | "card_monthly" | "pix_annual";
 type PixInfo = {
@@ -67,7 +68,7 @@ function readSelectedPlan(): PlanId | null {
     .get("plano")
     ?.toLowerCase();
   if (
-    query === "barber" ||
+    (BARBER_PLAN_SALES_ENABLED && query === "barber") ||
     query === "free" ||
     query === "basic" ||
     query === "plus"
@@ -76,7 +77,7 @@ function readSelectedPlan(): PlanId | null {
   try {
     const stored = sessionStorage.getItem("notenote:selected-plan");
     if (
-      stored === "barber" ||
+      (BARBER_PLAN_SALES_ENABLED && stored === "barber") ||
       stored === "free" ||
       stored === "basic" ||
       stored === "plus"
@@ -89,7 +90,8 @@ function readBillingMethod(): BillingMethod {
   const selectedPlan = new URLSearchParams(window.location.search)
     .get("plano")
     ?.toLowerCase();
-  if (selectedPlan === "barber") return "card_monthly";
+  if (BARBER_PLAN_SALES_ENABLED && selectedPlan === "barber")
+    return "card_monthly";
   if (selectedPlan === "free") return "free";
   if (!selectedPlan) {
     try {

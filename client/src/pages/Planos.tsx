@@ -79,6 +79,7 @@ const plans = [
     icon: Crown,
   },
 ] as const;
+const BARBER_PLAN_SALES_ENABLED = false;
 type PlanId = "barber" | "free" | "basic" | "plus";
 type BillingMethod = "free" | "card_monthly" | "pix_annual";
 function choosePlan(planId: PlanId, billingMethod: BillingMethod) {
@@ -133,7 +134,11 @@ export default function Planos() {
             </p>
           </div>
           <div className="mx-auto mt-12 grid max-w-7xl gap-6 md:grid-cols-2 xl:grid-cols-4">
-            {plans.map(plan => {
+            {plans
+              .filter(
+                plan => BARBER_PLAN_SALES_ENABLED || plan.id !== "barber",
+              )
+              .map(plan => {
               const Icon = plan.icon;
               return (
                 <article
@@ -295,7 +300,7 @@ export default function Planos() {
                   </p>
                 </article>
               );
-            })}
+              })}
           </div>
           <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-blue-100 bg-white/80 p-5 text-center text-sm leading-6 text-slate-600">
             <strong className="text-slate-900">Condição de contratação:</strong>{" "}
