@@ -25,6 +25,7 @@ const ANNUAL_PIX_PRICES = {
   plus: 39990,
 } as const;
 const PLAN_DATABASE_LIMITS = { barber: 0, free: 1, basic: 1, plus: 3 } as const;
+const BARBER_PLAN_SALES_ENABLED = false;
 const PLAN_LABELS = {
   barber: "Barbearia",
   free: "Grátis",
@@ -409,6 +410,11 @@ export default async function handler(req: any, res: any) {
       return sendJson(res, 400, {
         success: false,
         message: "Escolha o plano Grátis, Basic ou Plus antes de se cadastrar.",
+      });
+    if (!BARBER_PLAN_SALES_ENABLED && plan === "barber")
+      return sendJson(res, 403, {
+        success: false,
+        message: "Este plano não está disponível para novas contratações no momento.",
       });
     if (!isBillingMethod(billingMethodInput))
       return sendJson(res, 400, {
