@@ -22,6 +22,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 
 const plans = {
+  barber: {
+    name: "Barbearia",
+    monthly: "R$ 14,99/mês",
+    annualPix: "Somente mensal",
+    savings: "",
+    databaseAccess: "Área exclusiva para barbearia",
+  },
   free: {
     name: "Grátis",
     monthly: "R$ 0",
@@ -59,10 +66,21 @@ function readSelectedPlan(): PlanId | null {
   const query = new URLSearchParams(window.location.search)
     .get("plano")
     ?.toLowerCase();
-  if (query === "free" || query === "basic" || query === "plus") return query;
+  if (
+    query === "barber" ||
+    query === "free" ||
+    query === "basic" ||
+    query === "plus"
+  )
+    return query;
   try {
     const stored = sessionStorage.getItem("notenote:selected-plan");
-    if (stored === "free" || stored === "basic" || stored === "plus")
+    if (
+      stored === "barber" ||
+      stored === "free" ||
+      stored === "basic" ||
+      stored === "plus"
+    )
       return stored;
   } catch {}
   return "free";
@@ -71,6 +89,7 @@ function readBillingMethod(): BillingMethod {
   const selectedPlan = new URLSearchParams(window.location.search)
     .get("plano")
     ?.toLowerCase();
+  if (selectedPlan === "barber") return "card_monthly";
   if (selectedPlan === "free") return "free";
   if (!selectedPlan) {
     try {
@@ -475,6 +494,7 @@ export default function Cadastro() {
                 </button>
                 <button
                   type="button"
+                  disabled={plan === "barber"}
                   onClick={() => setBillingMethod("pix_annual")}
                   className={`rounded-2xl border p-4 text-left ${billingMethod === "pix_annual" ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100" : "border-slate-200 bg-white"}`}
                 >

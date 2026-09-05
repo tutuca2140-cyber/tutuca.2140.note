@@ -147,13 +147,15 @@ async function handleContext(req: any, res: any, viewer: any) {
   }
 
   const plan =
-    account.plan === "plus"
-      ? "plus"
-      : account.plan === "basic"
-        ? "basic"
-        : account.plan === "free"
-          ? "free"
-          : null;
+    account.plan === "barber"
+      ? "barber"
+      : account.plan === "plus"
+        ? "plus"
+        : account.plan === "basic"
+          ? "basic"
+          : account.plan === "free"
+            ? "free"
+            : null;
   return sendJson(res, 200, {
     success: true,
     commercial: true,
@@ -172,7 +174,7 @@ async function handleContext(req: any, res: any, viewer: any) {
         (account.isOwner || viewer.canManageUsers)
       ),
       canManageDatabases: Boolean(
-        account.active && (account.isOwner || viewer.canManageDatabases)
+        account.plan !== "barber" && account.active && (account.isOwner || viewer.canManageDatabases)
       ),
       canDeleteCashFlow: Boolean(
         account.active && (account.isOwner || viewer.canDeleteCashFlow)
@@ -319,9 +321,9 @@ async function handleTeam(req: any, res: any, viewer: any) {
   }
 
   const canManageTeam = Boolean(
-    account.active &&
-    account.plan === "plus" &&
-    (account.isOwner || viewer.canManageUsers)
+    account.active && account.plan === "barber"
+      ? "barber"
+      : account.plan === "plus" && (account.isOwner || viewer.canManageUsers)
   );
 
   if (req.method === "GET") {
@@ -335,7 +337,12 @@ async function handleTeam(req: any, res: any, viewer: any) {
       status: account.status,
       isOwner: account.isOwner,
       canManageTeam,
-      teamLimit: account.plan === "plus" ? TEAM_LIMIT : 0,
+      teamLimit:
+        account.plan === "barber"
+          ? "barber"
+          : account.plan === "plus"
+            ? TEAM_LIMIT
+            : 0,
       members,
       databases,
       viewerPermissions: {
