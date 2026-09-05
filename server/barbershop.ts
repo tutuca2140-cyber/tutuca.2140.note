@@ -79,12 +79,14 @@ async function owner(req: any) {
   if (!token) fail("Entre na sua conta.", 401);
   const sql = getSql();
   const rows =
-    await sql`SELECT u.id,u.name,u."supportId", cs.plan,cs.status FROM local_sessions s JOIN users u ON u.id=s."userId" JOIN commercial_subscriptions cs ON cs."userId"=u.id WHERE s.token=${token} AND s."expiresAt">NOW() AND u."isActive"=true LIMIT 1`;
+    await sql`SELECT u.id,u.name,u."supportId",u.role,cs.plan,cs.status FROM local_sessions s JOIN users u ON u.id=s."userId" LEFT JOIN commercial_subscriptions cs ON cs."userId"=u.id WHERE s.token=${token} AND s."expiresAt">NOW() AND u."isActive"=true LIMIT 1`;
   const u = rows[0];
+  const isSuperAdmin = u?.role === "super_admin";
   if (
     !u ||
-    u.plan !== "barber" ||
-    !["active", "paid"].includes(String(u.status))
+    (!isSuperAdmin &&
+      (u.plan !== "barber" ||
+        !["active", "paid"].includes(String(u.status))))
   )
     fail("Acesso exclusivo ao plano Barbearia ativo.", 403);
   return u;
