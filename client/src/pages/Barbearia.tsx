@@ -162,6 +162,7 @@ export default function Barbearia() {
   };
   const payments = s?.payments || [];
   const expenses = s?.expenses || [];
+  const blocks = s?.blocks || [];
   const dayPayments = payments.filter(
     (p: any) =>
       new Date(p.date).toLocaleDateString("en-CA", {
@@ -587,14 +588,19 @@ export default function Barbearia() {
                         value={date}
                         onChange={(e: any) => setDate(e.target.value)}
                       />
-                      <div className="grid gap-4 sm:grid-cols-4">
+                      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
                         {[
                           ["Recebido", sum(dayPayments, "amount")],
                           ["Taxas", sum(dayPayments, "fee")],
+                          ["Comissões", sum(dayPayments, "commission")],
                           ["Saídas", sum(dayExpenses, "amount")],
                           [
                             "Saldo diário",
-                            sum(dayPayments, "net") -
+                            dayPayments.reduce(
+                              (total: number, payment: any) =>
+                                total + Number(payment.businessNet ?? payment.net ?? 0),
+                              0
+                            ) -
                               sum(dayExpenses, "amount"),
                           ],
                         ].map(([label, value]) => (
@@ -646,7 +652,7 @@ export default function Barbearia() {
                               <p key={p.id}>
                                 {names(s.clients, p.clientId)} ·{" "}
                                 {methods[p.method]} · recebido {money(p.amount)}{" "}
-                                · taxa {money(p.fee)} · líquido {money(p.net)}
+                                · taxa {money(p.fee)} · comissão {money(p.commission || 0)} · líquido da barbearia {money(p.businessNet ?? p.net)}
                               </p>
                             ))}
                             {dayExpenses.map((e: any) => (
@@ -660,29 +666,104 @@ export default function Barbearia() {
                     </>
                   )}
                   {tab === "Barbeiros" && (
-                    <Card>
-                      <CardContent className="space-y-5 p-6">
-                        <h2 className="text-xl font-bold">
-                          Barbeiros cadastrados
-                        </h2>
-                        <form
-                          onSubmit={submit("barber")}
-                          className="flex flex-wrap items-end gap-4"
-                        >
-                          <Field
-                            label="Nome do barbeiro"
-                            name="name"
-                            required
-                          />
-                          <Button disabled={busy}>Cadastrar</Button>
-                        </form>
-                        {s.barbers.map((b: any) => (
-                          <p key={b.id} className="rounded-lg border p-4">
-                            {b.name}
-                          </p>
-                        ))}
-                      </CardContent>
-                    </Card>
+                    <div className="space-y-6">
+                      <Card>
+                        <CardContent className="space-y-5 p-6">
+                          <div>
+                            <h2 className="text-xl font-bold">Cadastrar barbeiro</h2>
+                            <p className="mt-1 text-sm text-muted-foreground">Defina comissão, jornada e intervalo individual.</p>
+                          </div>
+                          <form
+                            onSubmit={async e => {
+                              e.preventDefault();
+                              const form = e.currentTarget;
+                              const f = new FormData(form);
+                              if (await act("barber", {
+                                name: f.get("name"), commissionType: f.get("commissionType"), commissionValue: f.get("commissionValue"),
+                                open: f.get("open"), close: f.get("close"), breakStart: f.get("breakStart"), breakEnd: f.get("breakEnd"),
+                                days: f.getAll("days").map(Number),
+                              })) form.reset();
+                            }}
+                            className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+                          >
+                            <Field label="Nome" name="name" required />
+                            <SelectField label="Tipo de comissão" name="commissionType" required>
+                              <option value="percent">Porcentagem</option>
+                              <option value="fixed">Valor fixo por atendimento</option>
+                            </SelectField>
+                            <Field label="Comissão (% ou R$)" name="commissionValue" type="number" min="0" step="0.01" defaultValue="0" required />
+                            <Field label="Entrada" name="open" type="time" defaultValue={s.open} required />
+                            <Field label="Saída" name="close" type="time" defaultValue={s.close} required />
+                            <Field label="Início do intervalo" name="breakStart" type="time" />
+                            <Field label="Fim do intervalo" name="breakEnd" type="time" />
+                            <fieldset className="sm:col-span-2 xl:col-span-4">
+                              <legend className="mb-2 text-sm font-medium">Dias de trabalho</legend>
+                              <div className="flex flex-wrap gap-3">
+                                {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((label, index) => (
+                                  <label key={label} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+                                    <input type="checkbox" name="days" value={index} defaultChecked={s.days.includes(index)} /> {label}
+                                  </label>
+                                ))}
+                              </div>
+                            </fieldset>
+                            <Button disabled={busy} className="sm:col-span-2 xl:col-span-4">Cadastrar barbeiro</Button>
+                          </form>
+                        </CardContent>
+                      </Card>
+                      {s.barbers.map((professional: any) => {
+                        const commissionTotal = dayPayments.reduce((total: number, payment: any) => {
+                          const appointment = appointments.find((item: any) => item.id === payment.appointmentId);
+                          return (payment.barberId || appointment?.barberId) === professional.id ? total + Number(payment.commission || 0) : total;
+                        }, 0);
+                        return (
+                          <Card key={professional.id}>
+                            <CardContent className="space-y-5 p-6">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                  <h3 className="text-lg font-bold">{professional.name}</h3>
+                                  <p className="text-sm text-muted-foreground">Comissão no dia selecionado</p>
+                                </div>
+                                <p className="text-2xl font-black text-emerald-600">{money(commissionTotal)}</p>
+                              </div>
+                              <form
+                                onSubmit={e => {
+                                  e.preventDefault();
+                                  const f = new FormData(e.currentTarget);
+                                  void act("updateBarber", {
+                                    id: professional.id, name: f.get("name"), commissionType: f.get("commissionType"), commissionValue: f.get("commissionValue"),
+                                    open: f.get("open"), close: f.get("close"), breakStart: f.get("breakStart"), breakEnd: f.get("breakEnd"),
+                                    days: f.getAll("days").map(Number),
+                                  });
+                                }}
+                                className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+                              >
+                                <Field label="Nome" name="name" defaultValue={professional.name} required />
+                                <SelectField label="Tipo de comissão" name="commissionType" defaultValue={professional.commissionType || "percent"} required>
+                                  <option value="percent">Porcentagem</option>
+                                  <option value="fixed">Valor fixo</option>
+                                </SelectField>
+                                <Field label="Comissão (% ou R$)" name="commissionValue" type="number" min="0" step="0.01" defaultValue={professional.commissionType === "fixed" ? Number(professional.commissionValue || 0) / 100 : Number(professional.commissionValue || 0)} required />
+                                <Field label="Entrada" name="open" type="time" defaultValue={professional.open || s.open} required />
+                                <Field label="Saída" name="close" type="time" defaultValue={professional.close || s.close} required />
+                                <Field label="Início do intervalo" name="breakStart" type="time" defaultValue={professional.breakStart || ""} />
+                                <Field label="Fim do intervalo" name="breakEnd" type="time" defaultValue={professional.breakEnd || ""} />
+                                <fieldset className="sm:col-span-2 xl:col-span-4">
+                                  <legend className="mb-2 text-sm font-medium">Dias de trabalho</legend>
+                                  <div className="flex flex-wrap gap-3">
+                                    {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((label, index) => (
+                                      <label key={label} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+                                        <input type="checkbox" name="days" value={index} defaultChecked={(professional.days || s.days).includes(index)} /> {label}
+                                      </label>
+                                    ))}
+                                  </div>
+                                </fieldset>
+                                <Button disabled={busy} className="sm:col-span-2 xl:col-span-4">Salvar configurações</Button>
+                              </form>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
                   )}
                   {tab === "Clientes" && (
                     <Card>
@@ -774,6 +855,32 @@ export default function Barbearia() {
                             </p>
                           </div>
                           {booking}
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="space-y-5 p-6">
+                          <div>
+                            <h2 className="text-xl font-bold">Bloquear horário</h2>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Reserve períodos para almoço, folga, compromisso ou ausência.
+                            </p>
+                          </div>
+                          <form onSubmit={submit("block")} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                            <SelectField label="Barbeiro" name="barberId" required>{options(s.barbers)}</SelectField>
+                            <Field label="Data" name="date" type="date" min={today()} required />
+                            <Field label="Início" name="start" type="time" required />
+                            <Field label="Fim" name="end" type="time" required />
+                            <Field label="Motivo" name="reason" placeholder="Ex.: almoço" required />
+                            <Button disabled={busy} className="sm:col-span-2 xl:col-span-5">Bloquear período</Button>
+                          </form>
+                          {blocks.filter((block: any) => block.date >= today()).map((block: any) => (
+                            <div key={block.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+                              <p className="text-sm">
+                                <strong>{names(s.barbers, block.barberId)}</strong> · {block.date.split("-").reverse().join("/")} · {block.start}–{block.end} · {block.reason}
+                              </p>
+                              <Button variant="outline" disabled={busy} onClick={() => act("unblock", { id: block.id })}>Liberar horário</Button>
+                            </div>
+                          ))}
                         </CardContent>
                       </Card>
                       <Card>
@@ -952,7 +1059,11 @@ export default function Barbearia() {
                         </form>
                         <h2 className="font-bold">Receber atendimento</h2>
                         {appointments
-                          .filter((a: any) => a.status === "agendado")
+                          .filter((a: any) =>
+                            ["agendado", "confirmado", "check-in"].includes(
+                              a.status
+                            )
+                          )
                           .map((a: any) => (
                             <form
                               key={a.id}
@@ -969,7 +1080,13 @@ export default function Barbearia() {
                             >
                               <p className="flex-1">
                                 {names(s.clients, a.clientId)} · {a.date}{" "}
-                                {a.time} · {a.productName} · {money(a.price)}
+                                {a.time} · {a.productName} · {money(a.price)} ·{" "}
+                                comissão de {names(s.barbers, a.barberId)}: {(() => {
+                                  const professional = s.barbers.find((item: any) => item.id === a.barberId);
+                                  return professional?.commissionType === "fixed"
+                                    ? money(Math.min(a.price, Number(professional.commissionValue || 0)))
+                                    : `${Number(professional?.commissionValue || 0)}%`;
+                                })()}
                               </p>
                               <SelectField
                                 label="Forma de pagamento"
