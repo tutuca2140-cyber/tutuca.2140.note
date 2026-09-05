@@ -33,6 +33,7 @@ import {
   MessageCircle,
   MoreHorizontal,
   Package,
+  Scissors,
   Settings,
   Shield,
   Star,
@@ -622,6 +623,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       <div className="lg:pl-64">
         <main className="app-mobile-content px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] pt-[4.25rem] sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto w-full max-w-[1600px]">
+            {isSuperAdmin ? (
+              <div className="mb-4 flex justify-end">
+                <Link href="/barbearia">
+                  <a className="inline-flex h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-blue-700 shadow-sm transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200 dark:hover:bg-blue-900">
+                    <Scissors className="h-4 w-4" />
+                    Ver modo Barbearia
+                  </a>
+                </Link>
+              </div>
+            ) : null}
             <FreePlanAds enabled={freePlanWithAds} />
             {renderedChildren}
           </div>

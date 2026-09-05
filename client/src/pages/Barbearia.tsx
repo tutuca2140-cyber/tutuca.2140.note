@@ -1,5 +1,6 @@
 import { useEffect, useState, useId } from "react";
 import { useLocation } from "wouter";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,6 +58,7 @@ function SelectField({ label, children, ...props }: any) {
   );
 }
 export default function Barbearia() {
+  const { user } = useAuth();
   const [location] = useLocation();
   const slug = location.startsWith("/b/")
     ? decodeURIComponent(location.slice(3))
@@ -261,12 +263,29 @@ export default function Barbearia() {
             </div>
           </div>
           {!pub && (
-            <div className="text-sm">
-              ID {data?.shop?.user?.supportId || data?.user?.supportId || "—"} ·
-              R$ 14,99/mês{" "}
-              <a className="ml-3 underline" href="/perfil">
-                Minha conta
-              </a>
+            <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
+              {user?.role === "super_admin" ? (
+                <>
+                  <span className="rounded-full bg-violet-100 px-3 py-1 font-bold text-violet-700 dark:bg-violet-950 dark:text-violet-200">
+                    Visualização do Super ADM
+                  </span>
+                  <a
+                    className="inline-flex h-10 items-center rounded-xl bg-slate-900 px-4 font-bold text-white transition-colors hover:bg-slate-700 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                    href="/admin/controle"
+                  >
+                    Voltar ao Painel de Controle
+                  </a>
+                </>
+              ) : (
+                <>
+                  <span>
+                    ID {data?.shop?.user?.supportId || data?.user?.supportId || "—"} · R$ 14,99/mês
+                  </span>
+                  <a className="underline" href="/perfil">
+                    Minha conta
+                  </a>
+                </>
+              )}
             </div>
           )}
         </div>
