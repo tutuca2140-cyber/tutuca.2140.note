@@ -10,6 +10,23 @@ import { Link } from "wouter";
 
 const plans = [
   {
+    id: "barber",
+    name: "Barbearia",
+    monthlyPrice: "14,99",
+    annualPixPrice: null,
+    annualSavings: null,
+    description:
+      "Agenda online e gestão exclusiva para barbeiros e barbearias.",
+    badge: "Para barbearias",
+    databaseAccess: "Interface exclusiva de barbearia",
+    automaticCreation:
+      "Cadastre sua barbearia e compartilhe seu link de agendamento",
+    userAccess: "Agenda por barbeiro, clientes e serviços",
+    permissionBenefit: "Caixa, pagamentos e taxas de cartão",
+    featured: false,
+    icon: Sparkles,
+  },
+  {
     id: "free",
     name: "Grátis",
     monthlyPrice: "0",
@@ -61,7 +78,7 @@ const plans = [
     icon: Crown,
   },
 ] as const;
-type PlanId = "free" | "basic" | "plus";
+type PlanId = "barber" | "free" | "basic" | "plus";
 type BillingMethod = "free" | "card_monthly" | "pix_annual";
 function choosePlan(planId: PlanId, billingMethod: BillingMethod) {
   try {
@@ -147,7 +164,7 @@ export default function Planos() {
                       /mês
                     </span>
                   </div>
-                  {plan.id !== "free" ? (
+                  {plan.id !== "free" && plan.id !== "barber" ? (
                     <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                       <p className="text-xs font-extrabold uppercase text-emerald-700">
                         Pix anual
@@ -230,6 +247,7 @@ export default function Planos() {
                           Assinar mensal
                         </button>
                         <button
+                          hidden={plan.id === "barber"}
                           onClick={() => choosePlan(plan.id, "pix_annual")}
                           className="h-14 rounded-xl border border-emerald-300 bg-emerald-50 font-extrabold text-emerald-800"
                         >

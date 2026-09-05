@@ -14,6 +14,7 @@ import { verifyLoginCaptcha } from "../../shared/login-captcha.js";
 neonConfig.webSocketConstructor = WebSocket;
 
 const PLAN_CONFIG = {
+  barber: { label: "Barbearia", limit: 0 },
   free: { label: "Grátis", limit: 1 },
   basic: { label: "Basic", limit: 1 },
   plus: { label: "Plus", limit: 3 },
@@ -22,7 +23,12 @@ const PLAN_CONFIG = {
 type PlanId = keyof typeof PLAN_CONFIG;
 
 function isPlan(value: unknown): value is PlanId {
-  return value === "free" || value === "basic" || value === "plus";
+  return (
+    value === "barber" ||
+    value === "free" ||
+    value === "basic" ||
+    value === "plus"
+  );
 }
 
 function isValidCommercialPassword(value: string) {
@@ -484,7 +490,10 @@ async function provisionCommercialDatabasesOnFirstLogin(userId: number) {
       );
     }
 
-    if (!allAccess.rows.some((row: any) => row.isActive)) {
+    if (
+      allAccess.rows.length &&
+      !allAccess.rows.some((row: any) => row.isActive)
+    ) {
       await client.query(
         `UPDATE user_database_access
             SET "isActive" = true

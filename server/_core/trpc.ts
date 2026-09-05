@@ -1,4 +1,4 @@
-import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
+import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from "@shared/const";
 import { neon } from "@neondatabase/serverless";
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
@@ -15,6 +15,7 @@ type PaymentState = {
   commercial: boolean;
   active: boolean;
   status: string | null;
+  plan?: string | null;
 };
 
 const paymentStateCache = new Map<
@@ -35,6 +36,7 @@ async function getPaymentState(userId: number): Promise<PaymentState> {
   const rows = await sql`
     SELECT
       u."loginMethod",
+      COALESCE(owner_sub.plan, parent_sub.plan) AS plan,
       COALESCE(owner_sub.status, parent_sub.status) AS status
     FROM users u
     LEFT JOIN commercial_subscriptions owner_sub
@@ -50,7 +52,7 @@ async function getPaymentState(userId: number): Promise<PaymentState> {
     loginMethod === "commercial_signup" || loginMethod === "commercial_subuser";
   const status = row?.status == null ? null : String(row.status);
   const active = !commercial || status === "active" || status === "paid";
-  const value = { commercial, active, status };
+  const value = { commercial, active, status, plan: row?.plan };
   paymentStateCache.set(userId, { expiresAt: Date.now() + 5_000, value });
   return value;
 }
@@ -64,10 +66,17 @@ const requireUser = t.middleware(async opts => {
 
   const dashboardAllowed =
     path.startsWith("dashboard.") ||
-    ["databases.list", "databases.getActive", "databases.setActive"].includes(path);
+    ["databases.list", "databases.getActive", "databases.setActive"].includes(
+      path
+    );
 
   if (ctx.user.role !== "super_admin") {
     const payment = await getPaymentState(ctx.user.id);
+    if (payment.plan === "barber" && !path.startsWith("auth."))
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Seu plano dá acesso à área de Barbearia.",
+      });
     if (payment.commercial && !payment.active && !dashboardAllowed) {
       throw new TRPCError({
         code: "FORBIDDEN",
@@ -91,7 +100,7 @@ export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
-    if (!ctx.user || ctx.user.role !== 'admin') {
+    if (!ctx.user || ctx.user.role !== "admin") {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
 
@@ -101,5 +110,5 @@ export const adminProcedure = t.procedure.use(
         user: ctx.user,
       },
     });
-  }),
+  })
 );

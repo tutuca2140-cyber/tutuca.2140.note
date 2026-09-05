@@ -5,7 +5,7 @@ export type CommercialContext = {
   commercial: boolean;
   isSuperAdmin?: boolean;
   isOwner: boolean;
-  plan: "free" | "basic" | "plus" | null;
+  plan: "free" | "barber" | "basic" | "plus" | null;
   status: string | null;
   ownerId: number | null;
   teamLimit?: number | null;

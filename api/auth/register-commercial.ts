@@ -12,16 +12,36 @@ const ASAAS_API = "https://api.asaas.com/v3";
 const RETURN_BASE = "https://notenote.com.br";
 const TRIAL_DAYS = 7;
 
-const MONTHLY_PRICES = { free: 0, basic: 2990, plus: 4990 } as const;
-const ANNUAL_PIX_PRICES = { free: 0, basic: 19990, plus: 39990 } as const;
-const PLAN_DATABASE_LIMITS = { free: 1, basic: 1, plus: 3 } as const;
-const PLAN_LABELS = { free: "Grátis", basic: "Basic", plus: "Plus" } as const;
+const MONTHLY_PRICES = {
+  barber: 1499,
+  free: 0,
+  basic: 2990,
+  plus: 4990,
+} as const;
+const ANNUAL_PIX_PRICES = {
+  barber: 17988,
+  free: 0,
+  basic: 19990,
+  plus: 39990,
+} as const;
+const PLAN_DATABASE_LIMITS = { barber: 0, free: 1, basic: 1, plus: 3 } as const;
+const PLAN_LABELS = {
+  barber: "Barbearia",
+  free: "Grátis",
+  basic: "Basic",
+  plus: "Plus",
+} as const;
 
 type CommercialPlan = keyof typeof MONTHLY_PRICES;
 type BillingMethod = "free" | "card_monthly" | "pix_annual";
 
 function isCommercialPlan(value: string): value is CommercialPlan {
-  return value === "free" || value === "basic" || value === "plus";
+  return (
+    value === "barber" ||
+    value === "free" ||
+    value === "basic" ||
+    value === "plus"
+  );
 }
 function isBillingMethod(value: string): value is BillingMethod {
   return value === "free" || value === "card_monthly" || value === "pix_annual";
@@ -396,6 +416,11 @@ export default async function handler(req: any, res: any) {
         message: "Escolha pagamento mensal no cartão ou anual no Pix.",
       });
     const billingMethod = billingMethodInput as BillingMethod;
+    if (plan === "barber" && billingMethod !== "card_monthly")
+      return sendJson(res, 400, {
+        success: false,
+        message: "O plano Barbearia tem cobrança mensal de R$ 14,99.",
+      });
     if (plan === "free" && billingMethod !== "free")
       return sendJson(res, 400, {
         success: false,
@@ -488,7 +513,7 @@ export default async function handler(req: any, res: any) {
         "emailVerified", "createdAt", "updatedAt", "lastSignedIn"
       ) VALUES (
         ${username}, ${passwordHash}, ${name}, ${email}, ${whatsapp}, 'commercial_signup', 'user',
-        true, true, true, true, true, false, false, 0, ${initialAccessActive}, false, NOW(), NOW(), NOW()
+        ${plan !== "barber"}, ${plan !== "barber"}, ${plan !== "barber"}, ${plan !== "barber"}, ${plan !== "barber"}, false, false, 0, ${initialAccessActive}, false, NOW(), NOW(), NOW()
       ) RETURNING id, username, email, name, whatsapp
     `;
     const user = created[0] as any;
