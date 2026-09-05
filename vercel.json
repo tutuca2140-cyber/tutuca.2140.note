@@ -13,6 +13,10 @@
       "destination": "/api/site-access?scope=marketing"
     },
     {
+      "source": "/api/barbershop",
+      "destination": "/api/site-access?scope=barbershop"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
