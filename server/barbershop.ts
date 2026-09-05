@@ -99,7 +99,7 @@ function publicState(s: any) {
     products: s.products.filter((p: any) => p.active),
   };
 }
-export default async function handler(req: any, res: any) {
+export async function handleBarbershop(req: any, res: any) {
   try {
     if (!["GET", "POST"].includes(req.method))
       fail("Método não permitido.", 405);
@@ -391,3 +391,5 @@ export default async function handler(req: any, res: any) {
     });
   }
 }
+
+export default handleBarbershop;
