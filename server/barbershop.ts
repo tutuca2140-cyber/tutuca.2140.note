@@ -102,7 +102,7 @@ async function ensure() {
   }
   await ready;
 }
-async function owner(req: any) {
+async function owner(req: any): Promise<any> {
   const token = readCookie(req, SESSION_COOKIE_NAME);
   if (!token) fail("Entre na sua conta.", 401);
   const sql = getSql();
@@ -192,6 +192,16 @@ export async function handleBarbershop(req: any, res: any) {
     }
     const row = rows[0];
     const state = row.data as any;
+    const currentBarber =
+      !pub && u!.loginMethod === "commercial_subuser"
+          ? state.barbers.find(
+            (barber: any) =>
+              barber.active && Number(barber.userId) === Number(u!.id)
+          )
+        : null;
+    const isBarberUser = Boolean(currentBarber);
+    if (!pub && u!.loginMethod === "commercial_subuser" && !currentBarber)
+      fail("Este usuário não está vinculado a um barbeiro ativo.", 403);
     const cookieName = `barber_${row.owner_id}`;
     const token = readCookie(req, cookieName);
     const customer = state.clients.find(
@@ -201,20 +211,60 @@ export async function handleBarbershop(req: any, res: any) {
         c.expires > Date.now()
     );
     if (req.method === "GET") {
-      if (!pub)
+      if (!pub) {
+        const visibleAppointments = isBarberUser
+          ? state.appointments.filter(
+              (appointment: any) => appointment.barberId === currentBarber.id
+            )
+          : state.appointments;
+        const visibleClientIds = new Set(
+          visibleAppointments.map((appointment: any) => appointment.clientId)
+        );
+        const visibleClients = isBarberUser
+          ? state.clients.filter(
+              (client: any) =>
+                visibleClientIds.has(client.id) ||
+                client.createdByBarberId === currentBarber.id
+            )
+          : state.clients;
+        const visiblePayments = isBarberUser
+          ? state.payments.filter(
+              (payment: any) =>
+                payment.barberId === currentBarber.id ||
+                visibleAppointments.some(
+                  (appointment: any) =>
+                    appointment.id === payment.appointmentId
+                )
+            )
+          : state.payments;
         return sendJson(res, 200, {
           success: true,
+          access: {
+            role: isBarberUser ? "barber" : "owner",
+            barberId: currentBarber?.id || null,
+            canCorrectPayments: !isBarberUser,
+          },
           shop: {
             ...row,
             data: {
               ...state,
-              clients: state.clients.map(
+              barbers: isBarberUser ? [currentBarber] : state.barbers,
+              appointments: visibleAppointments,
+              payments: visiblePayments,
+              expenses: isBarberUser ? [] : state.expenses,
+              blocks: isBarberUser
+                ? (state.blocks || []).filter(
+                    (block: any) => block.barberId === currentBarber.id
+                  )
+                : state.blocks,
+              clients: visibleClients.map(
                 ({ passwordHash, tokenHash, expires, ...c }: any) => c
               ),
             },
             user: u,
           },
         });
+      }
       const date = str(req.query.date);
       const barberId = str(req.query.barber);
       const requestedProductIds = str(
@@ -260,6 +310,35 @@ export async function handleBarbershop(req: any, res: any) {
     const allowedPublic = ["register", "login", "book", "orderProduct"];
     if (pub && !allowedPublic.includes(action))
       fail("Ação não permitida.", 403);
+    if (!pub && isBarberUser) {
+      const allowedBarberActions = [
+        "client",
+        "book",
+        "orderProduct",
+        "removeProduct",
+        "confirm",
+        "checkin",
+        "pay",
+      ];
+      if (!allowedBarberActions.includes(action))
+        fail("Esta função é exclusiva do dono da barbearia.", 403);
+      if (action === "book" && body.barberId !== currentBarber.id)
+        fail("Você só pode agendar clientes na sua própria agenda.", 403);
+      const appointmentId = ["orderProduct", "removeProduct"].includes(action)
+        ? body.appointmentId
+        : ["confirm", "checkin", "pay"].includes(action)
+          ? body.id
+          : null;
+      if (
+        appointmentId &&
+        !state.appointments.some(
+          (appointment: any) =>
+            appointment.id === appointmentId &&
+            appointment.barberId === currentBarber.id
+        )
+      )
+        fail("Você só pode alterar atendimentos da sua própria agenda.", 403);
+    }
     if (action === "register" || action === "login") {
       const email = str(body.email).toLowerCase(),
         password = str(body.password, 128);
@@ -434,6 +513,7 @@ export async function handleBarbershop(req: any, res: any) {
         name: str(body.name),
         email: str(body.email).toLowerCase(),
         whatsapp: str(body.whatsapp),
+        createdByBarberId: isBarberUser ? currentBarber.id : null,
       });
     } else if (action === "book") {
       const c = pub

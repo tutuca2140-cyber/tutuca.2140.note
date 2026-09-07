@@ -156,7 +156,8 @@ export default function Barbearia() {
   }
   const s = pub ? data?.shop : data?.shop?.data;
   const branding = s?.branding || {};
-  const navigation = [
+  const isBarberUser = data?.access?.role === "barber";
+  const navigation = ([
     ["Dashboard", LayoutDashboard],
     ["Barbeiros", Scissors],
     ["Agenda", CalendarDays],
@@ -167,7 +168,10 @@ export default function Barbearia() {
     ["Caixa", Wallet],
     ["Pagamento", Wallet],
     ["Perfil", Settings],
-  ] as const;
+  ] as const).filter(([name]) =>
+    !isBarberUser ||
+    ["Dashboard", "Agenda", "Confirmações", "Comandas", "Clientes", "Pagamento"].includes(name)
+  );
   const names = (list: any[], id: string) =>
     list?.find(x => x.id === id)?.name || "—";
   const appointments = s?.appointments || [];
@@ -402,6 +406,10 @@ export default function Barbearia() {
                     Voltar ao Painel de Controle
                   </a>
                 </>
+              ) : isBarberUser ? (
+                <span className="rounded-full bg-blue-100 px-3 py-1 font-bold text-blue-700 dark:bg-blue-950 dark:text-blue-200">
+                  Acesso do barbeiro · {s?.barbers?.[0]?.name || user?.name}
+                </span>
               ) : (
                 <>
                   <span>
@@ -668,8 +676,11 @@ export default function Barbearia() {
                         value={date}
                         onChange={(e: any) => setDate(e.target.value)}
                       />
-                      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-                        {[
+                      <div className={`grid gap-4 sm:grid-cols-2 ${isBarberUser ? "xl:grid-cols-2" : "xl:grid-cols-5"}`}>
+                        {(isBarberUser ? [
+                          ["Meu faturamento", sum(dayPayments, "amount")],
+                          ["Minha comissão", sum(dayPayments, "commission")],
+                        ] : [
                           ["Recebido", sum(dayPayments, "amount")],
                           ["Taxas", sum(dayPayments, "fee")],
                           ["Comissões", sum(dayPayments, "commission")],
@@ -683,7 +694,7 @@ export default function Barbearia() {
                             ) -
                               sum(dayExpenses, "amount"),
                           ],
-                        ].map(([label, value]) => (
+                        ]).map(([label, value]) => (
                           <Card key={String(label)}>
                             <CardContent className="p-5">
                               <p className="text-sm text-muted-foreground">
@@ -745,9 +756,9 @@ export default function Barbearia() {
                       )}
                     </>
                   )}
-                  {tab === "Barbeiros" && (
+                  {tab === "Barbeiros" && !isBarberUser && (
                     <div className="space-y-6">
-                      <Card>
+                      {!isBarberUser && <Card>
                         <CardContent className="space-y-5 p-6">
                           <div>
                             <h2 className="text-xl font-bold">Cadastrar barbeiro</h2>
@@ -792,7 +803,7 @@ export default function Barbearia() {
                             <Button disabled={busy} className="sm:col-span-2 xl:col-span-4">Cadastrar barbeiro</Button>
                           </form>
                         </CardContent>
-                      </Card>
+                      </Card>}
                       {s.barbers.map((professional: any) => {
                         const commissionTotal = dayPayments.reduce((total: number, payment: any) => {
                           const appointment = appointments.find((item: any) => item.id === payment.appointmentId);
@@ -935,7 +946,7 @@ export default function Barbearia() {
                   )}
                   {tab === "Agenda" && (
                     <>
-                      <Card>
+                      {!isBarberUser && <Card>
                         <CardContent className="space-y-5 p-6">
                           <div>
                             <h2 className="text-xl font-bold">Novo agendamento</h2>
@@ -945,8 +956,8 @@ export default function Barbearia() {
                           </div>
                           {booking}
                         </CardContent>
-                      </Card>
-                      <Card>
+                      </Card>}
+                      {!isBarberUser && <Card>
                         <CardContent className="space-y-5 p-6">
                           <div>
                             <h2 className="text-xl font-bold">Bloquear horário</h2>
@@ -971,7 +982,7 @@ export default function Barbearia() {
                             </div>
                           ))}
                         </CardContent>
-                      </Card>
+                      </Card>}
                       <Card>
                         <CardContent className="space-y-5 p-6">
                           <div className="flex flex-wrap items-end justify-between gap-4">
@@ -1107,7 +1118,7 @@ export default function Barbearia() {
                                     {["agendado", "confirmado"].includes(a.status) ? (
                                       <Button variant="outline" disabled={busy} onClick={() => act("checkin", { id: a.id })}>Fazer check-in</Button>
                                     ) : null}
-                                    {["agendado", "confirmado"].includes(a.status) ? (
+                                    {!isBarberUser && ["agendado", "confirmado"].includes(a.status) ? (
                                       <Button variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" disabled={busy} onClick={() => act("cancel", { id: a.id })}>Cancelar</Button>
                                     ) : null}
                                   </div>
@@ -1175,6 +1186,7 @@ export default function Barbearia() {
                   {tab === "Pagamento" && (
                     <Card>
                       <CardContent className="space-y-5 p-6">
+                        {!isBarberUser && <>
                         <h2 className="text-xl font-bold">Taxas de cartão</h2>
                         <form
                           onSubmit={submit("rates")}
@@ -1200,6 +1212,7 @@ export default function Barbearia() {
                           />
                           <Button disabled={busy}>Salvar taxas</Button>
                         </form>
+                        </>}
                         <h2 className="font-bold">Receber atendimento</h2>
                         {appointments
                           .filter((a: any) =>
