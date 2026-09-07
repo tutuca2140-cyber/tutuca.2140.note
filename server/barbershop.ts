@@ -245,7 +245,7 @@ export async function handleBarbershop(req: any, res: any) {
           : [],
       });
     }
-    const allowedPublic = ["register", "login", "book"];
+    const allowedPublic = ["register", "login", "book", "orderProduct"];
     if (pub && !allowedPublic.includes(action))
       fail("Ação não permitida.", 403);
     if (action === "register" || action === "login") {
@@ -430,6 +430,13 @@ export async function handleBarbershop(req: any, res: any) {
         (total: number, p: any) => total + Number(p.price || 0),
         0
       );
+      const servicePrice = selectedServices.reduce(
+        (total: number, p: any) => total + Number(p.price || 0),
+        0
+      );
+      const convenienceItems = selectedProducts
+        .filter((p: any) => p.itemType === "convenience")
+        .map((p: any) => ({ productId: p.id, name: p.name, quantity: 1, unitPrice: p.price }));
       if (
         !slotFree(
           state,
@@ -446,13 +453,51 @@ export async function handleBarbershop(req: any, res: any) {
         barberId: body.barberId,
         productId: selectedProducts[0].id,
         productIds: selectedProducts.map((p: any) => p.id),
-        productName: selectedProducts.map((p: any) => p.name).join(" + "),
+        productName: selectedServices.map((p: any) => p.name).join(" + "),
+        convenienceItems,
         price: totalPrice,
+        servicePrice,
         duration: totalDuration,
         date: str(body.date),
         time: str(body.time),
         status: "agendado",
       });
+    } else if (action === "orderProduct") {
+      if (!pub || !customer) fail("Entre na sua conta para usar a comanda.", 401);
+      const appointment = state.appointments.find(
+        (a: any) => a.id === body.appointmentId && a.clientId === customer.id
+      );
+      const product = state.products.find(
+        (p: any) => p.id === body.productId && p.active && p.itemType === "convenience"
+      );
+      const localDate = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Sao_Paulo",
+      }).format(new Date());
+      if (
+        !appointment ||
+        appointment.date !== localDate ||
+        !["confirmado", "check-in"].includes(appointment.status) ||
+        state.payments.some((p: any) => p.appointmentId === appointment.id)
+      )
+        fail("A comanda fica disponível no dia do atendimento, após a confirmação ou o check-in.", 409);
+      if (!product) fail("Produto de conveniência indisponível.", 404);
+      appointment.convenienceItems ||= [];
+      const ordered = appointment.convenienceItems.find(
+        (item: any) => item.productId === product.id
+      );
+      if (ordered) {
+        if (Number(ordered.quantity || 0) >= 20)
+          fail("Limite de 20 unidades por produto atingido.", 409);
+        ordered.quantity = Number(ordered.quantity || 0) + 1;
+      } else {
+        appointment.convenienceItems.push({
+          productId: product.id,
+          name: product.name,
+          quantity: 1,
+          unitPrice: product.price,
+        });
+      }
+      appointment.price = Number(appointment.price || 0) + Number(product.price || 0);
     } else if (action === "confirm") {
       const a = state.appointments.find((a: any) => a.id === body.id);
       if (!a || a.status !== "agendado")
@@ -489,9 +534,16 @@ export async function handleBarbershop(req: any, res: any) {
       const rate = state.rates[method] || 0;
       const fee = Math.round((a.price * rate) / 100);
       const professional = state.barbers.find((b: any) => b.id === a.barberId);
+      const convenienceTotal = (a.convenienceItems || []).reduce(
+        (total: number, item: any) => total + Number(item.unitPrice || 0) * Number(item.quantity || 0),
+        0
+      );
+      const commissionBase = Number.isFinite(Number(a.servicePrice))
+        ? Number(a.servicePrice)
+        : Math.max(0, Number(a.price || 0) - convenienceTotal);
       const commission = professional?.commissionType === "fixed"
-        ? Math.min(a.price, Number(professional.commissionValue || 0))
-        : Math.round((a.price * Number(professional?.commissionValue || 0)) / 100);
+        ? Math.min(commissionBase, Number(professional.commissionValue || 0))
+        : Math.round((commissionBase * Number(professional?.commissionValue || 0)) / 100);
       state.payments.push({
         id: id(),
         appointmentId: a.id,
