@@ -47,6 +47,20 @@ const methods: any = {
   credit: "Crédito",
   debit: "Débito",
 };
+const addMinutes = (time: string, duration: number) => {
+  const total = Number(time.slice(0, 2)) * 60 + Number(time.slice(3)) + Number(duration || 0);
+  return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+};
+const readLogo = (file: File | null) =>
+  new Promise<string>((resolve, reject) => {
+    if (!file || file.size === 0) return resolve("");
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size > 1024 * 1024)
+      return reject(new Error("A logo deve ser PNG, JPG ou WebP e ter no máximo 1 MB."));
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Não foi possível carregar a logo."));
+    reader.readAsDataURL(file);
+  });
 function Field({ label, ...props }: any) {
   const fieldId = useId();
   return (
@@ -83,6 +97,7 @@ export default function Barbearia() {
     [busy, setBusy] = useState(false),
     [tab, setTab] = useState("Dashboard"),
     [drawerOpen, setDrawerOpen] = useState(false);
+  const [logoPreview, setLogoPreview] = useState("");
   const [date, setDate] = useState(today),
     [barber, setBarber] = useState(""),
     [selectedProducts, setSelectedProducts] = useState<string[]>([]),
@@ -138,6 +153,7 @@ export default function Barbearia() {
     };
   }
   const s = pub ? data?.shop : data?.shop?.data;
+  const branding = s?.branding || {};
   const navigation = [
     ["Dashboard", LayoutDashboard],
     ["Barbeiros", Scissors],
@@ -301,15 +317,19 @@ export default function Barbearia() {
         disabled={
           busy || selectedProducts.length === 0 || (pub && !data?.customer)
         }
-        className="sm:col-span-2"
+        className={`sm:col-span-2 ${pub ? "shop-primary-button" : ""}`}
       >
         Reservar horário
       </Button>
     </form>
   );
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/95">
+    <div
+      className={`${pub ? "public-shop" : ""} min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100`}
+      style={pub ? ({ "--shop-primary": branding.primaryColor || "#2563eb", "--shop-accent": branding.accentColor || "#4f46e5", "--shop-bg": branding.backgroundColor || "#f8fafc", backgroundColor: "var(--shop-bg)" } as any) : undefined}
+    >
+      {pub && <style>{`.public-shop .shop-primary-button{background:var(--shop-primary)!important;color:white!important}.public-shop .shop-card{border-color:color-mix(in srgb,var(--shop-primary) 28%,white)} `}</style>}
+      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/95" style={pub ? { borderColor: branding.primaryColor || "#2563eb" } : undefined}>
         <div className="mx-auto flex min-h-[76px] max-w-[1600px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             {!pub && s ? (
@@ -323,11 +343,15 @@ export default function Barbearia() {
                 <Menu className="h-5 w-5" />
               </Button>
             ) : null}
-            <span className="rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 p-3 text-white shadow-lg shadow-blue-600/20">
-              <Scissors />
-            </span>
+            {pub && branding.logo ? (
+              <img src={branding.logo} alt={`Logo ${s?.name || "da barbearia"}`} className="h-12 w-12 rounded-2xl border bg-white object-cover shadow-lg" />
+            ) : (
+              <span className="rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 p-3 text-white shadow-lg shadow-blue-600/20" style={pub ? { background: `linear-gradient(135deg, ${branding.primaryColor || "#2563eb"}, ${branding.accentColor || "#4f46e5"})` } : undefined}>
+                <Scissors />
+              </span>
+            )}
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-600">
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-600" style={pub ? { color: branding.primaryColor || "#2563eb" } : undefined}>
                 Note Note · Barbearia
               </p>
               <h1 className="text-xl font-bold">
@@ -414,7 +438,7 @@ export default function Barbearia() {
                     {s.open} às {s.close}.
                   </p>
                   {!data.customer ? (
-                    <Card>
+                    <Card className="shop-card">
                       <CardContent className="space-y-4 p-6">
                         <h2 className="text-xl font-bold">
                           {login
@@ -455,7 +479,7 @@ export default function Barbearia() {
                             maxLength={128}
                             required
                           />
-                          <Button disabled={busy}>
+                          <Button disabled={busy} className="shop-primary-button">
                             {login ? "Entrar" : "Criar cadastro"}
                           </Button>
                         </form>
@@ -469,7 +493,7 @@ export default function Barbearia() {
                   ) : (
                     <p className="font-semibold">Olá, {data.customer.name}!</p>
                   )}
-                  <Card>
+                  <Card className="shop-card">
                     <CardContent className="space-y-5 p-6">
                       <h2 className="text-xl font-bold">Agende seu horário</h2>
                       {booking}
@@ -671,7 +695,7 @@ export default function Barbearia() {
                         <CardContent className="space-y-5 p-6">
                           <div>
                             <h2 className="text-xl font-bold">Cadastrar barbeiro</h2>
-                            <p className="mt-1 text-sm text-muted-foreground">Defina comissão, jornada e intervalo individual.</p>
+                            <p className="mt-1 text-sm text-muted-foreground">Defina a jornada e o intervalo. A comissão é opcional.</p>
                           </div>
                           <form
                             onSubmit={async e => {
@@ -687,11 +711,12 @@ export default function Barbearia() {
                             className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
                           >
                             <Field label="Nome" name="name" required />
-                            <SelectField label="Tipo de comissão" name="commissionType" required>
+                            <SelectField label="Comissão (opcional)" name="commissionType" defaultValue="none">
+                              <option value="none">Sem comissão</option>
                               <option value="percent">Porcentagem</option>
                               <option value="fixed">Valor fixo por atendimento</option>
                             </SelectField>
-                            <Field label="Comissão (% ou R$)" name="commissionValue" type="number" min="0" step="0.01" defaultValue="0" required />
+                            <Field label="Valor da comissão (% ou R$)" name="commissionValue" type="number" min="0" step="0.01" placeholder="Deixe vazio se não houver" />
                             <Field label="Entrada" name="open" type="time" defaultValue={s.open} required />
                             <Field label="Saída" name="close" type="time" defaultValue={s.close} required />
                             <Field label="Início do intervalo" name="breakStart" type="time" />
@@ -738,11 +763,12 @@ export default function Barbearia() {
                                 className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
                               >
                                 <Field label="Nome" name="name" defaultValue={professional.name} required />
-                                <SelectField label="Tipo de comissão" name="commissionType" defaultValue={professional.commissionType || "percent"} required>
+                                <SelectField label="Comissão (opcional)" name="commissionType" defaultValue={professional.commissionType || "none"}>
+                                  <option value="none">Sem comissão</option>
                                   <option value="percent">Porcentagem</option>
                                   <option value="fixed">Valor fixo</option>
                                 </SelectField>
-                                <Field label="Comissão (% ou R$)" name="commissionValue" type="number" min="0" step="0.01" defaultValue={professional.commissionType === "fixed" ? Number(professional.commissionValue || 0) / 100 : Number(professional.commissionValue || 0)} required />
+                                <Field label="Valor da comissão (% ou R$)" name="commissionValue" type="number" min="0" step="0.01" defaultValue={professional.commissionType === "fixed" ? Number(professional.commissionValue || 0) / 100 : Number(professional.commissionValue || 0) || ""} placeholder="Deixe vazio se não houver" />
                                 <Field label="Entrada" name="open" type="time" defaultValue={professional.open || s.open} required />
                                 <Field label="Saída" name="close" type="time" defaultValue={professional.close || s.close} required />
                                 <Field label="Início do intervalo" name="breakStart" type="time" defaultValue={professional.breakStart || ""} />
@@ -935,12 +961,12 @@ export default function Barbearia() {
                                       {dayAppointments.length ? (
                                         dayAppointments.map((a: any) => (
                                           <div key={a.id} className={`rounded-xl border-l-4 bg-white p-3 shadow-sm dark:bg-slate-950 ${a.status === "check-in" ? "border-l-emerald-500" : a.status === "confirmado" ? "border-l-blue-500" : "border-l-amber-500"}`}>
-                                            <p className="text-sm font-black">{a.time}</p>
+                                            <p className="text-sm font-black">{a.time}–{addMinutes(a.time, Number(a.duration) || 30)}</p>
                                             <p className="mt-1 truncate text-sm font-semibold">
                                               {names(s.clients, a.clientId)}
                                             </p>
                                             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                                              {a.productName}
+                                              {a.productName} · {Number(a.duration) || 30} min ocupados
                                             </p>
                                             <p className="mt-2 text-xs font-semibold text-blue-700 dark:text-blue-300">
                                               {names(s.barbers, a.barberId)}
@@ -1137,15 +1163,21 @@ export default function Barbearia() {
                         </div>
                         <form
                           className="space-y-4"
-                          onSubmit={e => {
+                          onSubmit={async e => {
                             e.preventDefault();
                             const f = new FormData(e.currentTarget);
-                            act("profile", {
-                              name: f.get("name"),
-                              open: f.get("open"),
-                              close: f.get("close"),
-                              days: f.getAll("days").map(Number),
-                            });
+                            try {
+                              const logo = await readLogo(f.get("logo") instanceof File ? f.get("logo") as File : null);
+                              await act("profile", {
+                                name: f.get("name"), open: f.get("open"), close: f.get("close"),
+                                days: f.getAll("days").map(Number), logo,
+                                removeLogo: f.get("removeLogo") === "on",
+                                primaryColor: f.get("primaryColor"), accentColor: f.get("accentColor"),
+                                backgroundColor: f.get("backgroundColor"),
+                              });
+                            } catch (error: any) {
+                              toast.error(error.message);
+                            }
                           }}
                         >
                           <Field
@@ -1154,6 +1186,30 @@ export default function Barbearia() {
                             defaultValue={s.name}
                             required
                           />
+                          <div className="rounded-2xl border p-4">
+                            <Label htmlFor="barbershop-logo">Logo da barbearia (opcional)</Label>
+                            <div className="mt-3 flex flex-wrap items-center gap-4">
+                              {(logoPreview || branding.logo) && (
+                                <img src={logoPreview || branding.logo} alt="Prévia da logo" className="h-20 w-20 rounded-2xl border bg-white object-cover" />
+                              )}
+                              <Input
+                                id="barbershop-logo" name="logo" type="file" accept="image/png,image/jpeg,image/webp"
+                                onChange={(event: any) => {
+                                  const file = event.target.files?.[0];
+                                  if (!file) return setLogoPreview("");
+                                  readLogo(file).then(setLogoPreview).catch((error: Error) => { event.target.value = ""; toast.error(error.message); });
+                                }}
+                              />
+                            </div>
+                            <p className="mt-2 text-sm text-muted-foreground">PNG, JPG ou WebP de até 1 MB. A imagem aparecerá no link dos clientes.</p>
+                            {branding.logo && <label className="mt-3 flex items-center gap-2 text-sm"><input type="checkbox" name="removeLogo" /> Remover logo atual</label>}
+                          </div>
+                          <div className="grid gap-4 rounded-2xl border p-4 sm:grid-cols-3">
+                            <Field name="primaryColor" label="Cor principal" type="color" defaultValue={branding.primaryColor || "#2563eb"} />
+                            <Field name="accentColor" label="Cor de destaque" type="color" defaultValue={branding.accentColor || "#4f46e5"} />
+                            <Field name="backgroundColor" label="Cor do fundo" type="color" defaultValue={branding.backgroundColor || "#f8fafc"} />
+                            <p className="text-sm text-muted-foreground sm:col-span-3">Essas cores personalizam o cabeçalho, os botões e o fundo da página pública.</p>
+                          </div>
                           <div className="grid gap-4 sm:grid-cols-2">
                             <Field
                               name="open"

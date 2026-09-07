@@ -75,14 +75,18 @@ export function slotFree(
     )
   )
     return false;
-  return !state.appointments.some(
-    (a: any) =>
+  return !state.appointments.some((a: any) => {
+    const appointmentDuration = Number(a.duration) || (a.productIds || [a.productId])
+      .map((productId: string) => state.products?.find((p: any) => p.id === productId))
+      .reduce((total: number, product: any) => total + Number(product?.duration || 0), 0) || 30;
+    return (
       a.barberId === barberId &&
       a.date === date &&
       a.status !== "cancelado" &&
-      start < minutes(a.time) + a.duration &&
+      start < minutes(a.time) + appointmentDuration &&
       end > minutes(a.time)
-  );
+    );
+  });
 }
 let ready: Promise<unknown> | null = null;
 async function ensure() {
@@ -123,6 +127,7 @@ function publicState(s: any) {
     days: s.days,
     barbers: s.barbers.filter((b: any) => b.active),
     products: s.products.filter((p: any) => p.active),
+    branding: s.branding || {},
   };
 }
 export async function handleBarbershop(req: any, res: any) {
@@ -297,9 +302,22 @@ export async function handleBarbershop(req: any, res: any) {
       state.open = open;
       state.close = close;
       state.days = body.days;
+      const color = (value: unknown, fallback: string) => {
+        const parsed = str(value, 7);
+        return /^#[0-9a-f]{6}$/i.test(parsed) ? parsed : fallback;
+      };
+      const logo = str(body.logo, 1500000);
+      if (logo && !/^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(logo))
+        fail("Envie uma logo PNG, JPG ou WebP válida.");
+      state.branding = {
+        primaryColor: color(body.primaryColor, state.branding?.primaryColor || "#2563eb"),
+        accentColor: color(body.accentColor, state.branding?.accentColor || "#4f46e5"),
+        backgroundColor: color(body.backgroundColor, state.branding?.backgroundColor || "#f8fafc"),
+        logo: logo || (body.removeLogo ? "" : state.branding?.logo || ""),
+      };
     } else if (action === "barber") {
       if (str(body.name).length < 2) fail("Informe o nome do barbeiro.");
-      const commissionType = body.commissionType === "fixed" ? "fixed" : "percent";
+      const commissionType = body.commissionType === "fixed" ? "fixed" : body.commissionType === "percent" ? "percent" : "none";
       const commissionValue =
         commissionType === "fixed" ? cents(body.commissionValue || 0) : Number(body.commissionValue || 0);
       if (commissionType === "percent" && (!Number.isFinite(commissionValue) || commissionValue < 0 || commissionValue > 100))
@@ -323,7 +341,7 @@ export async function handleBarbershop(req: any, res: any) {
     } else if (action === "updateBarber") {
       const professional = state.barbers.find((b: any) => b.id === body.id);
       if (!professional) fail("Barbeiro não encontrado.", 404);
-      const commissionType = body.commissionType === "fixed" ? "fixed" : "percent";
+      const commissionType = body.commissionType === "fixed" ? "fixed" : body.commissionType === "percent" ? "percent" : "none";
       const commissionValue = commissionType === "fixed" ? cents(body.commissionValue || 0) : Number(body.commissionValue || 0);
       if (commissionType === "percent" && (!Number.isFinite(commissionValue) || commissionValue < 0 || commissionValue > 100))
         fail("A comissão percentual deve estar entre 0 e 100%.");
