@@ -98,6 +98,7 @@ export default function Barbearia() {
     [tab, setTab] = useState("Dashboard"),
     [drawerOpen, setDrawerOpen] = useState(false);
   const [logoPreview, setLogoPreview] = useState("");
+  const [newItemType, setNewItemType] = useState<"service" | "convenience">("service");
   const [date, setDate] = useState(today),
     [barber, setBarber] = useState(""),
     [selectedProducts, setSelectedProducts] = useState<string[]>([]),
@@ -168,6 +169,8 @@ export default function Barbearia() {
   const names = (list: any[], id: string) =>
     list?.find(x => x.id === id)?.name || "—";
   const appointments = s?.appointments || [];
+  const selectedItems = s?.products?.filter((p: any) => selectedProducts.includes(p.id)) || [];
+  const hasSelectedService = selectedItems.some((p: any) => (p.itemType || "service") === "service");
   const calendarDays = weekDays(date);
   const statusLabel: Record<string, string> = {
     agendado: "Aguardando confirmação",
@@ -261,7 +264,7 @@ export default function Barbearia() {
               <span>
                 <strong className="block text-sm">{p.name}</strong>
                 <span className="text-xs text-muted-foreground">
-                  {money(p.price)} · {p.duration} min
+                  {money(p.price)} · {(p.itemType || "service") === "convenience" ? "produto de conveniência" : `${p.duration} min`}
                 </span>
               </span>
             </label>
@@ -269,7 +272,7 @@ export default function Barbearia() {
         </div>
         {selectedProducts.length > 0 ? (
           <p className="text-sm font-semibold text-blue-700 dark:text-blue-300">
-            Total: {money(s.products.filter((p: any) => selectedProducts.includes(p.id)).reduce((total: number, p: any) => total + p.price, 0))} · {s.products.filter((p: any) => selectedProducts.includes(p.id)).reduce((total: number, p: any) => total + p.duration, 0)} minutos
+            Total: {money(selectedItems.reduce((total: number, p: any) => total + p.price, 0))} · {selectedItems.reduce((total: number, p: any) => total + Number(p.duration || 0), 0)} minutos na agenda
           </p>
         ) : (
           <p className="text-sm text-muted-foreground">
@@ -313,9 +316,14 @@ export default function Barbearia() {
           Nenhum horário livre nesta data. Escolha outro dia.
         </p>
       )}
+      {selectedProducts.length > 0 && !hasSelectedService && (
+        <p className="text-sm text-amber-700 sm:col-span-2">
+          Escolha pelo menos um serviço. Produtos de conveniência não ocupam horário e são adicionados junto ao atendimento.
+        </p>
+      )}
       <Button
         disabled={
-          busy || selectedProducts.length === 0 || (pub && !data?.customer)
+          busy || selectedProducts.length === 0 || !hasSelectedService || (pub && !data?.customer)
         }
         className={`sm:col-span-2 ${pub ? "shop-primary-button" : ""}`}
       >
@@ -820,12 +828,13 @@ export default function Barbearia() {
                         <h2 className="text-xl font-bold">
                           Produtos e serviços
                         </h2>
-                        <form
-                          onSubmit={submit("product")}
-                          className="grid gap-4 sm:grid-cols-3"
-                        >
+                        <form onSubmit={submit("product")} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                          <SelectField label="Tipo" name="itemType" value={newItemType} onChange={(e: any) => setNewItemType(e.target.value)} required>
+                            <option value="service">Serviço</option>
+                            <option value="convenience">Produto de conveniência</option>
+                          </SelectField>
                           <Field
-                            label="Nome do produto / serviço"
+                            label={newItemType === "service" ? "Nome do serviço" : "Nome do produto"}
                             name="name"
                             required
                           />
@@ -844,9 +853,13 @@ export default function Barbearia() {
                             min="5"
                             max="480"
                             defaultValue="30"
-                            required
+                            required={newItemType === "service"}
+                            disabled={newItemType === "convenience"}
                           />
-                          <Button disabled={busy}>Cadastrar</Button>
+                          <p className="text-sm text-muted-foreground sm:col-span-2 xl:col-span-4">
+                            Produtos como água, café, cerveja e refrigerante ficam com duração zero e não bloqueiam espaço na agenda.
+                          </p>
+                          <Button disabled={busy}>{newItemType === "service" ? "Cadastrar serviço" : "Cadastrar produto"}</Button>
                         </form>
                         {s.products.map((p: any) => (
                           <div
@@ -854,7 +867,7 @@ export default function Barbearia() {
                             className="flex flex-wrap justify-between gap-3 rounded-lg border p-4"
                           >
                             <p>
-                              {p.name} · {money(p.price)} · {p.duration} min
+                              {p.name} · {money(p.price)} · {(p.itemType || "service") === "convenience" ? "Conveniência · não ocupa agenda" : `Serviço · ${p.duration} min`}
                             </p>
                             <Button
                               variant="outline"
