@@ -215,7 +215,10 @@ export async function handleBarbershop(req: any, res: any) {
         .split(",")
         .filter(Boolean);
       const selectedProducts = state.products.filter(
-        (p: any) => requestedProductIds.includes(p.id) && p.active
+        (p: any) =>
+          requestedProductIds.includes(p.id) &&
+          p.active &&
+          (p.itemType || "service") === "service"
       );
       const totalDuration = selectedProducts.reduce(
         (total: number, p: any) => total + Number(p.duration || 0),
@@ -410,7 +413,10 @@ export async function handleBarbershop(req: any, res: any) {
           )
         : [str(body.productId)].filter(Boolean);
       const selectedProducts = state.products.filter(
-        (p: any) => requestedProductIds.includes(p.id) && p.active
+        (p: any) =>
+          requestedProductIds.includes(p.id) &&
+          p.active &&
+          (p.itemType || "service") === "service"
       );
       const selectedServices = selectedProducts.filter(
         (p: any) => (p.itemType || "service") === "service"
@@ -421,7 +427,7 @@ export async function handleBarbershop(req: any, res: any) {
         !selectedServices.length ||
         !state.barbers.some((b: any) => b.id === body.barberId && b.active)
       )
-        fail("Escolha pelo menos um serviço e um barbeiro. Produtos de conveniência podem ser adicionados junto ao atendimento.");
+        fail("Escolha pelo menos um serviço e um barbeiro. Produtos de conveniência ficam disponíveis somente na comanda.");
       const totalDuration = selectedProducts.reduce(
         (total: number, p: any) => total + Number(p.duration || 0),
         0
