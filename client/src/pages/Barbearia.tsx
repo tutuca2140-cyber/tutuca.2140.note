@@ -171,6 +171,9 @@ export default function Barbearia() {
   const appointments = s?.appointments || [];
   const selectedItems = s?.products?.filter((p: any) => selectedProducts.includes(p.id)) || [];
   const hasSelectedService = selectedItems.some((p: any) => (p.itemType || "service") === "service");
+  const convenienceProducts = s?.products?.filter(
+    (p: any) => p.active && p.itemType === "convenience"
+  ) || [];
   const calendarDays = weekDays(date);
   const statusLabel: Record<string, string> = {
     agendado: "Aguardando confirmação",
@@ -508,16 +511,48 @@ export default function Barbearia() {
                     </CardContent>
                   </Card>
                   {!!data.appointments?.length && (
-                    <Card>
-                      <CardContent className="space-y-3 p-6">
-                        <h2 className="font-bold">Meus agendamentos</h2>
-                        {data.appointments.map((a: any) => (
-                          <p key={a.id}>
-                            {a.date.split("-").reverse().join("/")} · {a.time} ·{" "}
-                            {a.productName} · {names(s.barbers, a.barberId)} ·{" "}
-                            {a.status}
-                          </p>
-                        ))}
+                    <Card className="shop-card">
+                      <CardContent className="space-y-5 p-6">
+                        <div>
+                          <h2 className="text-xl font-bold">Minha conta e comanda</h2>
+                          <p className="mt-1 text-sm text-muted-foreground">Acompanhe o atendimento e adicione produtos para pagar tudo junto.</p>
+                        </div>
+                        {data.appointments.map((a: any) => {
+                          const commandOpen = a.date === today() && ["confirmado", "check-in"].includes(a.status);
+                          return (
+                            <div key={a.id} className="space-y-4 rounded-2xl border p-4">
+                              <div>
+                                <p className="font-bold">{a.date.split("-").reverse().join("/")} · {a.time} · {a.productName}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">{names(s.barbers, a.barberId)} · {statusLabel[a.status] || a.status}</p>
+                              </div>
+                              {!!a.convenienceItems?.length && (
+                                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900">
+                                  <p className="mb-2 text-sm font-bold">Produtos na comanda</p>
+                                  {a.convenienceItems.map((item: any) => (
+                                    <p key={item.productId} className="text-sm">{item.quantity}× {item.name} · {money(Number(item.unitPrice) * Number(item.quantity))}</p>
+                                  ))}
+                                </div>
+                              )}
+                              <p className="text-lg font-black">Total para pagar: {money(a.price)}</p>
+                              {commandOpen && convenienceProducts.length > 0 && (
+                                <div>
+                                  <p className="mb-3 text-sm font-bold">Pedir produto</p>
+                                  <div className="grid gap-2 sm:grid-cols-2">
+                                    {convenienceProducts.map((product: any) => (
+                                      <Button key={product.id} type="button" variant="outline" disabled={busy} onClick={() => act("orderProduct", { appointmentId: a.id, productId: product.id })}>
+                                        + {product.name} · {money(product.price)}
+                                      </Button>
+                                    ))}
+                                  </div>
+                                  <p className="mt-3 text-xs text-muted-foreground">Cada toque adiciona uma unidade. O valor será cobrado junto com os serviços.</p>
+                                </div>
+                              )}
+                              {!commandOpen && a.date === today() && a.status === "agendado" && (
+                                <p className="text-sm text-amber-700">A comanda será liberada quando a barbearia confirmar sua reserva ou fizer o check-in.</p>
+                              )}
+                            </div>
+                          );
+                        })}
                       </CardContent>
                     </Card>
                   )}
@@ -1117,16 +1152,21 @@ export default function Barbearia() {
                                 });
                               }}
                             >
-                              <p className="flex-1">
-                                {names(s.clients, a.clientId)} · {a.date}{" "}
-                                {a.time} · {a.productName} · {money(a.price)} ·{" "}
-                                comissão de {names(s.barbers, a.barberId)}: {(() => {
+                              <div className="min-w-[260px] flex-1">
+                                <p className="font-bold">{names(s.clients, a.clientId)} · {a.date} {a.time}</p>
+                                <p className="text-sm text-muted-foreground">{a.productName}</p>
+                                {!!a.convenienceItems?.length && (
+                                  <p className="mt-1 text-sm">Comanda: {a.convenienceItems.map((item: any) => `${item.quantity}× ${item.name}`).join(" · ")}</p>
+                                )}
+                                <p className="mt-2 font-black">Total: {money(a.price)}</p>
+                                <p className="text-xs text-muted-foreground">Comissão de {names(s.barbers, a.barberId)}: {(() => {
                                   const professional = s.barbers.find((item: any) => item.id === a.barberId);
+                                  if (!professional?.commissionType || professional.commissionType === "none") return "sem comissão";
                                   return professional?.commissionType === "fixed"
                                     ? money(Math.min(a.price, Number(professional.commissionValue || 0)))
                                     : `${Number(professional?.commissionValue || 0)}%`;
-                                })()}
-                              </p>
+                                })()}</p>
+                              </div>
                               <SelectField
                                 label="Forma de pagamento"
                                 name="method"
