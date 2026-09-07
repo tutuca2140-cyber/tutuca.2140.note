@@ -254,7 +254,12 @@ export default function Barbearia() {
       <fieldset className="space-y-2 sm:col-span-2">
         <legend className="text-sm font-medium">Serviços do atendimento</legend>
         <div className="grid gap-2 sm:grid-cols-2">
-          {s?.products?.filter((p: any) => p.active).map((p: any) => (
+          {s?.products
+            ?.filter(
+              (p: any) =>
+                p.active && (p.itemType || "service") === "service"
+            )
+            .map((p: any) => (
             <label
               key={p.id}
               className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${selectedProducts.includes(p.id) ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40" : "border-slate-200 bg-background hover:border-blue-300 dark:border-slate-700"}`}
@@ -275,11 +280,11 @@ export default function Barbearia() {
               <span>
                 <strong className="block text-sm">{p.name}</strong>
                 <span className="text-xs text-muted-foreground">
-                  {money(p.price)} · {(p.itemType || "service") === "convenience" ? "produto de conveniência" : `${p.duration} min`}
+                  {money(p.price)} · {p.duration} min
                 </span>
               </span>
             </label>
-          ))}
+            ))}
         </div>
         {selectedProducts.length > 0 ? (
           <p className="text-sm font-semibold text-blue-700 dark:text-blue-300">
