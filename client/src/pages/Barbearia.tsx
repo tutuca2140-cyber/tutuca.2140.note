@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Menu,
   MessageCircle,
+  ClipboardList,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -160,6 +161,7 @@ export default function Barbearia() {
     ["Barbeiros", Scissors],
     ["Agenda", CalendarDays],
     ["Confirmações", UserCheck],
+    ["Comandas", ClipboardList],
     ["Clientes", Users],
     ["Produtos", Package],
     ["Caixa", Wallet],
@@ -183,6 +185,12 @@ export default function Barbearia() {
     cancelado: "Cancelado",
   };
   const payments = s?.payments || [];
+  const openCommands = appointments.filter(
+    (a: any) =>
+      a.date === today() &&
+      ["confirmado", "check-in"].includes(a.status) &&
+      !payments.some((payment: any) => payment.appointmentId === a.id)
+  );
   const expenses = s?.expenses || [];
   const blocks = s?.blocks || [];
   const dayPayments = payments.filter(
@@ -1103,6 +1111,60 @@ export default function Barbearia() {
                       </CardContent>
                     </Card>
                   )}
+                  {tab === "Comandas" && (
+                    <div className="space-y-5">
+                      <div>
+                        <h2 className="text-xl font-bold">Comandas abertas</h2>
+                        <p className="mt-1 text-sm text-muted-foreground">Controle os consumos dos clientes presentes e encaminhe o total para o pagamento.</p>
+                      </div>
+                      {openCommands.length ? openCommands.map((a: any) => (
+                        <Card key={a.id}>
+                          <CardContent className="space-y-5 p-6">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <h3 className="text-lg font-black">{names(s.clients, a.clientId)}</h3>
+                                <p className="text-sm text-muted-foreground">{a.time} · {names(s.barbers, a.barberId)} · {a.productName}</p>
+                              </div>
+                              <p className="text-2xl font-black text-emerald-600">{money(a.price)}</p>
+                            </div>
+                            <div className="rounded-2xl border p-4">
+                              <p className="mb-3 font-bold">Itens da comanda</p>
+                              {a.convenienceItems?.length ? a.convenienceItems.map((item: any) => (
+                                <div key={item.productId} className="flex flex-wrap items-center justify-between gap-3 border-b py-3 last:border-0">
+                                  <div>
+                                    <p className="font-semibold">{item.quantity}× {item.name}</p>
+                                    <p className="text-sm text-muted-foreground">{money(Number(item.unitPrice) * Number(item.quantity))}</p>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act("removeProduct", { appointmentId: a.id, productId: item.productId })}>− 1</Button>
+                                    <Button type="button" size="sm" disabled={busy} onClick={() => act("orderProduct", { appointmentId: a.id, productId: item.productId })}>+ 1</Button>
+                                  </div>
+                                </div>
+                              )) : <p className="text-sm text-muted-foreground">Nenhum produto consumido.</p>}
+                            </div>
+                            {!!convenienceProducts.length && (
+                              <div>
+                                <p className="mb-3 font-bold">Adicionar produto</p>
+                                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                  {convenienceProducts.map((product: any) => (
+                                    <Button key={product.id} type="button" variant="outline" disabled={busy} onClick={() => act("orderProduct", { appointmentId: a.id, productId: product.id })}>
+                                      + {product.name} · {money(product.price)}
+                                    </Button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                              <p className="font-black">Serviços e produtos: {money(a.price)}</p>
+                              <Button type="button" onClick={() => setTab("Pagamento")}>Ir para pagamento</Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )) : (
+                        <Card><CardContent className="p-8 text-center text-muted-foreground">Nenhuma comanda aberta. Confirme a reserva ou faça o check-in do cliente para liberar a comanda.</CardContent></Card>
+                      )}
+                    </div>
+                  )}
                   {tab === "Pagamento" && (
                     <Card>
                       <CardContent className="space-y-5 p-6">
@@ -1163,7 +1225,7 @@ export default function Barbearia() {
                                   const professional = s.barbers.find((item: any) => item.id === a.barberId);
                                   if (!professional?.commissionType || professional.commissionType === "none") return "sem comissão";
                                   return professional?.commissionType === "fixed"
-                                    ? money(Math.min(a.price, Number(professional.commissionValue || 0)))
+                                    ? money(Math.min(Number(a.servicePrice ?? a.price), Number(professional.commissionValue || 0)))
                                     : `${Number(professional?.commissionValue || 0)}%`;
                                 })()}</p>
                               </div>

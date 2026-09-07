@@ -463,9 +463,10 @@ export async function handleBarbershop(req: any, res: any) {
         status: "agendado",
       });
     } else if (action === "orderProduct") {
-      if (!pub || !customer) fail("Entre na sua conta para usar a comanda.", 401);
+      if (pub && !customer) fail("Entre na sua conta para usar a comanda.", 401);
       const appointment = state.appointments.find(
-        (a: any) => a.id === body.appointmentId && a.clientId === customer.id
+        (a: any) =>
+          a.id === body.appointmentId && (!pub || a.clientId === customer.id)
       );
       const product = state.products.find(
         (p: any) => p.id === body.productId && p.active && p.itemType === "convenience"
@@ -498,6 +499,28 @@ export async function handleBarbershop(req: any, res: any) {
         });
       }
       appointment.price = Number(appointment.price || 0) + Number(product.price || 0);
+    } else if (action === "removeProduct") {
+      if (pub) fail("Ação disponível somente para a barbearia.", 403);
+      const appointment = state.appointments.find((a: any) => a.id === body.appointmentId);
+      const ordered = appointment?.convenienceItems?.find(
+        (item: any) => item.productId === body.productId
+      );
+      if (
+        !appointment ||
+        !ordered ||
+        Number(ordered.quantity || 0) < 1 ||
+        state.payments.some((p: any) => p.appointmentId === appointment.id)
+      )
+        fail("Item não encontrado ou comanda já paga.", 409);
+      ordered.quantity = Number(ordered.quantity) - 1;
+      appointment.price = Math.max(
+        Number(appointment.servicePrice || 0),
+        Number(appointment.price || 0) - Number(ordered.unitPrice || 0)
+      );
+      if (ordered.quantity === 0)
+        appointment.convenienceItems = appointment.convenienceItems.filter(
+          (item: any) => item.productId !== body.productId
+        );
     } else if (action === "confirm") {
       const a = state.appointments.find((a: any) => a.id === body.id);
       if (!a || a.status !== "agendado")
