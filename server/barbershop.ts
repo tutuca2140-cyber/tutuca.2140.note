@@ -141,7 +141,7 @@ export async function handleBarbershop(req: any, res: any) {
     const pub = Boolean(slug);
     const u = pub ? null : await owner(req);
     let rows = pub
-      ? await sql`SELECT b.* FROM barber_shops b JOIN users u ON u.id=b.owner_id JOIN commercial_subscriptions c ON c."userId"=b.owner_id WHERE b.slug=${slug} AND u."isActive"=true AND c.plan='barber' AND c.status IN ('active','paid')`
+      ? await sql`SELECT b.* FROM barber_shops b JOIN users u ON u.id=b.owner_id LEFT JOIN commercial_subscriptions c ON c."userId"=b.owner_id WHERE b.slug=${slug} AND u."isActive"=true AND (u.role='super_admin' OR (c.plan='barber' AND c.status IN ('active','paid')))`
       : await sql`SELECT * FROM barber_shops WHERE owner_id=${u!.id}`;
     const body = req.method === "POST" ? await readJsonBody(req) : {};
     const action = str(body.action);
