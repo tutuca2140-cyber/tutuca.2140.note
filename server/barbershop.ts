@@ -503,15 +503,21 @@ export async function handleBarbershop(req: any, res: any) {
         active: true,
       });
     } else if (action === "client") {
+      const clientEmail = str(body.email).toLowerCase();
       if (
         str(body.name).length < 2 ||
-        str(body.whatsapp).replace(/\D/g, "").length < 10
+        str(body.whatsapp).replace(/\D/g, "").length < 10 ||
+        (clientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail))
       )
-        fail("Informe nome e WhatsApp.");
+        fail(
+          clientEmail
+            ? "Informe um e-mail válido ou deixe o campo vazio."
+            : "Informe nome e WhatsApp."
+        );
       state.clients.push({
         id: id(),
         name: str(body.name),
-        email: str(body.email).toLowerCase(),
+        email: clientEmail,
         whatsapp: str(body.whatsapp),
         createdByBarberId: isBarberUser ? currentBarber.id : null,
       });

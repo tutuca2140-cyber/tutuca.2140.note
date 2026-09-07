@@ -20,6 +20,7 @@ import {
   MessageCircle,
   ClipboardList,
   X,
+  LogOut,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -87,7 +88,7 @@ function SelectField({ label, children, ...props }: any) {
   );
 }
 export default function Barbearia() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [location] = useLocation();
   const slug = location.startsWith("/b/")
     ? decodeURIComponent(location.slice(3))
@@ -120,6 +121,16 @@ export default function Barbearia() {
       setError("");
     } catch (e: any) {
       setError(e.message);
+    }
+  }
+  async function handleLogout() {
+    setBusy(true);
+    try {
+      await logout();
+      window.location.href = "/login";
+    } catch {
+      setBusy(false);
+      toast.error("Não foi possível sair. Tente novamente.");
     }
   }
   useEffect(() => {
@@ -420,6 +431,16 @@ export default function Barbearia() {
                   </a>
                 </>
               )}
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={handleLogout}
+                className="h-10 rounded-xl"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Sair
+              </Button>
             </div>
           )}
         </div>
@@ -871,13 +892,18 @@ export default function Barbearia() {
                           className="grid gap-4 sm:grid-cols-3"
                         >
                           <Field label="Nome" name="name" required />
-                          <Field label="E-mail" name="email" type="email" />
+                          <Field
+                            label="E-mail (opcional)"
+                            name="email"
+                            type="email"
+                          />
                           <Field label="WhatsApp" name="whatsapp" required />
                           <Button disabled={busy}>Adicionar cliente</Button>
                         </form>
                         {s.clients.map((c: any) => (
                           <p key={c.id} className="rounded-lg border p-4">
-                            {c.name} · {c.email} · {c.whatsapp}
+                            {c.name} · {c.whatsapp}
+                            {c.email ? ` · ${c.email}` : ""}
                           </p>
                         ))}
                       </CardContent>
