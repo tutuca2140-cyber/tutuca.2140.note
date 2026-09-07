@@ -369,19 +369,20 @@ export async function handleBarbershop(req: any, res: any) {
       state.blocks ||= [];
       state.blocks = state.blocks.filter((block: any) => block.id !== body.id);
     } else if (action === "product") {
-      const duration = Number(body.duration);
+      const itemType = body.itemType === "convenience" ? "convenience" : "service";
+      const duration = itemType === "convenience" ? 0 : Number(body.duration);
       if (
         str(body.name).length < 2 ||
-        !Number.isInteger(duration) ||
-        duration < 5 ||
-        duration > 480
+        (itemType === "service" &&
+          (!Number.isInteger(duration) || duration < 5 || duration > 480))
       )
-        fail("Informe nome e duração de 5 a 480 minutos.");
+        fail("Informe o nome e, para serviços, uma duração de 5 a 480 minutos.");
       state.products.push({
         id: id(),
         name: str(body.name),
         price: cents(body.price),
         duration,
+        itemType,
         active: true,
       });
     } else if (action === "client") {
@@ -411,12 +412,16 @@ export async function handleBarbershop(req: any, res: any) {
       const selectedProducts = state.products.filter(
         (p: any) => requestedProductIds.includes(p.id) && p.active
       );
+      const selectedServices = selectedProducts.filter(
+        (p: any) => (p.itemType || "service") === "service"
+      );
       if (
         !selectedProducts.length ||
         selectedProducts.length !== requestedProductIds.length ||
+        !selectedServices.length ||
         !state.barbers.some((b: any) => b.id === body.barberId && b.active)
       )
-        fail("Escolha pelo menos um serviço e um barbeiro.");
+        fail("Escolha pelo menos um serviço e um barbeiro. Produtos de conveniência podem ser adicionados junto ao atendimento.");
       const totalDuration = selectedProducts.reduce(
         (total: number, p: any) => total + Number(p.duration || 0),
         0
