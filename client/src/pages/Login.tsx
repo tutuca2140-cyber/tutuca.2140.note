@@ -107,7 +107,7 @@ export default function Login() {
       }
 
       toast.success("Login realizado com sucesso!");
-      window.location.href = "/dashboard";
+      window.location.href = result.redirectTo || "/dashboard";
     } catch (error: any) {
       toast.error(error?.message || "Não foi possível realizar o login.");
       resetCaptcha();

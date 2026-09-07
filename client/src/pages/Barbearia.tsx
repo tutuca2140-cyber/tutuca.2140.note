@@ -759,7 +759,7 @@ export default function Barbearia() {
                               const form = e.currentTarget;
                               const f = new FormData(form);
                               if (await act("barber", {
-                                name: f.get("name"), commissionType: f.get("commissionType"), commissionValue: f.get("commissionValue"),
+                                name: f.get("name"), username: f.get("username"), password: f.get("password"), commissionType: f.get("commissionType"), commissionValue: f.get("commissionValue"),
                                 open: f.get("open"), close: f.get("close"), breakStart: f.get("breakStart"), breakEnd: f.get("breakEnd"),
                                 days: f.getAll("days").map(Number),
                               })) form.reset();
@@ -767,6 +767,8 @@ export default function Barbearia() {
                             className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
                           >
                             <Field label="Nome" name="name" required />
+                            <Field label="Usuário de acesso" name="username" minLength="3" maxLength="40" pattern="[a-zA-Z0-9._-]+" placeholder="Ex.: joao.barbeiro" autoComplete="off" required />
+                            <Field label="Senha inicial" name="password" type="password" minLength="8" placeholder="Maiúscula, número e 8 caracteres" autoComplete="new-password" required />
                             <SelectField label="Comissão (opcional)" name="commissionType" defaultValue="none">
                               <option value="none">Sem comissão</option>
                               <option value="percent">Porcentagem</option>
@@ -802,7 +804,7 @@ export default function Barbearia() {
                               <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div>
                                   <h3 className="text-lg font-bold">{professional.name}</h3>
-                                  <p className="text-sm text-muted-foreground">Comissão no dia selecionado</p>
+                                  <p className="text-sm text-muted-foreground">Usuário: {professional.username || "conta não vinculada"} · Comissão no dia selecionado</p>
                                 </div>
                                 <p className="text-2xl font-black text-emerald-600">{money(commissionTotal)}</p>
                               </div>

@@ -611,6 +611,7 @@ export default async function handler(req: any, res: any) {
         email,
         role,
         "loginMethod",
+        "accountOwnerId",
         "canView",
         "canInsert",
         "canEdit",
@@ -744,8 +745,29 @@ export default async function handler(req: any, res: any) {
 
     setSessionCookie(res, token, maxAgeSeconds);
 
+    let redirectTo = "/dashboard";
+    if (
+      user.loginMethod === "commercial_subuser" &&
+      Number(user.accountOwnerId) > 0
+    ) {
+      const table = await sql`SELECT to_regclass('public.barber_shops') AS name`;
+      if (table[0]?.name) {
+        const barberAccess = await sql`
+          SELECT 1 FROM barber_shops
+          WHERE owner_id=${Number(user.accountOwnerId)}
+            AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(COALESCE(data->'barbers','[]'::jsonb)) barber
+              WHERE barber->>'userId'=${String(user.id)}
+            )
+          LIMIT 1
+        `;
+        if (barberAccess.length) redirectTo = "/barbearia";
+      }
+    }
+
     return sendJson(res, 200, {
       success: true,
+      redirectTo,
       user: {
         id: user.id,
         username: user.username,

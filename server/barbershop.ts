@@ -107,17 +107,24 @@ async function owner(req: any) {
   if (!token) fail("Entre na sua conta.", 401);
   const sql = getSql();
   const rows =
-    await sql`SELECT u.id,u.name,u."supportId",u.role,cs.plan,cs.status FROM local_sessions s JOIN users u ON u.id=s."userId" LEFT JOIN commercial_subscriptions cs ON cs."userId"=u.id WHERE s.token=${token} AND s."expiresAt">NOW() AND u."isActive"=true LIMIT 1`;
+    await sql`SELECT u.id,u.name,u."supportId",u.role,u."loginMethod",u."accountOwnerId",parent_u.role AS "ownerRole",COALESCE(cs.plan,parent_cs.plan) AS plan,COALESCE(cs.status,parent_cs.status) AS status FROM local_sessions s JOIN users u ON u.id=s."userId" LEFT JOIN users parent_u ON parent_u.id=u."accountOwnerId" LEFT JOIN commercial_subscriptions cs ON cs."userId"=u.id LEFT JOIN commercial_subscriptions parent_cs ON parent_cs."userId"=u."accountOwnerId" WHERE s.token=${token} AND s."expiresAt">NOW() AND u."isActive"=true LIMIT 1`;
   const u = rows[0];
   const isSuperAdmin = u?.role === "super_admin";
   if (
     !u ||
     (!isSuperAdmin &&
+      u.ownerRole !== "super_admin" &&
       (u.plan !== "barber" ||
         !["active", "paid"].includes(String(u.status))))
   )
     fail("Acesso exclusivo ao plano Barbearia ativo.", 403);
-  return u;
+  return {
+    ...u,
+    shopOwnerId:
+      u.loginMethod === "commercial_subuser" && Number(u.accountOwnerId) > 0
+        ? Number(u.accountOwnerId)
+        : Number(u.id),
+  };
 }
 function publicState(s: any) {
   return {
@@ -131,6 +138,7 @@ function publicState(s: any) {
   };
 }
 export async function handleBarbershop(req: any, res: any) {
+  let createdBarberUserId: number | null = null;
   try {
     if (!["GET", "POST"].includes(req.method))
       fail("Método não permitido.", 405);
@@ -145,9 +153,10 @@ export async function handleBarbershop(req: any, res: any) {
     const slug = str(req.query?.shop, 100);
     const pub = Boolean(slug);
     const u = pub ? null : await owner(req);
+    const shopOwnerId = pub ? null : Number(u!.shopOwnerId);
     let rows = pub
       ? await sql`SELECT b.* FROM barber_shops b JOIN users u ON u.id=b.owner_id LEFT JOIN commercial_subscriptions c ON c."userId"=b.owner_id WHERE b.slug=${slug} AND u."isActive"=true AND (u.role='super_admin' OR (c.plan='barber' AND c.status IN ('active','paid')))`
-      : await sql`SELECT * FROM barber_shops WHERE owner_id=${u!.id}`;
+      : await sql`SELECT * FROM barber_shops WHERE owner_id=${shopOwnerId}`;
     const body = req.method === "POST" ? await readJsonBody(req) : {};
     const action = str(body.action);
     if (!rows.length) {
@@ -175,7 +184,7 @@ export async function handleBarbershop(req: any, res: any) {
         rates: { credit: 0, debit: 0 },
       };
       rows =
-        await sql`INSERT INTO barber_shops(owner_id,slug,data) VALUES(${u!.id},${newSlug},${JSON.stringify(state)}::jsonb) RETURNING *`;
+        await sql`INSERT INTO barber_shops(owner_id,slug,data) VALUES(${shopOwnerId},${newSlug},${JSON.stringify(state)}::jsonb) RETURNING *`;
       return sendJson(res, 200, {
         success: true,
         shop: { ...rows[0], user: u },
@@ -320,6 +329,14 @@ export async function handleBarbershop(req: any, res: any) {
       };
     } else if (action === "barber") {
       if (str(body.name).length < 2) fail("Informe o nome do barbeiro.");
+      const username = str(body.username, 40).toLowerCase();
+      const password = String(body.password || "");
+      if (!/^[a-z0-9._-]{3,40}$/.test(username))
+        fail("O usuário deve ter de 3 a 40 caracteres e usar letras, números, ponto, hífen ou sublinhado.");
+      if (password.length < 8 || !/[A-Z]/.test(password) || !/\d/.test(password))
+        fail("A senha deve ter no mínimo 8 caracteres, uma letra maiúscula e um número.");
+      const existingUser = await sql`SELECT id FROM users WHERE lower(username)=lower(${username}) LIMIT 1`;
+      if (existingUser.length) fail("Este nome de usuário já está em uso.", 409);
       const commissionType = body.commissionType === "fixed" ? "fixed" : body.commissionType === "percent" ? "percent" : "none";
       const commissionValue =
         commissionType === "fixed" ? cents(body.commissionValue || 0) : Number(body.commissionValue || 0);
@@ -329,8 +346,24 @@ export async function handleBarbershop(req: any, res: any) {
       const open = str(body.open) || state.open;
       const close = str(body.close) || state.close;
       if (minutes(open) >= minutes(close)) fail("Confira o horário do barbeiro.");
+      const passwordHash = await bcrypt.hash(password, 12);
+      const createdUser = await sql`
+        INSERT INTO users (
+          username,"passwordHash",name,email,"loginMethod","accountOwnerId",role,
+          "canView","canInsert","canEdit","canDelete","canGenerateReports",
+          "canAccessSettings","dashboardOnly","canManageUsers","canManageDatabases",
+          "canDeleteCashFlow","failedLoginAttempts","isActive","emailVerified",
+          "createdAt","updatedAt","lastSignedIn"
+        ) VALUES (
+          ${username},${passwordHash},${str(body.name)},${null},'commercial_subuser',${shopOwnerId},'user',
+          false,false,false,false,false,false,false,false,false,false,0,true,true,NOW(),NOW(),NOW()
+        ) RETURNING id
+      `;
+      createdBarberUserId = Number(createdUser[0].id);
       state.barbers.push({
         id: id(),
+        userId: createdBarberUserId,
+        username,
         name: str(body.name),
         active: true,
         commissionType,
@@ -362,6 +395,8 @@ export async function handleBarbershop(req: any, res: any) {
         breakStart: str(body.breakStart) || null,
         breakEnd: str(body.breakEnd) || null,
       });
+      if (professional.userId)
+        await sql`UPDATE users SET name=${professional.name},"updatedAt"=NOW() WHERE id=${Number(professional.userId)} AND "accountOwnerId"=${shopOwnerId}`;
     } else if (action === "block") {
       const start = str(body.start), end = str(body.end), blockDate = str(body.date);
       if (!state.barbers.some((b: any) => b.id === body.barberId) || !/^\d{4}-\d{2}-\d{2}$/.test(blockDate) || minutes(start) >= minutes(end))
@@ -607,6 +642,12 @@ export async function handleBarbershop(req: any, res: any) {
       );
     return sendJson(res, 200, { success: true });
   } catch (e: any) {
+    if (createdBarberUserId) {
+      try {
+        const sql = getSql();
+        await sql`DELETE FROM users WHERE id=${createdBarberUserId} AND "loginMethod"='commercial_subuser'`;
+      } catch {}
+    }
     return sendJson(res, e.statusCode || (e.code === "23505" ? 409 : 500), {
       success: false,
       message:
