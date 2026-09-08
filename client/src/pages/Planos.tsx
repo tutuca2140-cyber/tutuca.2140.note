@@ -96,7 +96,6 @@ const plans = [
     icon: Crown,
   },
 ] as const;
-const BARBER_PLAN_SALES_ENABLED = true;
 type PlanId = "barber" | "barber8" | "free" | "basic" | "plus";
 type BillingMethod = "free" | "card_monthly" | "pix_annual";
 function choosePlan(planId: PlanId, billingMethod: BillingMethod) {
@@ -163,7 +162,7 @@ export default function Planos() {
               .filter(
                 plan => {
                   const isBarber = plan.id === "barber" || plan.id === "barber8";
-                  return barberMode ? isBarber : BARBER_PLAN_SALES_ENABLED || !isBarber;
+                  return plan.id !== "free" && (barberMode ? isBarber : true);
                 },
               )
               .map(plan => {
@@ -200,20 +199,8 @@ export default function Planos() {
                       /mês
                     </span>
                   </div>
-                  {plan.id !== "free" && !isBarberPlan ? (
-                    <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                      <p className="text-xs font-extrabold uppercase text-emerald-700">
-                        Pix anual
-                      </p>
-                      <p className="mt-1 text-2xl font-black text-emerald-950">
-                        R$ {plan.annualPixPrice}
-                      </p>
-                      <p className="mt-2 text-xs font-semibold text-emerald-800">
-                        12 meses de acesso · economia de R$ {plan.annualSavings}
-                      </p>
-                    </div>
-                  ) : isBarberPlan ? (
-                    <div className="mt-5 space-y-3">
+                  {plan.id !== "free" ? (
+                    <div className="mt-5 grid gap-3">
                       <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
                         <p className="flex items-center gap-2 text-xs font-extrabold uppercase text-blue-700">
                           <CreditCard className="h-4 w-4" /> Cartão mensal
@@ -221,7 +208,7 @@ export default function Planos() {
                         <p className="mt-1 text-xl font-black text-blue-950">R$ {plan.monthlyPrice}/mês</p>
                       </div>
                       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                        <p className="text-xs font-extrabold uppercase text-emerald-700">Pix anual · 30% de desconto</p>
+                        <p className="text-xs font-extrabold uppercase text-emerald-700">Pix anual{isBarberPlan ? " · 30% de desconto" : ""}</p>
                         <p className="mt-1 text-2xl font-black text-emerald-950">R$ {plan.annualPixPrice}</p>
                         <p className="mt-2 text-xs font-bold text-emerald-800">Você economiza R$ {plan.annualSavings}</p>
                       </div>
