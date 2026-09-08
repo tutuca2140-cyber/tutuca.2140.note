@@ -107,7 +107,7 @@ async function owner(req: any): Promise<any> {
   if (!token) fail("Entre na sua conta.", 401);
   const sql = getSql();
   const rows =
-    await sql`SELECT u.id,u.name,u."supportId",u.role,u."loginMethod",u."accountOwnerId",parent_u.role AS "ownerRole",COALESCE(cs.plan,parent_cs.plan) AS plan,COALESCE(cs.status,parent_cs.status) AS status,COALESCE(cs."priceCents",parent_cs."priceCents") AS "priceCents" FROM local_sessions s JOIN users u ON u.id=s."userId" LEFT JOIN users parent_u ON parent_u.id=u."accountOwnerId" LEFT JOIN commercial_subscriptions cs ON cs."userId"=u.id LEFT JOIN commercial_subscriptions parent_cs ON parent_cs."userId"=u."accountOwnerId" WHERE s.token=${token} AND s."expiresAt">NOW() AND u."isActive"=true LIMIT 1`;
+    await sql`SELECT u.id,u.name,u."supportId",u.role,u."loginMethod",u."accountOwnerId",parent_u.role AS "ownerRole",COALESCE(cs.plan,parent_cs.plan) AS plan,COALESCE(cs.status,parent_cs.status) AS status,COALESCE(cs."priceCents",parent_cs."priceCents") AS "priceCents",COALESCE(cs."billingMethod",parent_cs."billingMethod") AS "billingMethod" FROM local_sessions s JOIN users u ON u.id=s."userId" LEFT JOIN users parent_u ON parent_u.id=u."accountOwnerId" LEFT JOIN commercial_subscriptions cs ON cs."userId"=u.id LEFT JOIN commercial_subscriptions parent_cs ON parent_cs."userId"=u."accountOwnerId" WHERE s.token=${token} AND s."expiresAt">NOW() AND u."isActive"=true LIMIT 1`;
   const u = rows[0];
   const isSuperAdmin = u?.role === "super_admin";
   if (
@@ -408,7 +408,8 @@ export async function handleBarbershop(req: any, res: any) {
       };
     } else if (action === "barber") {
       if (str(body.name).length < 2) fail("Informe o nome do barbeiro.");
-      const barberLimit = Number(u.priceCents || 0) >= 2590 ? 8 : 3;
+      const subscriptionPrice = Number(u.priceCents || 0);
+      const barberLimit = [2590, 26418].includes(subscriptionPrice) ? 8 : 3;
       if (state.barbers.filter((barber: any) => barber.active).length >= barberLimit)
         fail(`Seu plano permite cadastrar até ${barberLimit} barbeiros.`, 403);
       const username = str(body.username, 40).toLowerCase();
