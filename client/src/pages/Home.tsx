@@ -647,7 +647,7 @@ export default function Home() {
                   <p className="mt-1 text-sm text-blue-100">por mês</p>
                   <p className="mt-5 min-h-12 font-bold">1 gestão de barbearia com até {plan.limit} barbeiros.</p>
                   <a
-                    href={`/cadastro?plano=barber&cobranca=card_monthly&barbeiros=${plan.limit}`}
+                    href={`/planos?modo=barbearia#plano-${plan.limit}`}
                     className={`mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl font-extrabold transition hover:-translate-y-0.5 ${plan.featured ? "bg-white text-blue-700" : "bg-blue-600 text-white"}`}
                   >
                     Escolher plano <ArrowRight className="h-4 w-4" />
@@ -655,7 +655,7 @@ export default function Home() {
                 </article>
               ))}
               <p className="text-center text-xs leading-5 text-slate-400 sm:col-span-2">
-                Cobrança recorrente mensal no cartão. Cancele quando quiser.
+                Mensal no cartão ou anual no Pix com 15% de desconto.
               </p>
             </div>
           </div>
