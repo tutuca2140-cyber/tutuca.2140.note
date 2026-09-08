@@ -40,7 +40,7 @@ type CommercialAccount = {
   lastAccessAt?: string | null;
   usageMinutes: number;
   paymentState: PaymentState;
-  plan: "free" | "basic" | "plus";
+  plan: "barber" | "free" | "basic" | "plus";
   priceCents: number | string;
   status: string;
   provisionedAt?: string | null;
@@ -48,6 +48,12 @@ type CommercialAccount = {
   databaseCount: number;
   databaseLimit: number;
   databaseNames?: string;
+  barberLimit?: number;
+  barberCount?: number;
+  barbershopName?: string | null;
+  barbershopSlug?: string | null;
+  barbershopClientCount?: number;
+  appointmentCount?: number;
   provider?: string | null;
   providerStatus?: string | null;
   billingMethod?: "card_monthly" | "pix_annual" | string | null;
@@ -76,6 +82,8 @@ type CommercialResponse = {
     monthlyActiveCents: number;
     annualPixActiveCents: number;
     totalUsageMinutes: number;
+    barber: number;
+    barberActive: number;
   };
   message?: string;
 };
@@ -157,6 +165,12 @@ function billingLabel(account: CommercialAccount) {
       ? "Cartão mensal"
       : "—";
 }
+function planLabel(account: CommercialAccount) {
+  if (account.plan === "barber") return `Barbearia · até ${account.barberLimit || 3} barbeiros`;
+  if (account.plan === "plus") return "Plus";
+  if (account.plan === "basic") return "Basic";
+  return "Grátis";
+}
 
 function escapeHtml(value: unknown) {
   return String(value ?? "")
@@ -198,6 +212,12 @@ function downloadAccountsExcel(accounts: CommercialAccount[]) {
     "Bancos utilizados",
     "Limite de bancos",
     "Nomes dos bancos",
+    "Nome da barbearia",
+    "Link da barbearia",
+    "Barbeiros cadastrados",
+    "Limite de barbeiros",
+    "Clientes da barbearia",
+    "Agendamentos da barbearia",
     "Provisionado",
     "Último webhook",
     "ID assinatura provedor",
@@ -217,11 +237,7 @@ function downloadAccountsExcel(accounts: CommercialAccount[]) {
     paymentLabel(account),
     account.status || "",
     account.isActive ? "Sim" : "Não",
-    account.plan === "plus"
-      ? "Plus"
-      : account.plan === "basic"
-        ? "Basic"
-        : "Grátis",
+    planLabel(account),
     billingLabel(account),
     money.format(Number(account.priceCents || 0) / 100),
     account.provider || "",
@@ -241,6 +257,12 @@ function downloadAccountsExcel(accounts: CommercialAccount[]) {
     Number(account.databaseCount || 0),
     Number(account.databaseLimit || 0),
     account.databaseNames || "",
+    account.barbershopName || "",
+    account.barbershopSlug ? `${window.location.origin}/b/${account.barbershopSlug}` : "",
+    Number(account.barberCount || 0),
+    Number(account.barberLimit || 0),
+    Number(account.barbershopClientCount || 0),
+    Number(account.appointmentCount || 0),
     account.provisionedAt
       ? `Sim — ${safeDate(account.provisionedAt, true)}`
       : "Não",
@@ -462,13 +484,20 @@ export default function AdminAssinaturas() {
           </Card>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-7">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-8">
           <Card>
             <CardContent className="p-5">
               <p className="text-xs text-muted-foreground">Clientes</p>
               <p className="mt-1 text-2xl font-black">
                 {data?.summary.total ?? 0}
               </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-xs text-muted-foreground">Barbearias ativas</p>
+              <p className="mt-1 text-2xl font-black text-indigo-600">{data?.summary.barberActive ?? 0}</p>
+              <p className="text-xs text-muted-foreground">{data?.summary.barber ?? 0} cadastradas</p>
             </CardContent>
           </Card>
           <Card>
@@ -555,19 +584,7 @@ export default function AdminAssinaturas() {
                               {account.name || account.username}
                             </h3>
                             {paymentBadge(account)}
-                            <Badge
-                              variant={
-                                account.plan === "plus"
-                                  ? "default"
-                                  : "secondary"
-                              }
-                            >
-                              {account.plan === "plus"
-                                ? "Plus"
-                                : account.plan === "basic"
-                                  ? "Basic"
-                                  : "Grátis"}
-                            </Badge>
+                            <Badge variant={account.plan === "plus" || account.plan === "barber" ? "default" : "secondary"}>{planLabel(account)}</Badge>
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
                             @{account.username} · {lifecycleLabel(account)}
@@ -655,6 +672,16 @@ export default function AdminAssinaturas() {
                         </div>
                       </div>
 
+                      {account.plan === "barber" ? (
+                        <div className="mt-4 grid gap-3 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-4 sm:grid-cols-2 xl:grid-cols-5">
+                          <div><p className="text-xs font-bold uppercase text-indigo-700">Barbearia</p><p className="font-semibold">{account.barbershopName || "Perfil ainda não criado"}</p></div>
+                          <div><p className="text-xs font-bold uppercase text-indigo-700">Equipe</p><p className="font-semibold">{account.barberCount || 0}/{account.barberLimit || 3} barbeiros</p></div>
+                          <div><p className="text-xs font-bold uppercase text-indigo-700">Clientes</p><p className="font-semibold">{account.barbershopClientCount || 0}</p></div>
+                          <div><p className="text-xs font-bold uppercase text-indigo-700">Agendamentos</p><p className="font-semibold">{account.appointmentCount || 0}</p></div>
+                          <div><p className="text-xs font-bold uppercase text-indigo-700">Link público</p>{account.barbershopSlug ? <a className="break-all text-sm font-semibold text-indigo-700 underline" href={`/b/${account.barbershopSlug}`} target="_blank" rel="noreferrer">/b/{account.barbershopSlug}</a> : <p className="text-sm text-muted-foreground">Não configurado</p>}</div>
+                        </div>
+                      ) : null}
+
                       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
                         <div className="rounded-xl bg-muted/40 p-3">
                           <p className="text-[11px] font-bold uppercase text-muted-foreground">
@@ -736,10 +763,7 @@ export default function AdminAssinaturas() {
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <Database className="h-4 w-4" />
                           <span>
-                            <strong>
-                              {account.databaseCount}/{account.databaseLimit}
-                            </strong>{" "}
-                            bancos — {account.databaseNames || "nenhum criado"}
+                            {account.plan === "barber" ? <><strong>{account.barberCount || 0}/{account.barberLimit || 3}</strong> barbeiros cadastrados</> : <><strong>{account.databaseCount}/{account.databaseLimit}</strong> bancos — {account.databaseNames || "nenhum criado"}</>}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
