@@ -19,7 +19,7 @@ const MONTHLY_PRICES = {
   plus: 4990,
 } as const;
 const ANNUAL_PIX_PRICES = {
-  barber: 17988,
+  barber: 17238,
   free: 0,
   basic: 19990,
   plus: 39990,
@@ -245,6 +245,7 @@ async function createAsaasPix(args: {
   cpf: string;
   plan: CommercialPlan;
   trialEndsAt: Date;
+  annualPriceCents?: number;
 }) {
   const externalReference = `notenote:${args.userId}:${args.plan}:pix_annual`;
   const customerId = await createAsaasCustomer(args);
@@ -254,7 +255,7 @@ async function createAsaasPix(args: {
     body: JSON.stringify({
       customer: customerId,
       billingType: "PIX",
-      value: ANNUAL_PIX_PRICES[args.plan] / 100,
+      value: (args.annualPriceCents ?? ANNUAL_PIX_PRICES[args.plan]) / 100,
       dueDate: yyyyMmDd(paymentDueDate),
       description: `Note Note - Plano ${PLAN_LABELS[args.plan]} Anual`,
       externalReference,
@@ -425,11 +426,6 @@ export default async function handler(req: any, res: any) {
         message: "Escolha pagamento mensal no cartão ou anual no Pix.",
       });
     const billingMethod = billingMethodInput as BillingMethod;
-    if (plan === "barber" && billingMethod !== "card_monthly")
-      return sendJson(res, 400, {
-        success: false,
-        message: "O plano Barbearia possui cobrança mensal no cartão.",
-      });
     if (plan === "free" && billingMethod !== "free")
       return sendJson(res, 400, {
         success: false,
@@ -529,9 +525,13 @@ export default async function handler(req: any, res: any) {
     createdUserId = Number(user.id);
     const selectedPrice =
       plan === "barber"
-        ? barberLimit === 8
-          ? 2590
-          : 1690
+        ? billingMethod === "pix_annual"
+          ? barberLimit === 8
+            ? 26418
+            : 17238
+          : barberLimit === 8
+            ? 2590
+            : 1690
         : priceFor(plan, billingMethod);
 
     await sql`
@@ -603,6 +603,7 @@ export default async function handler(req: any, res: any) {
         cpf,
         plan,
         trialEndsAt,
+        annualPriceCents: selectedPrice,
       });
       await sql`
         UPDATE commercial_subscriptions SET
