@@ -424,7 +424,7 @@ export default function Barbearia() {
               ) : (
                 <>
                   <span>
-                    ID {data?.shop?.user?.supportId || data?.user?.supportId || "—"} · R$ 14,99/mês
+                    ID {data?.shop?.user?.supportId || data?.user?.supportId || "—"} · {data?.user?.billingMethod === "pix_annual" ? `Plano anual via Pix · ${money(data?.user?.priceCents)}` : `${money(data?.user?.priceCents)}/mês`}
                   </span>
                   <a className="underline" href="/perfil">
                     Minha conta

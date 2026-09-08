@@ -25,8 +25,8 @@ const plans = {
   barber: {
     name: "Barbearia",
     monthly: "R$ 16,90/mês",
-    annualPix: "Somente mensal",
-    savings: "",
+    annualPix: "R$ 172,38/ano",
+    savings: "R$ 30,42",
     databaseAccess: "Área exclusiva para barbearia",
   },
   free: {
@@ -90,8 +90,6 @@ function readBillingMethod(): BillingMethod {
   const selectedPlan = new URLSearchParams(window.location.search)
     .get("plano")
     ?.toLowerCase();
-  if (BARBER_PLAN_SALES_ENABLED && selectedPlan === "barber")
-    return "card_monthly";
   if (selectedPlan === "free") return "free";
   if (!selectedPlan) {
     try {
@@ -204,11 +202,14 @@ export default function Cadastro() {
   const whatsappValid = validWhatsapp(whatsapp);
   const cpfValid = validCpf(cpf);
   const isFreePlan = plan === "free";
+  const barberMonthlyPrice = barberLimit === 8 ? "R$ 25,90/mês" : "R$ 16,90/mês";
+  const barberAnnualPrice = barberLimit === 8 ? "R$ 264,18/ano" : "R$ 172,38/ano";
+  const barberAnnualSavings = barberLimit === 8 ? "R$ 46,62" : "R$ 30,42";
   const selectedPrice = plan
     ? plan === "barber"
-      ? barberLimit === 8
-        ? "R$ 25,90/mês"
-        : "R$ 16,90/mês"
+      ? billingMethod === "pix_annual"
+        ? barberAnnualPrice
+        : barberMonthlyPrice
       : billingMethod === "pix_annual"
       ? plans[plan].annualPix
       : plans[plan].monthly
@@ -362,7 +363,7 @@ export default function Cadastro() {
                       Pix Asaas
                     </div>
                     <p className="mt-3 text-3xl font-black text-slate-950">
-                      {plans[plan].annualPix}
+                      {selectedPrice}
                     </p>
                     {pixInfo.qrCodeBase64 && (
                       <img
@@ -490,7 +491,7 @@ export default function Cadastro() {
               </div>
             )}
             {plan && !isFreePlan && (
-              <div className={`mb-6 grid gap-3 ${plan === "barber" ? "" : "sm:grid-cols-2"}`}>
+              <div className="mb-6 grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"
                   onClick={() => setBillingMethod("card_monthly")}
@@ -500,7 +501,7 @@ export default function Cadastro() {
                     Cartão de crédito · cobrança recorrente
                   </p>
                   <p className="mt-1 text-xl font-black">
-                    {selectedPrice}
+                    {plan === "barber" ? barberMonthlyPrice : plans[plan].monthly}
                   </p>
                   <p className="mt-2 text-xs text-slate-600">
                     {plan === "barber"
@@ -508,7 +509,7 @@ export default function Cadastro() {
                       : "Primeira cobrança após os 7 dias grátis."}
                   </p>
                 </button>
-                {plan !== "barber" && (
+                {(
                   <button
                     type="button"
                     onClick={() => setBillingMethod("pix_annual")}
@@ -518,10 +519,10 @@ export default function Cadastro() {
                       Pix anual
                     </p>
                     <p className="mt-1 text-xl font-black">
-                      {plans[plan].annualPix}
+                      {plan === "barber" ? barberAnnualPrice : plans[plan].annualPix}
                     </p>
                     <p className="mt-2 text-xs font-bold text-emerald-700">
-                      Economize {plans[plan].savings} no ano
+                      Economize {plan === "barber" ? barberAnnualSavings : plans[plan].savings} no ano
                     </p>
                   </button>
                 )}
