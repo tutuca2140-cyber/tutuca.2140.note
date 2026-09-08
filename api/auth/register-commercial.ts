@@ -13,7 +13,7 @@ const RETURN_BASE = "https://notenote.com.br";
 const TRIAL_DAYS = 7;
 
 const MONTHLY_PRICES = {
-  barber: 1499,
+  barber: 1690,
   free: 0,
   basic: 2990,
   plus: 4990,
@@ -25,7 +25,7 @@ const ANNUAL_PIX_PRICES = {
   plus: 39990,
 } as const;
 const PLAN_DATABASE_LIMITS = { barber: 0, free: 1, basic: 1, plus: 3 } as const;
-const BARBER_PLAN_SALES_ENABLED = false;
+const BARBER_PLAN_SALES_ENABLED = true;
 const PLAN_LABELS = {
   barber: "Barbearia",
   free: "Grátis",
@@ -332,6 +332,8 @@ async function createAsaasCardCheckout(args: {
   userId: number;
   plan: CommercialPlan;
   trialEndsAt: Date;
+  monthlyPriceCents?: number;
+  barberLimit?: number;
 }) {
   const externalReference = `notenote:${args.userId}:${args.plan}:card_monthly`;
   const checkout = await asaasRequest("/checkouts", {
@@ -348,10 +350,10 @@ async function createAsaasCardCheckout(args: {
       },
       items: [
         {
-          name: `Note Note ${PLAN_LABELS[args.plan]}`,
+          name: `Note Note ${PLAN_LABELS[args.plan]}${args.plan === "barber" ? ` · até ${args.barberLimit || 3} barbeiros` : ""}`,
           description: `Assinatura mensal do plano ${PLAN_LABELS[args.plan]}`,
           quantity: 1,
-          value: MONTHLY_PRICES[args.plan] / 100,
+          value: (args.monthlyPriceCents ?? MONTHLY_PRICES[args.plan]) / 100,
         },
       ],
       subscription: {
@@ -396,6 +398,7 @@ export default async function handler(req: any, res: any) {
     const plan = String(body?.plan ?? "")
       .trim()
       .toLowerCase();
+    const barberLimit = Number(body?.barberLimit) === 8 ? 8 : 3;
     const billingMethodInput = String(body?.billingMethod ?? "card_monthly")
       .trim()
       .toLowerCase();
@@ -425,7 +428,7 @@ export default async function handler(req: any, res: any) {
     if (plan === "barber" && billingMethod !== "card_monthly")
       return sendJson(res, 400, {
         success: false,
-        message: "O plano Barbearia tem cobrança mensal de R$ 14,99.",
+        message: "O plano Barbearia possui cobrança mensal no cartão.",
       });
     if (plan === "free" && billingMethod !== "free")
       return sendJson(res, 400, {
@@ -524,7 +527,12 @@ export default async function handler(req: any, res: any) {
     `;
     const user = created[0] as any;
     createdUserId = Number(user.id);
-    const selectedPrice = priceFor(plan, billingMethod);
+    const selectedPrice =
+      plan === "barber"
+        ? barberLimit === 8
+          ? 2590
+          : 1690
+        : priceFor(plan, billingMethod);
 
     await sql`
       INSERT INTO commercial_subscriptions (
@@ -644,6 +652,8 @@ export default async function handler(req: any, res: any) {
       userId: Number(user.id),
       plan,
       trialEndsAt,
+      monthlyPriceCents: selectedPrice,
+      barberLimit: plan === "barber" ? barberLimit : undefined,
     });
     await sql`
       UPDATE commercial_subscriptions SET

@@ -12,8 +12,8 @@ import { Link } from "wouter";
 const plans = [
   {
     id: "barber",
-    name: "Barbearia",
-    monthlyPrice: "14,99",
+    name: "Barbearia Essencial",
+    monthlyPrice: "16,90",
     annualPixPrice: null,
     annualSavings: null,
     description:
@@ -22,10 +22,27 @@ const plans = [
     databaseAccess: "Interface exclusiva de barbearia",
     automaticCreation:
       "Cadastre sua barbearia e compartilhe seu link de agendamento",
-    userAccess: "Agenda por barbeiro, clientes e serviços",
+    userAccess: "Cadastro de até 3 barbeiros",
     permissionBenefit: "Caixa, pagamentos e taxas de cartão",
     featured: false,
     icon: Sparkles,
+  },
+  {
+    id: "barber8",
+    name: "Barbearia Equipe",
+    monthlyPrice: "25,90",
+    annualPixPrice: null,
+    annualSavings: null,
+    description:
+      "Para barbearias com uma equipe maior, mantendo agenda, comandas e faturamento organizados.",
+    badge: "Até 8 barbeiros",
+    databaseAccess: "Interface exclusiva de barbearia",
+    automaticCreation:
+      "Página personalizada e link público para agendamentos",
+    userAccess: "Cadastro de até 8 barbeiros",
+    permissionBenefit: "Caixa, pagamentos, comandas e taxas de cartão",
+    featured: false,
+    icon: Crown,
   },
   {
     id: "free",
@@ -79,15 +96,17 @@ const plans = [
     icon: Crown,
   },
 ] as const;
-const BARBER_PLAN_SALES_ENABLED = false;
-type PlanId = "barber" | "free" | "basic" | "plus";
+const BARBER_PLAN_SALES_ENABLED = true;
+type PlanId = "barber" | "barber8" | "free" | "basic" | "plus";
 type BillingMethod = "free" | "card_monthly" | "pix_annual";
 function choosePlan(planId: PlanId, billingMethod: BillingMethod) {
+  const selectedPlan = planId === "barber8" ? "barber" : planId;
+  const barberLimit = planId === "barber8" ? 8 : 3;
   try {
-    window.sessionStorage.setItem("notenote:selected-plan", planId);
+    window.sessionStorage.setItem("notenote:selected-plan", selectedPlan);
     window.sessionStorage.setItem("notenote:selected-billing", billingMethod);
   } catch {}
-  window.location.href = `/cadastro?plano=${planId}&cobranca=${billingMethod}`;
+  window.location.href = `/cadastro?plano=${selectedPlan}&cobranca=${billingMethod}${selectedPlan === "barber" ? `&barbeiros=${barberLimit}` : ""}`;
 }
 export default function Planos() {
   return (
@@ -133,17 +152,18 @@ export default function Planos() {
               momento.
             </p>
           </div>
-          <div className="mx-auto mt-12 grid max-w-7xl gap-6 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mx-auto mt-12 grid max-w-7xl gap-6 md:grid-cols-2 xl:grid-cols-3">
             {plans
               .filter(
                 plan => BARBER_PLAN_SALES_ENABLED || plan.id !== "barber",
               )
               .map(plan => {
               const Icon = plan.icon;
+              const isBarberPlan = plan.id === "barber" || plan.id === "barber8";
               return (
                 <article
                   key={plan.id}
-                  className={`relative overflow-hidden rounded-[2rem] border bg-white p-7 shadow-xl sm:p-8 ${plan.featured ? "border-blue-500 shadow-blue-600/15" : plan.id === "barber" ? "border-indigo-300 shadow-indigo-600/10" : "border-slate-200"}`}
+                  className={`relative overflow-hidden rounded-[2rem] border bg-white p-7 shadow-xl sm:p-8 ${plan.featured ? "border-blue-500 shadow-blue-600/15" : isBarberPlan ? "border-indigo-300 shadow-indigo-600/10" : "border-slate-200"}`}
                 >
                   {plan.featured && (
                     <div className="absolute right-0 top-0 rounded-bl-2xl bg-blue-600 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-white">
@@ -170,7 +190,7 @@ export default function Planos() {
                       /mês
                     </span>
                   </div>
-                  {plan.id !== "free" && plan.id !== "barber" ? (
+                  {plan.id !== "free" && !isBarberPlan ? (
                     <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                       <p className="text-xs font-extrabold uppercase text-emerald-700">
                         Pix anual
@@ -182,7 +202,7 @@ export default function Planos() {
                         12 meses de acesso · economia de R$ {plan.annualSavings}
                       </p>
                     </div>
-                  ) : plan.id === "barber" ? (
+                  ) : isBarberPlan ? (
                     <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 p-4">
                       <p className="flex items-center gap-2 text-xs font-extrabold uppercase text-blue-700">
                         <CreditCard className="h-4 w-4" />
@@ -192,7 +212,7 @@ export default function Planos() {
                         Cartão de crédito
                       </p>
                       <p className="mt-2 text-xs font-semibold text-blue-800">
-                        R$ 14,99 cobrados automaticamente todo mês
+                        R$ {plan.monthlyPrice} cobrados automaticamente todo mês
                       </p>
                     </div>
                   ) : (
@@ -240,7 +260,7 @@ export default function Planos() {
                       <Check className="h-5 w-5 text-emerald-600" />
                       {plan.id === "free"
                         ? "Sem cartão e sem cobrança"
-                        : plan.id === "barber"
+                        : isBarberPlan
                           ? "Cobrança recorrente mensal no cartão"
                           : "Mensal no cartão ou anual no Pix"}
                     </div>
@@ -265,12 +285,12 @@ export default function Planos() {
                           onClick={() => choosePlan(plan.id, "card_monthly")}
                           className={`h-14 rounded-xl font-extrabold ${plan.featured ? "bg-blue-600 text-white" : "border border-blue-200 bg-blue-50 text-blue-700"}`}
                         >
-                          {plan.id === "barber"
-                            ? "Assinar no cartão — R$ 14,99/mês"
+                          {isBarberPlan
+                            ? `Assinar no cartão — R$ ${plan.monthlyPrice}/mês`
                             : "Assinar mensal"}
                         </button>
                         <button
-                          hidden={plan.id === "barber"}
+                          hidden={isBarberPlan}
                           onClick={() => choosePlan(plan.id, "pix_annual")}
                           className="h-14 rounded-xl border border-emerald-300 bg-emerald-50 font-extrabold text-emerald-800"
                         >
@@ -283,9 +303,9 @@ export default function Planos() {
                     {plan.id === "free"
                       ? "* O plano grátis não exige forma de pagamento."
                       : "* Novos usuários elegíveis têm 7 dias grátis. O plano mensal "}
-                    {plan.id === "barber" ? (
+                    {isBarberPlan ? (
                       <>
-                        A cobrança de R$ 14,99 é renovada mensalmente no cartão
+                        A cobrança de R$ {plan.monthlyPrice} é renovada mensalmente no cartão
                         de crédito e pode ser cancelada a qualquer momento,
                         ressalvados valores já vencidos e ciclos iniciados.
                       </>

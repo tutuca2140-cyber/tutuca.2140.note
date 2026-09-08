@@ -24,7 +24,7 @@ import { Link } from "wouter";
 const plans = {
   barber: {
     name: "Barbearia",
-    monthly: "R$ 14,99/mês",
+    monthly: "R$ 16,90/mês",
     annualPix: "Somente mensal",
     savings: "",
     databaseAccess: "Área exclusiva para barbearia",
@@ -52,7 +52,7 @@ const plans = {
   },
 } as const;
 
-const BARBER_PLAN_SALES_ENABLED = false;
+const BARBER_PLAN_SALES_ENABLED = true;
 type PlanId = keyof typeof plans;
 type BillingMethod = "free" | "card_monthly" | "pix_annual";
 type PixInfo = {
@@ -111,6 +111,12 @@ function readBillingMethod(): BillingMethod {
   } catch {}
   return "card_monthly";
 }
+function readBarberLimit() {
+  const value = Number(
+    new URLSearchParams(window.location.search).get("barbeiros") || "3"
+  );
+  return value === 8 ? 8 : 3;
+}
 function formatWhatsapp(value: string) {
   const d = value
     .replace(/\D/g, "")
@@ -148,6 +154,7 @@ function validWhatsapp(value: string) {
 
 export default function Cadastro() {
   const plan = useMemo(readSelectedPlan, []);
+  const barberLimit = useMemo(readBarberLimit, []);
   const [billingMethod, setBillingMethod] = useState<BillingMethod>(() =>
     readBillingMethod()
   );
@@ -198,7 +205,11 @@ export default function Cadastro() {
   const cpfValid = validCpf(cpf);
   const isFreePlan = plan === "free";
   const selectedPrice = plan
-    ? billingMethod === "pix_annual"
+    ? plan === "barber"
+      ? barberLimit === 8
+        ? "R$ 25,90/mês"
+        : "R$ 16,90/mês"
+      : billingMethod === "pix_annual"
       ? plans[plan].annualPix
       : plans[plan].monthly
     : "";
@@ -243,6 +254,7 @@ export default function Cadastro() {
           cpf,
           password,
           plan,
+          barberLimit: plan === "barber" ? barberLimit : undefined,
           billingMethod,
           captchaToken: captcha.token,
           captchaAnswer,
@@ -488,11 +500,11 @@ export default function Cadastro() {
                     Cartão de crédito · cobrança recorrente
                   </p>
                   <p className="mt-1 text-xl font-black">
-                    {plans[plan].monthly}
+                    {selectedPrice}
                   </p>
                   <p className="mt-2 text-xs text-slate-600">
                     {plan === "barber"
-                      ? "R$ 14,99 cobrados automaticamente a cada mês após o período grátis."
+                      ? `Gestão para até ${barberLimit} barbeiros, cobrada automaticamente a cada mês após o período grátis.`
                       : "Primeira cobrança após os 7 dias grátis."}
                   </p>
                 </button>

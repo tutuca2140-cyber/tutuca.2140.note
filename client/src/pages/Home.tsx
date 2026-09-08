@@ -13,6 +13,7 @@ import {
   Package,
   PlayCircle,
   ShieldCheck,
+  Scissors,
   Star,
   TrendingUp,
   Users,
@@ -519,6 +520,9 @@ export default function Home() {
             <a href="#imoveis" className="transition hover:text-blue-600">
               Imóveis
             </a>
+            <a href="#barbearia" className="transition hover:text-blue-600">
+              Barbearias
+            </a>
             <a
               href="#funcionalidades"
               className="transition hover:text-blue-600"
@@ -607,6 +611,55 @@ export default function Home() {
         </section>
 
         <RotatingAds />
+
+        <section
+          id="barbearia"
+          className="scroll-mt-24 overflow-hidden bg-slate-950 py-20 text-white"
+        >
+          <div className="mx-auto grid max-w-7xl items-center gap-12 px-5 lg:grid-cols-[1.05fr_.95fr] lg:px-8">
+            <div>
+              <span className="inline-flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 px-4 py-2 text-sm font-bold text-blue-200">
+                <Scissors className="h-4 w-4" /> Note Note para Barbearias
+              </span>
+              <h2 className="mt-6 max-w-3xl text-4xl font-black leading-tight tracking-tight sm:text-5xl">
+                Sua agenda, equipe, comandas e caixa no mesmo lugar.
+              </h2>
+              <p className="mt-5 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
+                Crie o perfil da sua barbearia, compartilhe um link personalizado para agendamentos e acompanhe o faturamento de cada barbeiro com acesso individual.
+              </p>
+              <div className="mt-7 grid gap-3 text-sm text-slate-200 sm:grid-cols-2">
+                {["Agenda semanal por barbeiro", "Link público personalizado", "Confirmação e check-in", "Comandas, produtos e pagamentos", "Clientes cadastrados", "Fluxo e comissão por profissional"].map(item => (
+                  <div key={item} className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {[
+                { name: "Barbearia Essencial", price: "16,90", limit: 3, featured: false },
+                { name: "Barbearia Equipe", price: "25,90", limit: 8, featured: true },
+              ].map(plan => (
+                <article key={plan.limit} className={`rounded-3xl border p-6 ${plan.featured ? "border-blue-400 bg-blue-600 shadow-2xl shadow-blue-950/40" : "border-white/15 bg-white/5"}`}>
+                  <p className="text-sm font-bold text-blue-100">{plan.name}</p>
+                  <p className="mt-4 text-4xl font-black">R$ {plan.price}</p>
+                  <p className="mt-1 text-sm text-blue-100">por mês</p>
+                  <p className="mt-5 min-h-12 font-bold">1 gestão de barbearia com até {plan.limit} barbeiros.</p>
+                  <a
+                    href={`/cadastro?plano=barber&cobranca=card_monthly&barbeiros=${plan.limit}`}
+                    className={`mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl font-extrabold transition hover:-translate-y-0.5 ${plan.featured ? "bg-white text-blue-700" : "bg-blue-600 text-white"}`}
+                  >
+                    Escolher plano <ArrowRight className="h-4 w-4" />
+                  </a>
+                </article>
+              ))}
+              <p className="text-center text-xs leading-5 text-slate-400 sm:col-span-2">
+                Cobrança recorrente mensal no cartão. Cancele quando quiser.
+              </p>
+            </div>
+          </div>
+        </section>
 
         <section id="recursos" className="scroll-mt-24 bg-white py-20">
           <div className="mx-auto max-w-7xl px-5 lg:px-8">
@@ -836,11 +889,11 @@ export default function Home() {
                 Escolha seu acesso
               </p>
               <h2 className="mt-2 text-3xl font-black">
-                Comece com Basic ou Plus.
+                Escolha o plano certo para o seu negócio.
               </h2>
               <p className="mt-3 max-w-2xl text-blue-100">
                 Controle clientes, vendas, imóveis, aluguéis, financiamentos e
-                caixa no mesmo sistema.
+                caixa ou use a gestão exclusiva para sua barbearia.
               </p>
             </div>
             <Link href="/planos">
