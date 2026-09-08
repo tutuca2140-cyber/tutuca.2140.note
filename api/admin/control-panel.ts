@@ -16,6 +16,7 @@ function ensureTables() {
   if (tablesPromise) return tablesPromise;
   const sql = getSql();
   tablesPromise = (async () => {
+    await sql`CREATE TABLE IF NOT EXISTS barber_shops (owner_id integer PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, slug varchar(100) UNIQUE NOT NULL, version integer NOT NULL DEFAULT 0, data jsonb NOT NULL)`;
     await sql`
       CREATE TABLE IF NOT EXISTS site_access_logs (
         id bigserial PRIMARY KEY,
@@ -39,6 +40,7 @@ function ensureTables() {
         "updatedAt" timestamptz NOT NULL DEFAULT NOW()
       )
     `;
+    await sql`ALTER TABLE commercial_subscriptions ADD COLUMN IF NOT EXISTS "billingMethod" varchar(30) NOT NULL DEFAULT 'card_monthly'`;
   })().catch(error => {
     tablesPromise = null;
     throw error;
@@ -188,12 +190,16 @@ export default async function handler(req: any, res: any) {
           COUNT(*)::int AS total,
           COUNT(*) FILTER (WHERE plan = 'basic')::int AS basic,
           COUNT(*) FILTER (WHERE plan = 'plus')::int AS plus,
+          COUNT(*) FILTER (WHERE plan = 'barber')::int AS barber,
+          COUNT(*) FILTER (WHERE plan = 'barber' AND status IN ('active', 'paid'))::int AS "barberActive",
           COUNT(*) FILTER (WHERE status = 'pending_payment')::int AS pending,
           COUNT(*) FILTER (WHERE status = 'past_due')::int AS overdue,
           COUNT(*) FILTER (WHERE status IN ('active', 'paid'))::int AS active,
           COALESCE(SUM("priceCents"), 0)::bigint AS "selectedValueCents",
           COALESCE(SUM("priceCents") FILTER (WHERE status IN ('pending_payment', 'past_due')), 0)::bigint AS "pendingValueCents",
           COALESCE(SUM("priceCents") FILTER (WHERE status IN ('active', 'paid')), 0)::bigint AS "activeMonthlyValueCents"
+          ,COALESCE(SUM("priceCents") FILTER (WHERE status IN ('active', 'paid') AND "billingMethod"='card_monthly'), 0)::bigint AS "monthlyActiveCents"
+          ,COALESCE(SUM("priceCents") FILTER (WHERE status IN ('active', 'paid') AND "billingMethod"='pix_annual'), 0)::bigint AS "annualPixActiveCents"
         FROM commercial_subscriptions
       `,
       sql`
@@ -274,6 +280,10 @@ export default async function handler(req: any, res: any) {
           cs.plan,
           cs."priceCents",
           cs.status AS "subscriptionStatus",
+          cs."billingMethod",
+          (SELECT b.data->>'name' FROM barber_shops b WHERE b.owner_id=u.id LIMIT 1) AS "barbershopName",
+          (SELECT b.slug FROM barber_shops b WHERE b.owner_id=u.id LIMIT 1) AS "barbershopSlug",
+          COALESCE((SELECT COUNT(*)::int FROM barber_shops b, jsonb_array_elements(COALESCE(b.data->'barbers','[]'::jsonb)) item WHERE b.owner_id=u.id AND COALESCE((item->>'active')::boolean,true)),0)::int AS "barberCount",
           EXISTS (
             SELECT 1 FROM local_sessions s
              WHERE s."userId" = u.id AND s."expiresAt" > NOW()
