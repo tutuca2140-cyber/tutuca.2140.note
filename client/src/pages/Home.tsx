@@ -655,7 +655,7 @@ export default function Home() {
                 </article>
               ))}
               <p className="text-center text-xs leading-5 text-slate-400 sm:col-span-2">
-                Mensal no cartão ou anual no Pix com 15% de desconto.
+                Mensal no cartão ou anual no Pix com 30% de desconto.
               </p>
             </div>
           </div>
