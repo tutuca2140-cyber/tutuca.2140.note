@@ -21,6 +21,7 @@ import {
   ClipboardList,
   X,
   LogOut,
+  ReceiptText,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -52,6 +53,16 @@ const methods: any = {
 const addMinutes = (time: string, duration: number) => {
   const total = Number(time.slice(0, 2)) * 60 + Number(time.slice(3)) + Number(duration || 0);
   return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+};
+const expenseDueOn = (schedule: any, date: string) => {
+  if (!schedule?.active || !date || !schedule.startDate || date < schedule.startDate) return false;
+  if (schedule.frequency === "once") return date === schedule.startDate;
+  const target = new Date(`${date}T12:00:00`);
+  const start = new Date(`${schedule.startDate}T12:00:00`);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  const expectedDay = Math.min(start.getDate(), lastDay);
+  if (schedule.frequency === "monthly") return target.getDate() === expectedDay;
+  return schedule.frequency === "yearly" && target.getMonth() === start.getMonth() && target.getDate() === expectedDay;
 };
 const readLogo = (file: File | null) =>
   new Promise<string>((resolve, reject) => {
@@ -176,6 +187,7 @@ export default function Barbearia() {
     ["Comandas", ClipboardList],
     ["Clientes", Users],
     ["Produtos", Package],
+    ["Despesas", ReceiptText],
     ["Caixa", Wallet],
     ["Pagamento", Wallet],
     ["Perfil", Settings],
@@ -210,6 +222,7 @@ export default function Barbearia() {
       !payments.some((payment: any) => payment.appointmentId === a.id)
   );
   const expenses = s?.expenses || [];
+  const expenseSchedules = s?.expenseSchedules || [];
   const blocks = s?.blocks || [];
   const dayPayments = payments.filter(
     (p: any) =>
@@ -222,6 +235,9 @@ export default function Barbearia() {
       new Date(p.date).toLocaleDateString("en-CA", {
         timeZone: "America/Sao_Paulo",
       }) === date
+  );
+  const pendingDayExpenses = expenseSchedules.filter(
+    (schedule: any) => expenseDueOn(schedule, date) && !expenses.some((expense: any) => expense.scheduleId === schedule.id && expense.occurrenceDate === date)
   );
   const sum = (list: any[], key: string) =>
     list.reduce((n: number, p: any) => n + Number(p[key] || 0), 0);
@@ -767,26 +783,20 @@ export default function Barbearia() {
                       {tab === "Caixa" && (
                         <Card>
                           <CardContent className="space-y-4 p-6">
-                            <h2 className="font-bold">Registrar saída</h2>
-                            <form
-                              onSubmit={submit("expense")}
-                              className="grid gap-4 sm:grid-cols-3"
-                            >
-                              <Field
-                                name="description"
-                                label="Descrição"
-                                required
-                              />
-                              <Field
-                                name="amount"
-                                label="Valor (R$)"
-                                type="number"
-                                min="0.01"
-                                step="0.01"
-                                required
-                              />
-                              <Button disabled={busy}>Registrar saída</Button>
-                            </form>
+                            <div>
+                              <h2 className="font-bold">Movimentações do dia</h2>
+                              <p className="mt-1 text-sm text-muted-foreground">As despesas previstas precisam da autorização do dono antes de entrar como saída.</p>
+                            </div>
+                            {pendingDayExpenses.map((expense: any) => (
+                              <div key={expense.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+                                <div>
+                                  <p className="font-bold">{expense.description}</p>
+                                  <p className="text-sm text-amber-800 dark:text-amber-200">{money(expense.amount)} · aguardando autorização de pagamento</p>
+                                </div>
+                                <Button disabled={busy || date > today()} onClick={() => act("payExpense", { id: expense.id, occurrenceDate: date })}>{date > today() ? "Disponível no vencimento" : "Autorizar pagamento"}</Button>
+                              </div>
+                            ))}
+                            {!pendingDayExpenses.length ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-muted-foreground dark:bg-slate-900">Nenhuma despesa aguardando autorização neste dia.</p> : null}
                             {dayPayments.map((p: any) => (
                               <p key={p.id}>
                                 {names(s.clients, p.clientId)} ·{" "}
@@ -803,6 +813,46 @@ export default function Barbearia() {
                         </Card>
                       )}
                     </>
+                  )}
+                  {tab === "Despesas" && !isBarberUser && (
+                    <div className="space-y-6">
+                      <Card>
+                        <CardContent className="space-y-5 p-6">
+                          <div>
+                            <h2 className="text-xl font-bold">Cadastrar despesa</h2>
+                            <p className="mt-1 text-sm text-muted-foreground">Programe uma despesa única, mensal ou anual. Ela aparecerá no Caixa no dia escolhido.</p>
+                          </div>
+                          <form onSubmit={submit("expenseSchedule")} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                            <Field name="description" label="Descrição" placeholder="Ex.: aluguel, energia ou licença" required />
+                            <Field name="amount" label="Valor (R$)" type="number" min="0.01" step="0.01" required />
+                            <SelectField name="frequency" label="Frequência" defaultValue="monthly" required>
+                              <option value="once">Uma vez</option>
+                              <option value="monthly">Todo mês</option>
+                              <option value="yearly">Todo ano</option>
+                            </SelectField>
+                            <Field name="startDate" label="Primeiro vencimento" type="date" required />
+                            <Button disabled={busy} className="sm:col-span-2 xl:col-span-4">Salvar despesa</Button>
+                          </form>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="space-y-4 p-6">
+                          <h2 className="text-xl font-bold">Despesas programadas</h2>
+                          {expenseSchedules.some((expense: any) => expense.active) ? expenseSchedules.filter((expense: any) => expense.active).map((expense: any) => (
+                            <div key={expense.id} className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-4">
+                              <div>
+                                <p className="font-bold">{expense.description}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">{money(expense.amount)} · {expense.frequency === "monthly" ? "Mensal" : expense.frequency === "yearly" ? "Anual" : "Uma vez"} · primeiro vencimento em {expense.startDate.split("-").reverse().join("/")}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">Ativa</span>
+                                <Button type="button" variant="destructive" disabled={busy} onClick={() => window.confirm(`Excluir ${expense.description}?`) && act("deleteExpenseSchedule", { id: expense.id })}>Excluir</Button>
+                              </div>
+                            </div>
+                          )) : <p className="text-sm text-muted-foreground">Nenhuma despesa programada.</p>}
+                        </CardContent>
+                      </Card>
+                    </div>
                   )}
                   {tab === "Barbeiros" && !isBarberUser && (
                     <div className="space-y-6">
