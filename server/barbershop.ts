@@ -139,6 +139,7 @@ function publicState(s: any) {
 }
 export async function handleBarbershop(req: any, res: any) {
   let createdBarberUserId: number | null = null;
+  let barberUserToDeactivate: number | null = null;
   try {
     if (!["GET", "POST"].includes(req.method))
       fail("Método não permitido.", 405);
@@ -313,7 +314,11 @@ export async function handleBarbershop(req: any, res: any) {
     if (!pub && isBarberUser) {
       const allowedBarberActions = [
         "client",
+        "updateClient",
+        "deleteClient",
         "book",
+        "updateAppointment",
+        "deleteAppointment",
         "orderProduct",
         "removeProduct",
         "confirm",
@@ -326,7 +331,7 @@ export async function handleBarbershop(req: any, res: any) {
         fail("Você só pode agendar clientes na sua própria agenda.", 403);
       const appointmentId = ["orderProduct", "removeProduct"].includes(action)
         ? body.appointmentId
-        : ["confirm", "checkin", "pay"].includes(action)
+        : ["confirm", "checkin", "pay", "updateAppointment", "deleteAppointment"].includes(action)
           ? body.id
           : null;
       if (
@@ -338,6 +343,11 @@ export async function handleBarbershop(req: any, res: any) {
         )
       )
         fail("Você só pode alterar atendimentos da sua própria agenda.", 403);
+      if (["updateClient", "deleteClient"].includes(action)) {
+        const client = state.clients.find((item: any) => item.id === body.id);
+        if (!client || client.createdByBarberId !== currentBarber.id)
+          fail("Você só pode alterar clientes cadastrados por você.", 403);
+      }
     }
     if (action === "register" || action === "login") {
       const email = str(body.email).toLowerCase(),
@@ -480,6 +490,14 @@ export async function handleBarbershop(req: any, res: any) {
       });
       if (professional.userId)
         await sql`UPDATE users SET name=${professional.name},"updatedAt"=NOW() WHERE id=${Number(professional.userId)} AND "accountOwnerId"=${shopOwnerId}`;
+    } else if (action === "deleteBarber") {
+      const professional = state.barbers.find((b: any) => b.id === body.id);
+      if (!professional) fail("Barbeiro não encontrado.", 404);
+      if (state.appointments.some((appointment: any) => appointment.barberId === professional.id))
+        fail("Exclua os agendamentos vinculados antes de excluir este barbeiro.", 409);
+      state.blocks = (state.blocks || []).filter((block: any) => block.barberId !== professional.id);
+      state.barbers = state.barbers.filter((b: any) => b.id !== professional.id);
+      barberUserToDeactivate = Number(professional.userId) || null;
     } else if (action === "block") {
       const start = str(body.start), end = str(body.end), blockDate = str(body.date);
       if (!state.barbers.some((b: any) => b.id === body.barberId) || !/^\d{4}-\d{2}-\d{2}$/.test(blockDate) || minutes(start) >= minutes(end))
@@ -506,6 +524,18 @@ export async function handleBarbershop(req: any, res: any) {
         itemType,
         active: true,
       });
+    } else if (action === "updateProduct") {
+      const product = state.products.find((item: any) => item.id === body.id);
+      if (!product) fail("Produto ou serviço não encontrado.", 404);
+      const itemType = body.itemType === "convenience" ? "convenience" : "service";
+      const duration = itemType === "convenience" ? 0 : Number(body.duration);
+      if (str(body.name).length < 2 || (itemType === "service" && (!Number.isInteger(duration) || duration < 5 || duration > 480)))
+        fail("Informe o nome e, para serviços, uma duração de 5 a 480 minutos.");
+      Object.assign(product, { name: str(body.name), price: cents(body.price), duration, itemType });
+    } else if (action === "deleteProduct") {
+      const product = state.products.find((item: any) => item.id === body.id);
+      if (!product) fail("Produto ou serviço não encontrado.", 404);
+      state.products = state.products.filter((item: any) => item.id !== product.id);
     } else if (action === "client") {
       const clientEmail = str(body.email).toLowerCase();
       if (
@@ -525,6 +555,19 @@ export async function handleBarbershop(req: any, res: any) {
         whatsapp: str(body.whatsapp),
         createdByBarberId: isBarberUser ? currentBarber.id : null,
       });
+    } else if (action === "updateClient") {
+      const client = state.clients.find((item: any) => item.id === body.id);
+      const email = str(body.email).toLowerCase();
+      if (!client) fail("Cliente não encontrado.", 404);
+      if (str(body.name).length < 2 || str(body.whatsapp).replace(/\D/g, "").length < 10 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))
+        fail("Informe nome, WhatsApp e, se preenchido, um e-mail válido.");
+      Object.assign(client, { name: str(body.name), email, whatsapp: str(body.whatsapp) });
+    } else if (action === "deleteClient") {
+      const client = state.clients.find((item: any) => item.id === body.id);
+      if (!client) fail("Cliente não encontrado.", 404);
+      if (state.appointments.some((appointment: any) => appointment.clientId === client.id))
+        fail("Exclua os agendamentos vinculados antes de excluir este cliente.", 409);
+      state.clients = state.clients.filter((item: any) => item.id !== client.id);
     } else if (action === "book") {
       const c = pub
         ? customer
@@ -593,6 +636,29 @@ export async function handleBarbershop(req: any, res: any) {
         time: str(body.time),
         status: "agendado",
       });
+    } else if (action === "updateAppointment") {
+      const appointment = state.appointments.find((item: any) => item.id === body.id);
+      if (!appointment) fail("Agendamento não encontrado.", 404);
+      if (state.payments.some((payment: any) => payment.appointmentId === appointment.id))
+        fail("Agendamentos pagos não podem ser alterados.", 409);
+      const clientId = str(body.clientId) || appointment.clientId;
+      const barberId = isBarberUser ? currentBarber.id : str(body.barberId) || appointment.barberId;
+      const appointmentDate = str(body.date) || appointment.date;
+      const appointmentTime = str(body.time) || appointment.time;
+      if (!state.clients.some((client: any) => client.id === clientId) || !state.barbers.some((barber: any) => barber.id === barberId && barber.active))
+        fail("Confira o cliente e o barbeiro.");
+      const originalAppointments = state.appointments;
+      state.appointments = originalAppointments.filter((item: any) => item.id !== appointment.id);
+      const available = slotFree(state, barberId, appointmentDate, appointmentTime, Number(appointment.duration) || 30);
+      state.appointments = originalAppointments;
+      if (!available) fail("O novo horário está indisponível.", 409);
+      Object.assign(appointment, { clientId, barberId, date: appointmentDate, time: appointmentTime });
+    } else if (action === "deleteAppointment") {
+      const appointment = state.appointments.find((item: any) => item.id === body.id);
+      if (!appointment) fail("Agendamento não encontrado.", 404);
+      if (state.payments.some((payment: any) => payment.appointmentId === appointment.id))
+        fail("Agendamentos pagos não podem ser excluídos.", 409);
+      state.appointments = state.appointments.filter((item: any) => item.id !== appointment.id);
     } else if (action === "orderProduct") {
       if (pub && !customer) fail("Entre na sua conta para usar a comanda.", 401);
       const appointment = state.appointments.find(
@@ -730,6 +796,8 @@ export async function handleBarbershop(req: any, res: any) {
         "A agenda mudou enquanto você salvava. Atualize e tente novamente.",
         409
       );
+    if (barberUserToDeactivate)
+      await sql`UPDATE users SET "isActive"=false,"updatedAt"=NOW() WHERE id=${barberUserToDeactivate} AND "accountOwnerId"=${shopOwnerId}`;
     return sendJson(res, 200, { success: true });
   } catch (e: any) {
     if (createdBarberUserId) {
