@@ -409,7 +409,7 @@ export async function handleBarbershop(req: any, res: any) {
     } else if (action === "barber") {
       if (str(body.name).length < 2) fail("Informe o nome do barbeiro.");
       const subscriptionPrice = Number(u.priceCents || 0);
-      const barberLimit = [2590, 26418].includes(subscriptionPrice) ? 8 : 3;
+      const barberLimit = [2590, 21756].includes(subscriptionPrice) ? 8 : 3;
       if (state.barbers.filter((barber: any) => barber.active).length >= barberLimit)
         fail(`Seu plano permite cadastrar até ${barberLimit} barbeiros.`, 403);
       const username = str(body.username, 40).toLowerCase();
