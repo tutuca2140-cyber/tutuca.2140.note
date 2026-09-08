@@ -88,6 +88,20 @@ export function slotFree(
     );
   });
 }
+function expenseDueOn(schedule: any, date: string) {
+  if (!schedule?.active || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{4}-\d{2}-\d{2}$/.test(schedule.startDate)) return false;
+  const target = new Date(`${date}T12:00:00Z`);
+  const start = new Date(`${schedule.startDate}T12:00:00Z`);
+  if (target < start) return false;
+  if (schedule.frequency === "once") return date === schedule.startDate;
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  const expectedDay = Math.min(start.getUTCDate(), lastDay);
+  if (schedule.frequency === "monthly") return target.getUTCDate() === expectedDay;
+  if (schedule.frequency === "yearly") {
+    return target.getUTCMonth() === start.getUTCMonth() && target.getUTCDate() === expectedDay;
+  }
+  return false;
+}
 let ready: Promise<unknown> | null = null;
 async function ensure() {
   if (!ready) {
@@ -181,6 +195,7 @@ export async function handleBarbershop(req: any, res: any) {
         appointments: [],
         payments: [],
         expenses: [],
+        expenseSchedules: [],
         blocks: [],
         rates: { credit: 0, debit: 0 },
       };
@@ -253,6 +268,7 @@ export async function handleBarbershop(req: any, res: any) {
               appointments: visibleAppointments,
               payments: visiblePayments,
               expenses: isBarberUser ? [] : state.expenses,
+              expenseSchedules: isBarberUser ? [] : (state.expenseSchedules || []),
               blocks: isBarberUser
                 ? (state.blocks || []).filter(
                     (block: any) => block.barberId === currentBarber.id
@@ -779,6 +795,29 @@ export async function handleBarbershop(req: any, res: any) {
         date: new Date().toISOString(),
       });
       a.status = "concluido";
+    } else if (action === "expenseSchedule") {
+      const frequency = ["once", "monthly", "yearly"].includes(body.frequency) ? body.frequency : "once";
+      const startDate = str(body.startDate);
+      if (!str(body.description) || cents(body.amount) <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(startDate))
+        fail("Informe descrição, valor, frequência e primeiro vencimento.");
+      state.expenseSchedules ||= [];
+      state.expenseSchedules.push({ id: id(), description: str(body.description), amount: cents(body.amount), frequency, startDate, active: true });
+    } else if (action === "deleteExpenseSchedule") {
+      state.expenseSchedules ||= [];
+      const schedule = state.expenseSchedules.find((item: any) => item.id === body.id);
+      if (!schedule) fail("Despesa não encontrada.", 404);
+      schedule.active = false;
+    } else if (action === "payExpense") {
+      state.expenseSchedules ||= [];
+      const schedule = state.expenseSchedules.find((item: any) => item.id === body.id);
+      const occurrenceDate = str(body.occurrenceDate);
+      if (!schedule || !expenseDueOn(schedule, occurrenceDate)) fail("Este vencimento não está disponível para pagamento.", 409);
+      const currentDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+      if (occurrenceDate > currentDate) fail("A despesa só pode ser autorizada no vencimento.", 409);
+      if (state.expenses.some((item: any) => item.scheduleId === schedule.id && item.occurrenceDate === occurrenceDate))
+        fail("Esta despesa já foi paga.", 409);
+      state.expenses.push({ id: id(), scheduleId: schedule.id, occurrenceDate, description: schedule.description, amount: schedule.amount, date: `${occurrenceDate}T12:00:00-03:00` });
+      if (schedule.frequency === "once") schedule.active = false;
     } else if (action === "expense") {
       if (!str(body.description) || cents(body.amount) <= 0)
         fail("Informe descrição e valor da saída.");
