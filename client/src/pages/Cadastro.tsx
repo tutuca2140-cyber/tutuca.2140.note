@@ -25,8 +25,8 @@ const plans = {
   barber: {
     name: "Barbearia",
     monthly: "R$ 16,90/mês",
-    annualPix: "R$ 172,38/ano",
-    savings: "R$ 30,42",
+    annualPix: "R$ 141,96/ano",
+    savings: "R$ 60,84",
     databaseAccess: "Área exclusiva para barbearia",
   },
   free: {
@@ -203,8 +203,8 @@ export default function Cadastro() {
   const cpfValid = validCpf(cpf);
   const isFreePlan = plan === "free";
   const barberMonthlyPrice = barberLimit === 8 ? "R$ 25,90/mês" : "R$ 16,90/mês";
-  const barberAnnualPrice = barberLimit === 8 ? "R$ 264,18/ano" : "R$ 172,38/ano";
-  const barberAnnualSavings = barberLimit === 8 ? "R$ 46,62" : "R$ 30,42";
+  const barberAnnualPrice = barberLimit === 8 ? "R$ 217,56/ano" : "R$ 141,96/ano";
+  const barberAnnualSavings = barberLimit === 8 ? "R$ 93,24" : "R$ 60,84";
   const selectedPrice = plan
     ? plan === "barber"
       ? billingMethod === "pix_annual"

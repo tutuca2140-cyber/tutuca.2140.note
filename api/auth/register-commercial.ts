@@ -19,7 +19,7 @@ const MONTHLY_PRICES = {
   plus: 4990,
 } as const;
 const ANNUAL_PIX_PRICES = {
-  barber: 17238,
+  barber: 14196,
   free: 0,
   basic: 19990,
   plus: 39990,
@@ -527,8 +527,8 @@ export default async function handler(req: any, res: any) {
       plan === "barber"
         ? billingMethod === "pix_annual"
           ? barberLimit === 8
-            ? 26418
-            : 17238
+            ? 21756
+            : 14196
           : barberLimit === 8
             ? 2590
             : 1690

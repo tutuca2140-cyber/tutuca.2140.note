@@ -14,8 +14,8 @@ const plans = [
     id: "barber",
     name: "Barbearia Essencial",
     monthlyPrice: "16,90",
-    annualPixPrice: "172,38",
-    annualSavings: "30,42",
+    annualPixPrice: "141,96",
+    annualSavings: "60,84",
     description:
       "Agenda online e gestão exclusiva para barbeiros e barbearias.",
     badge: "Para barbearias",
@@ -31,8 +31,8 @@ const plans = [
     id: "barber8",
     name: "Barbearia Equipe",
     monthlyPrice: "25,90",
-    annualPixPrice: "264,18",
-    annualSavings: "46,62",
+    annualPixPrice: "217,56",
+    annualSavings: "93,24",
     description:
       "Para barbearias com uma equipe maior, mantendo agenda, comandas e faturamento organizados.",
     badge: "Até 8 barbeiros",
@@ -152,7 +152,7 @@ export default function Planos() {
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
               {barberMode ? (
-                <>Agenda, equipe, clientes, comandas e pagamentos em uma interface feita para barbearias. Escolha pagar mensalmente no cartão ou anualmente no Pix com <strong>15% de desconto</strong>.</>
+                <>Agenda, equipe, clientes, comandas e pagamentos em uma interface feita para barbearias. Escolha pagar mensalmente no cartão ou anualmente no Pix com <strong>30% de desconto</strong>.</>
               ) : (
                 <>Novos usuários elegíveis têm <strong>7 dias grátis</strong>. O plano mensal não possui fidelidade e pode ser cancelado a qualquer momento.</>
               )}
@@ -221,7 +221,7 @@ export default function Planos() {
                         <p className="mt-1 text-xl font-black text-blue-950">R$ {plan.monthlyPrice}/mês</p>
                       </div>
                       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                        <p className="text-xs font-extrabold uppercase text-emerald-700">Pix anual · 15% de desconto</p>
+                        <p className="text-xs font-extrabold uppercase text-emerald-700">Pix anual · 30% de desconto</p>
                         <p className="mt-1 text-2xl font-black text-emerald-950">R$ {plan.annualPixPrice}</p>
                         <p className="mt-2 text-xs font-bold text-emerald-800">Você economiza R$ {plan.annualSavings}</p>
                       </div>
@@ -315,7 +315,7 @@ export default function Planos() {
                       : "* Novos usuários elegíveis têm 7 dias grátis. O plano mensal "}
                     {isBarberPlan ? (
                       <>
-                        No cartão, a cobrança de R$ {plan.monthlyPrice} é mensal. No Pix anual, são 12 meses antecipados com 15% de desconto.
+                        No cartão, a cobrança de R$ {plan.monthlyPrice} é mensal. No Pix anual, são 12 meses antecipados com 30% de desconto.
                       </>
                     ) : plan.id !== "free" && (
                       <>
@@ -333,7 +333,7 @@ export default function Planos() {
           <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-blue-100 bg-white/80 p-5 text-center text-sm leading-6 text-slate-600">
             <strong className="text-slate-900">Condição de contratação:</strong>{" "}
             {barberMode
-              ? "O pagamento anual no Pix libera 12 meses de acesso e já inclui 15% de desconto sobre o total mensal."
+              ? "O pagamento anual no Pix libera 12 meses de acesso e já inclui 30% de desconto sobre o total mensal."
               : "7 dias de teste grátis para elegíveis. O plano mensal não possui fidelidade e pode ser cancelado a qualquer momento. Direitos obrigatórios do consumidor permanecem preservados."}
           </div>
         </section>
