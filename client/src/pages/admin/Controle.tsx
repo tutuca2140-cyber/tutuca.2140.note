@@ -16,8 +16,10 @@ import {
   HardDrive,
   History,
   Loader2,
+  Mail,
   RefreshCw,
   Search,
+  Scissors,
   ShieldCheck,
   UserCheck,
   Users,
@@ -96,6 +98,12 @@ function billingLabel(account: any) {
     : account.billingMethod === "card_monthly"
       ? "Cartão mensal"
       : "—";
+}
+function planLabel(account: any) {
+  if (account.plan === "barber") return "Barbearia";
+  if (account.plan === "plus") return "Plus";
+  if (account.plan === "basic") return "Basic";
+  return account.plan === "free" ? "Grátis" : "—";
 }
 
 function paymentLabel(account: any) {
@@ -187,11 +195,7 @@ function exportCommercialExcel(accounts: any[]) {
     paymentLabel(account),
     account.status || "",
     account.isActive ? "Sim" : "Não",
-    account.plan === "plus"
-      ? "Plus"
-      : account.plan === "basic"
-        ? "Basic"
-        : "Grátis",
+    planLabel(account),
     billingLabel(account),
     money.format(Number(account.priceCents || 0) / 100),
     account.provider || "",
@@ -440,7 +444,7 @@ export default function AdminControle() {
           </Card>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <StatCard
             title="Usuários ativos"
             value={Number(s?.users?.active || 0)}
@@ -464,6 +468,12 @@ export default function AdminControle() {
             value={Number(s?.sessions?.active || 0)}
             note="Logins ainda válidos neste momento"
             icon={Eye}
+          />
+          <StatCard
+            title="Barbearias ativas"
+            value={Number(s?.subscriptions?.barberActive || 0)}
+            note={`${Number(s?.subscriptions?.barber || 0)} assinaturas Barbearia`}
+            icon={Scissors}
           />
         </div>
 
@@ -521,11 +531,11 @@ export default function AdminControle() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <StatCard
             title="Planos selecionados"
             value={cents(s?.subscriptions?.selectedValueCents)}
-            note={`${Number(s?.subscriptions?.basic || 0)} Basic · ${Number(s?.subscriptions?.plus || 0)} Plus`}
+            note={`${Number(s?.subscriptions?.basic || 0)} Basic · ${Number(s?.subscriptions?.plus || 0)} Plus · ${Number(s?.subscriptions?.barber || 0)} Barbearia`}
             icon={CreditCard}
           />
           <StatCard
@@ -535,10 +545,16 @@ export default function AdminControle() {
             icon={Banknote}
           />
           <StatCard
-            title="Receita mensal ativa"
-            value={cents(s?.subscriptions?.activeMonthlyValueCents)}
-            note="Somente assinaturas marcadas como ativas/pagas"
+            title="Cartão mensal ativo"
+            value={cents(s?.subscriptions?.monthlyActiveCents)}
+            note="Receita mensal recorrente ativa"
             icon={Wallet}
+          />
+          <StatCard
+            title="Pix anual ativo"
+            value={cents(s?.subscriptions?.annualPixActiveCents)}
+            note="Total de contratos anuais ativos"
+            icon={CreditCard}
           />
           <StatCard
             title="Bancos cadastrados"
@@ -673,8 +689,20 @@ export default function AdminControle() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {[
+            [
+              "Gerenciar assinaturas",
+              "Acompanhar planos, pagamentos e informações completas das barbearias.",
+              "/admin/assinaturas",
+              CreditCard,
+            ],
+            [
+              "Marketing",
+              "Criar campanhas para todos os clientes ou somente para barbearias.",
+              "/admin/marketing",
+              Mail,
+            ],
             [
               "Gerenciar usuários",
               "Criar, editar, ativar, desativar, redefinir senha e permissões.",
@@ -766,7 +794,7 @@ export default function AdminControle() {
                     <th className="px-4 py-3">Tipo</th>
                     <th className="px-4 py-3">Plano</th>
                     <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Bancos</th>
+                    <th className="px-4 py-3">Estrutura</th>
                     <th className="px-4 py-3">Último login</th>
                     <th className="px-4 py-3">Sessão</th>
                   </tr>
@@ -796,11 +824,9 @@ export default function AdminControle() {
                         <td className="px-4 py-3">
                           {item.plan ? (
                             <>
-                              <span className="font-semibold capitalize">
-                                {item.plan}
-                              </span>
+                              <span className="font-semibold">{planLabel(item)}</span>
                               <div className="text-xs text-muted-foreground">
-                                {cents(item.priceCents)}
+                                {cents(item.priceCents)} · {billingLabel(item)}
                               </div>
                             </>
                           ) : (
@@ -820,10 +846,7 @@ export default function AdminControle() {
                           </Badge>
                         </td>
                         <td className="px-4 py-3">
-                          <p>{Number(item.databaseCount || 0)}</p>
-                          <p className="max-w-[250px] truncate text-xs text-muted-foreground">
-                            {item.databaseNames || "Nenhum banco"}
-                          </p>
+                          {item.plan === "barber" ? <><p className="font-semibold">{item.barbershopName || "Perfil pendente"}</p><p className="max-w-[250px] truncate text-xs text-muted-foreground">{Number(item.barberCount || 0)} barbeiros · {item.barbershopSlug ? `/b/${item.barbershopSlug}` : "sem link público"}</p></> : <><p>{Number(item.databaseCount || 0)} banco(s)</p><p className="max-w-[250px] truncate text-xs text-muted-foreground">{item.databaseNames || "Nenhum banco"}</p></>}
                         </td>
                         <td className="px-4 py-3">
                           {safeDate(item.lastSignedIn)}

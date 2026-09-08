@@ -11,6 +11,7 @@ import {
 const MERCADO_PAGO_API = "https://api.mercadopago.com";
 const ASAAS_API = "https://api.asaas.com/v3";
 const PLAN_CONFIG = {
+  barber: { label: "Barbearia", limit: 0, monthlyCents: 1690, annualPixCents: 14196 },
   free: { label: "Grátis", limit: 1, monthlyCents: 0, annualPixCents: 0 },
   basic: {
     label: "Basic",
@@ -24,11 +25,12 @@ const PLAN_CONFIG = {
 type PlanId = keyof typeof PLAN_CONFIG;
 
 function isPlan(value: unknown): value is PlanId {
-  return value === "free" || value === "basic" || value === "plus";
+  return value === "barber" || value === "free" || value === "basic" || value === "plus";
 }
 
 async function ensureTables() {
   const sql = getSql();
+  await sql`CREATE TABLE IF NOT EXISTS barber_shops (owner_id integer PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, slug varchar(100) UNIQUE NOT NULL, version integer NOT NULL DEFAULT 0, data jsonb NOT NULL)`;
   await sql`
     CREATE TABLE IF NOT EXISTS commercial_subscriptions (
       id bigserial PRIMARY KEY,
@@ -108,7 +110,12 @@ async function listCommercialAccounts() {
       COUNT(uda.id)::int AS "databaseCount",
       COALESCE(string_agg(d.name, ', ' ORDER BY uda."createdAt", d.id), '') AS "databaseNames",
       usage."lastAccessAt",
-      COALESCE(usage."usageBuckets", 0)::int * 5 AS "usageMinutes"
+      COALESCE(usage."usageBuckets", 0)::int * 5 AS "usageMinutes",
+      (SELECT b.slug FROM barber_shops b WHERE b.owner_id=u.id LIMIT 1) AS "barbershopSlug",
+      (SELECT b.data->>'name' FROM barber_shops b WHERE b.owner_id=u.id LIMIT 1) AS "barbershopName",
+      COALESCE((SELECT COUNT(*)::int FROM barber_shops b, jsonb_array_elements(COALESCE(b.data->'barbers','[]'::jsonb)) item WHERE b.owner_id=u.id AND COALESCE((item->>'active')::boolean,true)),0)::int AS "barberCount",
+      COALESCE((SELECT jsonb_array_length(COALESCE(b.data->'clients','[]'::jsonb)) FROM barber_shops b WHERE b.owner_id=u.id LIMIT 1),0)::int AS "barbershopClientCount",
+      COALESCE((SELECT jsonb_array_length(COALESCE(b.data->'appointments','[]'::jsonb)) FROM barber_shops b WHERE b.owner_id=u.id LIMIT 1),0)::int AS "appointmentCount"
     FROM users u
     JOIN commercial_subscriptions cs ON cs."userId" = u.id
     LEFT JOIN user_database_access uda ON uda."userId" = u.id
@@ -155,6 +162,7 @@ async function listCommercialAccounts() {
       usageMinutes,
       usageHours: Number((usageMinutes / 60).toFixed(2)),
       databaseLimit: plan ? PLAN_CONFIG[plan].limit : 0,
+      barberLimit: planValue === "barber" ? ([2590, 21756].includes(Number(row.priceCents)) ? 8 : 3) : 0,
       paymentState,
       trialActive,
     };
@@ -176,6 +184,8 @@ async function listCommercialAccounts() {
       active: active.length,
       canceled: accounts.filter((item: any) => item.status === "canceled")
         .length,
+      barber: accounts.filter((item: any) => item.plan === "barber").length,
+      barberActive: active.filter((item: any) => item.plan === "barber").length,
       monthlyActiveCents: active
         .filter((item: any) => String(item.billingMethod) === "card_monthly")
         .reduce(
