@@ -191,6 +191,9 @@ export default function Barbearia() {
   const convenienceProducts = s?.products?.filter(
     (p: any) => p.active && p.itemType === "convenience"
   ) || [];
+  const publicServices = s?.products?.filter(
+    (p: any) => p.active && (p.itemType || "service") === "service"
+  ) || [];
   const calendarDays = weekDays(date);
   const statusLabel: Record<string, string> = {
     agendado: "Aguardando confirmação",
@@ -490,6 +493,30 @@ export default function Barbearia() {
                     Escolha seu barbeiro e reserve um horário. Atendimento das{" "}
                     {s.open} às {s.close}.
                   </p>
+                  {publicServices.length > 0 ? (
+                    <section className="overflow-hidden rounded-3xl border bg-white shadow-xl shop-card dark:bg-slate-900">
+                      <div className="bg-gradient-to-r from-slate-950 to-slate-800 px-6 py-5 text-white">
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Tabela de preços</p>
+                        <h2 className="mt-1 text-2xl font-black">Escolha seu serviço</h2>
+                      </div>
+                      <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {publicServices.map((service: any) => (
+                          <div key={service.id} className="flex items-center justify-between gap-5 px-6 py-5 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60">
+                            <div className="flex min-w-0 items-center gap-4">
+                              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-md" style={{ backgroundColor: branding.primaryColor || "#2563eb" }}>
+                                <Scissors className="h-5 w-5" />
+                              </span>
+                              <div>
+                                <h3 className="font-extrabold">{service.name}</h3>
+                                <p className="text-sm text-muted-foreground">Duração aproximada: {service.duration} min</p>
+                              </div>
+                            </div>
+                            <strong className="shrink-0 text-xl" style={{ color: branding.primaryColor || "#2563eb" }}>{money(service.price)}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
                   {!data.customer ? (
                     <Card className="shop-card">
                       <CardContent className="space-y-4 p-6">
@@ -873,7 +900,10 @@ export default function Barbearia() {
                                     ))}
                                   </div>
                                 </fieldset>
-                                <Button disabled={busy} className="sm:col-span-2 xl:col-span-4">Salvar configurações</Button>
+                                <div className="flex flex-wrap gap-3 sm:col-span-2 xl:col-span-4">
+                                  <Button disabled={busy}>Salvar configurações</Button>
+                                  <Button type="button" variant="destructive" disabled={busy} onClick={() => window.confirm(`Excluir ${professional.name}?`) && act("deleteBarber", { id: professional.id })}>Excluir barbeiro</Button>
+                                </div>
                               </form>
                             </CardContent>
                           </Card>
@@ -901,10 +931,15 @@ export default function Barbearia() {
                           <Button disabled={busy}>Adicionar cliente</Button>
                         </form>
                         {s.clients.map((c: any) => (
-                          <p key={c.id} className="rounded-lg border p-4">
-                            {c.name} · {c.whatsapp}
-                            {c.email ? ` · ${c.email}` : ""}
-                          </p>
+                          <form key={c.id} onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); void act("updateClient", { id: c.id, name: f.get("name"), email: f.get("email"), whatsapp: f.get("whatsapp") }); }} className="grid gap-3 rounded-xl border p-4 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                            <Field label="Nome" name="name" defaultValue={c.name} required />
+                            <Field label="E-mail (opcional)" name="email" type="email" defaultValue={c.email || ""} />
+                            <Field label="WhatsApp" name="whatsapp" defaultValue={c.whatsapp} required />
+                            <div className="flex items-end gap-2">
+                              <Button disabled={busy}>Salvar</Button>
+                              <Button type="button" variant="destructive" disabled={busy} onClick={() => window.confirm(`Excluir ${c.name}?`) && act("deleteClient", { id: c.id })}>Excluir</Button>
+                            </div>
+                          </form>
                         ))}
                       </CardContent>
                     </Card>
@@ -948,25 +983,21 @@ export default function Barbearia() {
                           </p>
                           <Button disabled={busy}>{newItemType === "service" ? "Cadastrar serviço" : "Cadastrar produto"}</Button>
                         </form>
-                        {s.products.map((p: any) => (
-                          <div
-                            key={p.id}
-                            className="flex flex-wrap justify-between gap-3 rounded-lg border p-4"
-                          >
-                            <p>
-                              {p.name} · {money(p.price)} · {(p.itemType || "service") === "convenience" ? "Conveniência · não ocupa agenda" : `Serviço · ${p.duration} min`}
-                            </p>
-                            <Button
-                              variant="outline"
-                              onClick={() => {
-                                setSelectedProducts([p.id]);
-                                setTab("Agenda");
-                              }}
-                            >
-                              Adicionar cliente / agendar
-                            </Button>
-                          </div>
-                        ))}
+                        {s.products.map((p: any) => {
+                          const productType = p.itemType || "service";
+                          return (
+                            <form key={p.id} onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); void act("updateProduct", { id: p.id, itemType: f.get("itemType"), name: f.get("name"), price: f.get("price"), duration: f.get("duration") }); }} className="grid gap-3 rounded-xl border p-4 sm:grid-cols-2 xl:grid-cols-[.8fr_1.2fr_.7fr_.7fr_auto]">
+                              <SelectField label="Tipo" name="itemType" defaultValue={productType}><option value="service">Serviço</option><option value="convenience">Conveniência</option></SelectField>
+                              <Field label="Nome" name="name" defaultValue={p.name} required />
+                              <Field label="Valor (R$)" name="price" type="number" min="0" step="0.01" defaultValue={(Number(p.price) / 100).toFixed(2)} required />
+                              <Field label="Duração (min)" name="duration" type="number" min="0" max="480" defaultValue={p.duration || 0} />
+                              <div className="flex items-end gap-2">
+                                <Button disabled={busy}>Salvar</Button>
+                                <Button type="button" variant="destructive" disabled={busy} onClick={() => window.confirm(`Excluir ${p.name}?`) && act("deleteProduct", { id: p.id })}>Excluir</Button>
+                              </div>
+                            </form>
+                          );
+                        })}
                       </CardContent>
                     </Card>
                   )}
@@ -1082,6 +1113,27 @@ export default function Barbearia() {
                               })}
                             </div>
                           </div>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="space-y-5 p-6">
+                          <div>
+                            <h2 className="text-xl font-bold">Editar agendamentos</h2>
+                            <p className="mt-1 text-sm text-muted-foreground">Altere os dados ou exclua um agendamento ainda não pago.</p>
+                          </div>
+                          {appointments.filter((a: any) => a.status !== "cancelado").map((a: any) => (
+                            <form key={a.id} onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); void act("updateAppointment", { id: a.id, clientId: f.get("clientId"), barberId: f.get("barberId") || a.barberId, date: f.get("date"), time: f.get("time") }); }} className="grid gap-3 rounded-2xl border p-4 sm:grid-cols-2 xl:grid-cols-[1.2fr_1.2fr_.8fr_.7fr_auto]">
+                              <SelectField label="Cliente" name="clientId" defaultValue={a.clientId} required>{options(s.clients)}</SelectField>
+                              <SelectField label="Barbeiro" name="barberId" defaultValue={a.barberId} disabled={isBarberUser} required>{options(s.barbers)}</SelectField>
+                              <Field label="Data" name="date" type="date" defaultValue={a.date} required />
+                              <Field label="Horário" name="time" type="time" defaultValue={a.time} required />
+                              <div className="flex items-end gap-2">
+                                <Button disabled={busy || a.status === "concluido"}>Salvar</Button>
+                                <Button type="button" variant="destructive" disabled={busy || a.status === "concluido"} onClick={() => window.confirm(`Excluir o agendamento de ${names(s.clients, a.clientId)}?`) && act("deleteAppointment", { id: a.id })}>Excluir</Button>
+                              </div>
+                              <p className="text-xs text-muted-foreground sm:col-span-2 xl:col-span-5">{a.productName} · {Number(a.duration) || 30} minutos · {statusLabel[a.status] || a.status}</p>
+                            </form>
+                          ))}
                         </CardContent>
                       </Card>
                     </>
